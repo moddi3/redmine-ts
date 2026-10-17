@@ -50,6 +50,7 @@ export async function generate(
   const raw: Record<string, string> = {
     "src/generated/versions.ts": versionsFile(merged.versions),
     "src/generated/schemas.ts": schemasFile(schemas),
+    "src/generated/inputs.ts": inputsFile(ops, schemas),
     "src/generated/ops.ts": opsFile(ops, schemas),
     "src/generated/slots.ts": slotsFile(ops),
     "src/generated/resources.ts": resourcesFile(ops, merged, schemas),
@@ -175,9 +176,10 @@ function schemasFile(schemas: SchemaType[]): string {
 
 /** Type-only imports for the names `body` uses. */
 function imports(body: string, candidates: [name: string, from: string][]): string {
+  const code = body.replace(/\/\*\*[\s\S]*?\*\//g, "");
   const byModule = new Map<string, string[]>();
   for (const [name, from] of candidates) {
-    if (new RegExp(`\\b${name}\\b`).test(body))
+    if (new RegExp(`\\b${name}\\b`).test(code))
       byModule.set(from, [...(byModule.get(from) ?? []), name]);
   }
   const lines = [...byModule].map(
@@ -188,6 +190,13 @@ function imports(body: string, candidates: [name: string, from: string][]): stri
 
 function schemaImports(schemas: SchemaType[]): [string, string][] {
   return schemas.map((s) => [s.name, "./schemas.ts"]);
+}
+
+function inputImports(ops: OpModel[]): [string, string][] {
+  return ops.flatMap((o) => {
+    const n = names(o);
+    return [n.input, n.where, n.include].map((x): [string, string] => [x, "./inputs.ts"]);
+  });
 }
 
 const names = (op: OpModel) => {
@@ -253,8 +262,30 @@ function literal(v: unknown): string {
   return JSON.stringify(v);
 }
 
+/**
+ * Input, where and include types of the callable operations: the part of the operation data callers
+ * import. Hidden operations keep theirs in ops.ts, next to the descriptors that stay internal.
+ */
+function inputsFile(ops: OpModel[], schemas: SchemaType[]): string {
+  const body = ops
+    .filter((o) => o.verb)
+    .map(inputTypes)
+    .join("\n");
+  return (
+    imports(body, [
+      ["BinarySource", "../core/files.ts"],
+      ["Cond", "../core/listing.ts"],
+      ["ListInput", "../core/listing.ts"],
+      ...schemaImports(schemas),
+    ]) + body
+  );
+}
+
 function opsFile(ops: OpModel[], schemas: SchemaType[]): string {
-  const types = ops.map(inputTypes).join("\n");
+  const types = ops
+    .filter((o) => !o.verb)
+    .map(inputTypes)
+    .join("\n");
   const consts = ops.map((op) => {
     const { id } = op.descriptor;
     return `export const ${id}: Op<${JSON.stringify(id)}, ${names(op).input}, ${returnType(op, false)}> = ${literal(op.descriptor)};\n`;
@@ -269,6 +300,7 @@ function opsFile(ops: OpModel[], schemas: SchemaType[]): string {
       ["ListInput", "../core/listing.ts"],
       ["Listing", "../core/listing.ts"],
       ["Op", "../core/op.ts"],
+      ...inputImports(ops.filter((o) => o.verb)),
       ...schemaImports(schemas),
     ]) + body
   );
@@ -364,10 +396,7 @@ export type Resources<${additions.length > 0 ? "V" : "_V"} extends RedmineVersio
       ["Listing", "../core/listing.ts"],
       ["Included", "../core/op.ts"],
       ["AtLeast", "../core/version.ts"],
-      ...ops.flatMap((o): [string, string][] => {
-        const n = names(o);
-        return [n.input, n.include].map((x) => [x, "./ops.ts"]);
-      }),
+      ...inputImports(visible),
       ...schemaImports(schemas),
       ["RedmineVersion", "./versions.ts"],
     ]) + body

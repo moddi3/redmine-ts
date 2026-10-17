@@ -17,3 +17,4 @@ export { parseRedmineVersion } from "./core/version.ts";
 export { VERSIONS } from "./generated/versions.ts";
 export type { LatestVersion, RedmineVersion } from "./generated/versions.ts";
 export type * from "./generated/schemas.ts";
+export type * from "./generated/inputs.ts";

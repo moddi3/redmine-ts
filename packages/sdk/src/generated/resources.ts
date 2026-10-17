@@ -102,7 +102,7 @@ import type {
   UpdateUserInput,
   UpdateVersionInput,
   UpdateWikiPageInput,
-} from "./ops.ts";
+} from "./inputs.ts";
 import type {
   Attachment,
   CustomField,
