@@ -1,0 +1,18 @@
+6.1 unknown body attribute -> 201
+6.1 included keys on a fresh issue: journals=present allowed_statuses=present attachments=present relations=ABSENT children=ABSENT watchers=present changesets=present
+6.1 assigned_to on unassigned issue: absent
+6.1 undocumented operator total=0, unknown key total=1, all total=1
+6.1 limit=1000 echoed limit: 100
+6.1 PUT -> 204 content-type null body undefined
+6.1 unknown switch user -> 412
+6.1 422 body: {"errors":["Subject cannot be blank"]}
+6.1 bulk removeUsersFromGroup -> 404 members after: 1
+7.0 unknown body attribute -> 201
+7.0 included keys on a fresh issue: journals=present allowed_statuses=present attachments=present relations=ABSENT children=ABSENT watchers=present changesets=present
+7.0 assigned_to on unassigned issue: absent
+7.0 undocumented operator total=0, unknown key total=1, all total=1
+7.0 limit=1000 echoed limit: 100
+7.0 PUT -> 204 content-type null body undefined
+7.0 unknown switch user -> 412
+7.0 422 body: {"errors":["Subject cannot be blank"]}
+7.0 bulk removeUsersFromGroup -> 204 members after: 0
