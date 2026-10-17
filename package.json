@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "ready": "vp check && vp run -r test && vp run -r build",
-    "prepare": "vp config"
+    "prepare": "vp config",
+    "redmine:up": "node scripts/redmine-env.ts up",
+    "redmine:down": "node scripts/redmine-env.ts down",
+    "redmine:smoke": "node scripts/redmine-env.ts smoke"
   },
   "devDependencies": {
     "vite-plus": "catalog:"
