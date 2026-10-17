@@ -19,8 +19,8 @@ All of these hold on `main`, checked by commands a reviewer can rerun:
 - [x] Scaffold: vp monorepo, packages/sdk, vendored specs. Commit e624108.
 - [x] Harness: Docker Redmine 7.0/6.1 and 7.0 under /redmine, seeded, idempotent `up`, `smoke` 15/15 from main. Commit 56f4672.
 - [x] Design: arena with 3 runners, GPT cross-judge, synthesis in `docs/architecture.md` and the typed contract in `packages/sdk/src/core`. Commit 730431e.
-- [ ] Wave 1 (parallel worktrees, running): generator (Opus) and core runtime (Sonnet) against the contract.
-- [ ] Wave 2: facade (issues, projects, users, time entries, uploads/downloads, reference data) and contract tests.
+- [x] Wave 1: generator (Opus) and core runtime (Sonnet), integrated with sparse-include fix and direct extras wiring; built dist smoke-tested on all three servers. Commits fc82b40..742357f.
+- [ ] Wave 2 (running): contract tests against Docker (Sonnet); public input types, examples, READMEs (Opus). The facade is generated, so no hand-written facade wave.
 - [ ] Wave 3: packaging gates (publint, attw), README with typechecked examples, fixes from contract runs.
 - [ ] Verify the whole predicate on main. Cross-model review of the trail. Reply.
 
