@@ -149,7 +149,9 @@ export interface IssuesNamespace {
   list<const I extends GetIssuesInclude = never>(
     input?: GetIssuesInput<I>,
     options?: CallOptions,
-  ): Listing<[I] extends [never] ? IssueSummary : Included<IssueSummary, I>>;
+  ): Listing<
+    [I] extends [never] ? IssueSummary : Included<IssueSummary, Extract<I, "attachments">>
+  >;
 
   /**
    * Create issue
@@ -164,7 +166,14 @@ export interface IssuesNamespace {
   get<const I extends GetIssueInclude = never>(
     input: GetIssueInput<I>,
     options?: CallOptions,
-  ): Promise<[I] extends [never] ? Issue : Included<Issue, I>>;
+  ): Promise<
+    [I] extends [never]
+      ? Issue
+      : Included<
+          Issue,
+          Extract<I, "attachments" | "changesets" | "journals" | "watchers" | "allowed_statuses">
+        >
+  >;
 
   /**
    * Update issue
@@ -205,7 +214,9 @@ export interface ProjectsNamespace {
   list<const I extends GetProjectsInclude = never>(
     input?: GetProjectsInput<I>,
     options?: CallOptions,
-  ): Listing<[I] extends [never] ? ProjectSummary : Included<ProjectSummary, I>>;
+  ): Listing<
+    [I] extends [never] ? ProjectSummary : Included<ProjectSummary, Extract<I, "enabled_modules">>
+  >;
 
   /**
    * Create project
@@ -220,7 +231,7 @@ export interface ProjectsNamespace {
   get<const I extends GetProjectInclude = never>(
     input: GetProjectInput<I>,
     options?: CallOptions,
-  ): Promise<[I] extends [never] ? Project : Included<Project, I>>;
+  ): Promise<[I] extends [never] ? Project : Included<Project, Extract<I, "enabled_modules">>>;
 
   /**
    * Update project
@@ -316,7 +327,7 @@ export interface UsersNamespace {
   list<const I extends GetUsersInclude = never>(
     input?: GetUsersInput<I>,
     options?: CallOptions,
-  ): Listing<[I] extends [never] ? UserSummary : Included<UserSummary, I>>;
+  ): Listing<UserSummary>;
 
   /**
    * Create user
@@ -331,7 +342,7 @@ export interface UsersNamespace {
   get<const I extends GetUserInclude = never>(
     input: GetUserInput<I>,
     options?: CallOptions,
-  ): Promise<[I] extends [never] ? User : Included<User, I>>;
+  ): Promise<[I] extends [never] ? User : Included<User, Extract<I, "memberships" | "groups">>>;
 
   /**
    * Update user
@@ -352,7 +363,7 @@ export interface UsersNamespace {
   current<const I extends GetCurrentUserInclude = never>(
     input?: GetCurrentUserInput<I>,
     options?: CallOptions,
-  ): Promise<[I] extends [never] ? User : Included<User, I>>;
+  ): Promise<[I] extends [never] ? User : Included<User, Extract<I, "memberships" | "groups">>>;
 }
 
 /**
@@ -409,7 +420,7 @@ export interface NewsNamespace {
   get<const I extends GetNewsInclude = never>(
     input: GetNewsInput<I>,
     options?: CallOptions,
-  ): Promise<[I] extends [never] ? News : Included<News, I>>;
+  ): Promise<[I] extends [never] ? News : Included<News, Extract<I, "attachments" | "comments">>>;
 
   /**
    * Update news
@@ -531,7 +542,7 @@ export interface WikiNamespace {
   get<const I extends GetWikiPageInclude = never>(
     input: GetWikiPageInput<I>,
     options?: CallOptions,
-  ): Promise<[I] extends [never] ? WikiPage : Included<WikiPage, I>>;
+  ): Promise<[I] extends [never] ? WikiPage : Included<WikiPage, Extract<I, "attachments">>>;
 
   /**
    * Create or update wiki page
@@ -555,7 +566,7 @@ export interface WikiNamespace {
   getVersion<const I extends GetWikiPageByVersionInclude = never>(
     input: GetWikiPageByVersionInput<I>,
     options?: CallOptions,
-  ): Promise<[I] extends [never] ? WikiPage : Included<WikiPage, I>>;
+  ): Promise<[I] extends [never] ? WikiPage : Included<WikiPage, Extract<I, "attachments">>>;
 }
 
 /**
@@ -748,7 +759,7 @@ export interface GroupsNamespace {
   get<const I extends GetGroupInclude = never>(
     input: GetGroupInput<I>,
     options?: CallOptions,
-  ): Promise<[I] extends [never] ? Group : Included<Group, I>>;
+  ): Promise<[I] extends [never] ? Group : Included<Group, Extract<I, "users" | "memberships">>>;
 
   /**
    * Update group

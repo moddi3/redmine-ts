@@ -1,0 +1,14 @@
+6.1 project trackers=ABSENT issue_categories=ABSENT enabled_modules=present time_entry_activities=ABSENT issue_custom_fields=ABSENT
+6.1 projects[0] trackers=ABSENT issue_categories=ABSENT enabled_modules=present time_entry_activities=ABSENT issue_custom_fields=ABSENT
+6.1 user memberships=present groups=present auth_source=ABSENT
+6.1 group users=present memberships=present
+6.1 issues[0] attachments=present relations=present
+6.1 wiki attachments=present
+6.1 news attachments=present comments=present
+7.0 project trackers=ABSENT issue_categories=ABSENT enabled_modules=present time_entry_activities=ABSENT issue_custom_fields=ABSENT
+7.0 projects[0] trackers=ABSENT issue_categories=ABSENT enabled_modules=present time_entry_activities=ABSENT issue_custom_fields=ABSENT
+7.0 user memberships=present groups=present auth_source=ABSENT
+7.0 group users=present memberships=present
+7.0 issues[0] attachments=present relations=present
+7.0 wiki attachments=present
+7.0 news attachments=present comments=present

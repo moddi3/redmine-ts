@@ -44,9 +44,13 @@ export async function includeNarrowing() {
   // @ts-expect-error getIssue documents no "time_entries" include
   await rm.issues.get({ issue_id: 1, include: ["time_entries"] });
 
+  const sparse = await rm.issues.get({ issue_id: 1, include: ["relations", "children"] });
+  // @ts-expect-error relations stays optional: the server omits the key when there are none
+  const relations: NonNullable<Issue["relations"]> = sparse.relations;
+
   const me = await rm.users.current({ include: ["groups"] });
   const groups: NonNullable<User["groups"]> = me.groups;
-  return [missing, journals, statuses, watchers, groups];
+  return [missing, journals, statuses, watchers, relations, groups];
 }
 
 export function filters() {
@@ -63,7 +67,9 @@ export function filters() {
     sort: "updated_on:desc",
     include: ["relations"],
   });
-  equal<typeof issues, Listing<IssueSummary & Required<Pick<IssueSummary, "relations">>>>(true);
+  type Listed = typeof issues extends Listing<infer T> ? T : never;
+  // @ts-expect-error relations stays optional: the server omits the key when there are none
+  const listedRelations: NonNullable<IssueSummary["relations"]> = ({} as Listed).relations;
 
   // @ts-expect-error status_id documents no text operators
   rm.issues.list({ where: { status_id: { contains: "x" } } });
@@ -79,6 +85,7 @@ export function filters() {
     to: "2026-10-31",
     where: { spent_on: { raw: "<t-30" } },
   });
+  return listedRelations;
 }
 
 export async function bodies(upload: UploadRef) {

@@ -66,6 +66,8 @@ export interface OpModel {
   list: boolean;
   /** The returned item, or null for empty and binary responses. */
   item: string | null;
+  /** Include values that become required on the item when requested. */
+  narrows: string[];
   /** A 204 can answer instead of the body. */
   maybeEmpty: boolean;
   summary: string | undefined;
@@ -238,6 +240,9 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
     where,
     list,
     item,
+    narrows: includes.filter(
+      (inc) => itemSchema?.properties?.[inc] !== undefined && !overlay.sparseIncludes.includes(inc),
+    ),
     maybeEmpty,
     summary: op.summary,
     description: op.description,
@@ -355,4 +360,8 @@ function checkOverlay(ops: OpModel[], doc: OpenApi, overlay: Overlay): void {
     }
   }
   for (const id of Object.keys(overlay.safety)) need("safety", id);
+  for (const inc of overlay.sparseIncludes) {
+    if (!ops.some((o) => o.descriptor.includes.includes(inc)))
+      throw new Error(`overlay.sparseIncludes names ${inc}, which no operation includes`);
+  }
 }

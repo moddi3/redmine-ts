@@ -19,6 +19,12 @@ export interface Overlay {
   keyset: Readonly<Record<string, string>>;
   /** Filter name -> words compiled to operator codes. Words whose code a filter lacks are dropped. */
   filterWords: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
+   * Include values whose key the server leaves out when the collection is empty, so they must stay
+   * optional instead of narrowing to required. Observed on Redmine 6.1 and 7.0:
+   * .audit/probes/includes.out.txt and .audit/probes/redmine-behavior.out.txt.
+   */
+  sparseIncludes: readonly string[];
   safety: Readonly<Record<string, Safety>>;
   /** JSON pointer of a non-additive change -> why the latest shape is right. */
   resolved: Readonly<Record<string, string>>;
@@ -51,6 +57,15 @@ export const overlay: Overlay = {
   extras: ["uploadAttachmentFile", "downloadAttachmentFile", "downloadThumbnail"],
   keyset: { getIssues: "issue_id" },
   filterWords: { status_id: { open: "o", closed: "c", any: "*" } },
+  sparseIncludes: [
+    "children",
+    "relations",
+    "trackers",
+    "issue_categories",
+    "time_entry_activities",
+    "issue_custom_fields",
+    "auth_source",
+  ],
   safety: {},
   resolved: {},
 };

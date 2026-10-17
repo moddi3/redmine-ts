@@ -234,7 +234,11 @@ function returnType(op: OpModel, narrowed: boolean): string {
   const kind = op.descriptor.response.kind;
   if (kind === "empty") return "Promise<void>";
   if (kind === "binary") return "Promise<Download>";
-  const item = narrowed ? `[I] extends [never] ? ${op.item} : Included<${op.item}, I>` : op.item!;
+  const narrows = op.narrows.map((i) => JSON.stringify(i)).join(" | ");
+  const item =
+    narrowed && narrows
+      ? `[I] extends [never] ? ${op.item} : Included<${op.item}, Extract<I, ${narrows}>>`
+      : op.item!;
   if (kind === "list") return `Listing<${item}>`;
   return `Promise<${item}${op.maybeEmpty ? " | undefined" : ""}>`;
 }
