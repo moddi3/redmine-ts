@@ -28,7 +28,8 @@
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check",
-    "prepublishOnly": "vp run build"
+    "prepublishOnly": "vp run build",
+    "test:contract": "REDMINE_CONTRACT=1 vp test --project contract"
   },
   "devDependencies": {
     "@arethetypeswrong/core": "catalog:",
