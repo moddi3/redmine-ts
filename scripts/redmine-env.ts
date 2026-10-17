@@ -68,6 +68,7 @@ def seed_issue_field(name, multiple)
   field.possible_values = %w[S1 S2 S3] unless multiple
   field.multiple = multiple
   field.is_for_all = true
+  field.is_filter = true
   field.is_required = false
   field.tracker_ids = Tracker.pluck(:id)
   field.save!

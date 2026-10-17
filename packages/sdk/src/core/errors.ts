@@ -12,7 +12,7 @@ export type RedmineErrorData =
   | { kind: "forbidden"; status: 403 }
   /** `hint` explains likely causes, e.g. an operation newer than an undeclared server version. */
   | { kind: "not_found"; status: 404; hint?: string }
-  /** X-Redmine-Switch-User named an unknown or inactive login, or the caller is not an admin. */
+  /** X-Redmine-Switch-User named an unknown or inactive login. A non-admin key never gets this: Redmine ignores the header for it. */
   | { kind: "switch_user_rejected"; status: 412; login: string | undefined }
   | { kind: "not_acceptable"; status: 406 }
   /** Any other status. `body` is truncated to 2 KiB. */

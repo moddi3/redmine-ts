@@ -130,7 +130,7 @@ export type SdkEvent =
 export interface CallOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
-  /** X-Redmine-Switch-User. Admin only; a bad login fails with kind "switch_user_rejected". */
+  /** X-Redmine-Switch-User. Only an admin key switches (a non-admin key silently stays itself); a bad login fails with kind "switch_user_rejected". */
   as?: string;
   retry?: Partial<RetryPolicy> | false;
 }
