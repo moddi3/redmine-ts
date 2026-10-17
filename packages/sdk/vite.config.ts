@@ -6,5 +6,7 @@ export default defineConfig({
       generator: "tsgo",
     },
     exports: true,
+    publint: { level: "error" },
+    attw: { profile: "esm-only", level: "error" },
   },
 });
