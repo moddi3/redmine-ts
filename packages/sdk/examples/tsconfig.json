@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "isolatedDeclarations": false,
+    "declaration": false,
+    "paths": { "redmine-ts-sdk": ["../src/index.ts"] }
+  },
+  "include": ["."]
+}
