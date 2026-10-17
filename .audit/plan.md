@@ -17,9 +17,9 @@ All of these hold on `main`, checked by commands a reviewer can rerun:
 
 - [x] A. Frame: read research, measure spec drift, pick MVP scope.
 - [x] Scaffold: vp monorepo, packages/sdk, vendored specs. Commit e624108.
-- [ ] Harness: Docker Redmine 7.0/6.1 seeded, idempotent `up`, `smoke` green. (worker, worktree)
-- [ ] Design: architect/arena with 3 runners (Opus free, Sonnet free, Opus steelmanning per-version subpaths), cross-judge on a different model family, synthesis committed as `docs/architecture.md` plus the type sketch.
-- [ ] Wave 1 (parallel worktrees): codegen (types, operation registry, since, drift gate) and core runtime (transport, auth, errors, retries, timeouts, concurrency, base URL, pagination, filter DSL) against the sketch's seam.
+- [x] Harness: Docker Redmine 7.0/6.1 and 7.0 under /redmine, seeded, idempotent `up`, `smoke` 15/15 from main. Commit 56f4672.
+- [x] Design: arena with 3 runners, GPT cross-judge, synthesis in `docs/architecture.md` and the typed contract in `packages/sdk/src/core`. Commit 730431e.
+- [ ] Wave 1 (parallel worktrees, running): generator (Opus) and core runtime (Sonnet) against the contract.
 - [ ] Wave 2: facade (issues, projects, users, time entries, uploads/downloads, reference data) and contract tests.
 - [ ] Wave 3: packaging gates (publint, attw), README with typechecked examples, fixes from contract runs.
 - [ ] Verify the whole predicate on main. Cross-model review of the trail. Reply.
