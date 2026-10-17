@@ -1,0 +1,130 @@
+// One error class carrying a discriminated, JSON-serializable union. Callers branch on `kind`;
+// tool layers serialize `data` as is. Nothing here holds credentials: the SDK never puts the key
+// in a URL, and headers are never captured.
+
+import type { RedmineVersion } from "../generated/versions.ts";
+
+export type RedmineErrorData =
+  /** Messages are raw and localized to the API user's language. Display them, never match on them. */
+  | { kind: "validation"; status: 422; messages: readonly string[] }
+  | { kind: "unauthorized"; status: 401 }
+  /** Also what a disabled REST API looks like. */
+  | { kind: "forbidden"; status: 403 }
+  /** `hint` explains likely causes, e.g. an operation newer than an undeclared server version. */
+  | { kind: "not_found"; status: 404; hint?: string }
+  /** X-Redmine-Switch-User named an unknown or inactive login, or the caller is not an admin. */
+  | { kind: "switch_user_rejected"; status: 412; login: string | undefined }
+  | { kind: "not_acceptable"; status: 406 }
+  /** Any other status. `body` is truncated to 2 KiB. */
+  | { kind: "http"; status: number; body: string }
+  | {
+      kind: "protocol";
+      reason:
+        | "non_json"
+        | "bad_json"
+        | "pagination_stalled"
+        | "pagination_offset_mismatch"
+        | "page_cap";
+      hint: string;
+    }
+  | { kind: "network"; message: string }
+  | { kind: "timeout"; after_ms: number }
+  | { kind: "aborted" }
+  /** Refused before the network: the declared server version lacks this operation. */
+  | {
+      kind: "unsupported_version";
+      declared: RedmineVersion;
+      since: RedmineVersion;
+      until: RedmineVersion | null;
+    }
+  /** Refused before the network: bad config, unknown filter key or operator, conflicting paging options. */
+  | { kind: "invalid_input"; detail: string }
+  | { kind: "transition_not_allowed"; wanted: number; allowed: readonly number[] };
+
+export type ErrorKind = RedmineErrorData["kind"];
+
+export interface ErrorContext {
+  /** Operation id in flight, when there was one. */
+  op?: string;
+  /** X-Request-Id from Rails, for server log lookups. */
+  request_id?: string;
+  cause?: unknown;
+}
+
+export class RedmineError<D extends RedmineErrorData = RedmineErrorData> extends Error {
+  override readonly name = "RedmineError";
+  readonly data: D;
+  readonly op: string | undefined;
+  readonly request_id: string | undefined;
+
+  constructor(data: D, context: ErrorContext = {}) {
+    super(describe(data, context.op), { cause: context.cause });
+    this.data = data;
+    this.op = context.op;
+    this.request_id = context.request_id;
+  }
+
+  get kind(): D["kind"] {
+    return this.data.kind;
+  }
+
+  /** `if (RedmineError.is(e, "validation")) e.data.messages` */
+  static is<K extends ErrorKind>(
+    e: unknown,
+    kind: K,
+  ): e is RedmineError<Extract<RedmineErrorData, { kind: K }>> {
+    return e instanceof RedmineError && e.data.kind === kind;
+  }
+
+  /** `cause` is dropped: exotic fetch implementations may attach request details to it. */
+  toJSON(): {
+    name: string;
+    message: string;
+    op: string | undefined;
+    request_id: string | undefined;
+  } & D {
+    return {
+      name: this.name,
+      message: this.message,
+      op: this.op,
+      request_id: this.request_id,
+      ...this.data,
+    };
+  }
+}
+
+function describe(data: RedmineErrorData, op: string | undefined): string {
+  const where = op ? ` on ${op}` : "";
+  switch (data.kind) {
+    case "validation":
+      return `Redmine rejected the request${where}: ${data.messages.join("; ")}`;
+    case "unauthorized":
+    case "forbidden":
+    case "not_acceptable":
+      return `Redmine answered ${data.status} (${data.kind})${where}`;
+    case "not_found":
+      return `Redmine answered 404${where}${data.hint ? `: ${data.hint}` : ""}`;
+    case "switch_user_rejected":
+      return `Redmine refused to switch to user ${data.login ?? "(unknown)"}${where} (412)`;
+    case "http":
+      return `Redmine answered ${data.status}${where}`;
+    case "protocol":
+      return `Unexpected response${where} (${data.reason}): ${data.hint}`;
+    case "network":
+      return `Network error${where}: ${data.message}`;
+    case "timeout":
+      return `Timed out after ${data.after_ms} ms${where}`;
+    case "aborted":
+      return `Aborted${where}`;
+    case "unsupported_version":
+      return `${op ?? "This operation"} needs Redmine ${data.since}${data.until ? ` to ${data.until}` : "+"}, but the client declared ${data.declared}`;
+    case "invalid_input":
+      return `Invalid input${where}: ${data.detail}`;
+    case "transition_not_allowed":
+      return `Status ${data.wanted} is not an allowed transition (allowed: ${data.allowed.join(", ") || "none"})`;
+    default: {
+      const exhaustive: never = data;
+      return String(exhaustive);
+    }
+  }
+}

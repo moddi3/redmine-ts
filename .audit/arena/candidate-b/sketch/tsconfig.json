@@ -1,0 +1,1 @@
+{"compilerOptions":{"target":"esnext","lib":["es2023","dom"],"module":"nodenext","moduleResolution":"nodenext","strict":true,"noEmit":true,"allowImportingTsExtensions":true,"verbatimModuleSyntax":true,"skipLibCheck":true,"noUncheckedIndexedAccess":false},"include":["*.ts"]}
