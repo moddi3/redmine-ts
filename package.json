@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "ready": "vp check && vp run -r test && vp run -r build",
+    "ready": "vp check && vp run --no-cache -r test && vp run -r build",
     "prepare": "vp config",
     "redmine:up": "node scripts/redmine-env.ts up",
     "redmine:down": "node scripts/redmine-env.ts down",

@@ -23,7 +23,7 @@ All of these hold on `main`, checked by commands a reviewer can rerun:
 - [x] Wave 2: contract suite, 240 cases on 7.0, 6.1 and 7.0 under /redmine (Sonnet); public input types, examples and READMEs with a drift test (Opus). Commits 89b9613, 7fb61f2, 73f6b51.
 - [x] Wave 3: folded into earlier waves. Packaging gates since ca525eb; README examples typechecked and drift-tested; contract findings documented.
 - [x] Verify the whole predicate on main: `vp run ready` green, test:contract 240/240 twice, gen:check clean.
-- [ ] Cross-model review of the trail (Sonnet, Claude only per user). Reply.
+- [x] Trail review by claude-sonnet-5-5 (Claude only per the owner). Flags addressed where structural (uncached ready), the rest handed to the owner.
 
 ## Rigor
 
