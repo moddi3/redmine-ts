@@ -115,7 +115,7 @@ Some scoped variants have a global sibling that takes the same scope as a filter
 
 - **`Listing<T>`.** It is lazy and offers `for await`, `page()`, `pages()`, `all({ max })` and `count()`. It is not thenable. Offset paging advances by the number of items received. It throws `protocol/pagination_offset_mismatch` when the echoed offset differs (the class of the 6.0.1 `/projects` bug), and `pagination_stalled` on a repeated page. It also throws `page_cap` rather than truncating silently.
 - **Keyset paging.** `paging: "keyset"` (issues) uses `sort=id` with `issue_id=>=last+1`. It is immune to inserts and deletes during the walk, but it is not a snapshot.
-- **Filter DSL.** Keys are wire param names (`status_id`, `assigned_to_id`, `cf_12`), so there is no alias table to drift. Each field's legal operators come from the spec's `Operators:` lines. `Cond<V, Caps>` narrows the type per field, and `compileWhere` rejects an undocumented operator before the network, because Redmine would silently ignore it and return everything. `{ raw }` is the escape hatch for relative dates.
+- **Filter DSL.** Keys are wire param names (`status_id`, `assigned_to_id`, `cf_12`), so there is no alias table to drift. Each field's legal operators come from the spec's `Operators:` lines. `Cond<V, Caps>` narrows the type per field, and `compileWhere` rejects an unknown key or an undocumented operator before the network. Observed on 6.1 and 7.0, Redmine silently ignores an unknown key and returns every row, and it evaluates an undocumented operator into zero rows (`.audit/probes/redmine-behavior.out.txt`). `{ raw }` is the escape hatch for relative dates.
 
 ### Testing
 
@@ -143,7 +143,7 @@ The bakeoff had three runners. A ran on Opus and B on Sonnet, both designing fre
 
 - We accept over-optional fields: four today, such as `custom_field.is_for_all`, which is required in 7.0 but absent in 6.1. In exchange we get one type model and no import churn on server upgrades.
 - We accept `rm.issues.get({ issue_id: 42 })` over `get(42)`. In exchange there is one calling convention, self-documenting arguments, and method input identical to tool input.
-- We accept that request types are a superset too. A 6.1 client can send a 7.0-only field. Contract tests check that 6.1 ignores rather than rejects it.
+- We accept that request types are a superset too. A 6.1 client can send a 7.0-only field. Observed on real 6.1 and 7.0, unknown body attributes are ignored and the request succeeds.
 - We accept filter keys named by wire params (`assigned_to_id`), with no prettier aliases, because an alias table would be a hand-synced list.
 - We accept no name-to-id resolution (`"In Progress"` to 7) in the SDK. That belongs in the toolkit, over cached lookups.
 - We accept that POST, PUT and PATCH never retry automatically. Redmine has no idempotency key.
@@ -151,6 +151,5 @@ The bakeoff had three runners. A ran on Opus and B on Sonnet, both designing fre
 
 ## Open questions
 
-- Does Redmine ignore unknown body attributes on every endpoint, or reject some? The contract tests answer this for 6.1.
 - Should Redmine 6.0 get a derived spec? Only if real 6.0 instances need it, and 6.0 is legacy stable.
 - Which runtime should validate responses: none by default, or an opt-in Standard Schema hook? This is deferred.
