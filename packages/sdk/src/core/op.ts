@@ -87,7 +87,7 @@ export interface Op<Id extends string = string, In = unknown, Ret = unknown> {
 // oxlint-disable-next-line no-explicit-any -- the registry is heterogeneous; InputOf/ReturnOf recover the types
 export type AnyOp = Op<string, any, any>;
 export type InputOf<O> = O extends Op<string, infer I, unknown> ? I : never;
-export type ReturnOf<O> = O extends Op<string, never, infer R> ? R : never;
+export type ReturnOf<O> = O extends Op<string, infer _In, infer R> ? R : never;
 
 /** Generated namespaces: `rm.issues.get` dispatches `ops.getIssue`. Every method is `(input, options?)`. */
 export type SlotTable = Readonly<Record<string, Readonly<Record<string, AnyOp>>>>;

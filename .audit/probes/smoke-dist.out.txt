@@ -1,0 +1,3 @@
+7.0 {"me":"admin","created":10,"journals":0,"allowed":6,"iterated":1,"count":1,"download":"hello file","validation":"validation","switchUser":"switch_user_rejected","removeUsers":"not_found"}
+6.1 {"me":"admin","created":10,"journals":0,"allowed":6,"iterated":1,"count":1,"download":"hello file","validation":"validation","switchUser":"switch_user_rejected","removeUsers":"unsupported_version"}
+7.0-subpath {"me":"admin","created":3,"journals":0,"allowed":6,"iterated":1,"count":1,"download":"hello file","validation":"validation","switchUser":"switch_user_rejected","removeUsers":"not_found"}

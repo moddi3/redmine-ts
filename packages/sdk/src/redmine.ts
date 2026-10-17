@@ -79,9 +79,6 @@ type MergeNamespaces<G, E> = {
     (K extends keyof E ? E[K] : unknown);
 };
 
-/** Registry lookup by id, tolerant of ids the generated registry does not have. */
-const registry: Readonly<Record<string, AnyOp | undefined>> = ops;
-
 export function createRedmine<const V extends RedmineVersion = LatestVersion>(
   config: RedmineConfig<V>,
 ): Redmine<V> {
@@ -114,37 +111,29 @@ export function createRedmine<const V extends RedmineVersion = LatestVersion>(
   return build({});
 }
 
-/**
- * The extras whose operations the registry has. Descriptors are looked up by id so a registry without
- * them (the pre-generation placeholder) simply gets no extras.
- */
+/** The hand-written verbs, merged into the generated namespaces of the same name. */
 function extraMethods(
   engine: Engine,
   merge: (options?: CallOptions) => CallOptions,
 ): Record<string, Record<string, unknown>> {
-  const found: Record<string, Record<string, unknown>> = {};
-  const get = registry.getIssue;
-  const update = registry.updateIssue;
-  if (get && update) {
-    const transition = createIssueTransition(engine, { get, update });
-    found.issues = {
+  const transition = createIssueTransition(engine, { get: ops.getIssue, update: ops.updateIssue });
+  const files = createAttachmentFiles(engine, {
+    upload: ops.uploadAttachmentFile,
+    download: ops.downloadAttachmentFile,
+    thumbnail: ops.downloadThumbnail,
+  });
+  return {
+    issues: {
       transition: (input: never, options?: CallOptions) => transition(input, merge(options)),
-    };
-  }
-  const upload = registry.uploadAttachmentFile;
-  const download = registry.downloadAttachmentFile;
-  const thumbnail = registry.downloadThumbnail;
-  if (upload && download && thumbnail) {
-    const files = createAttachmentFiles(engine, { upload, download, thumbnail });
-    found.attachments = {
+    },
+    attachments: {
       upload: (input: never, options?: CallOptions) => files.upload(input, merge(options)),
       download: (attachment: never, options?: CallOptions) =>
         files.download(attachment, merge(options)),
       thumbnail: (attachment: never, options?: CallOptions) =>
         files.thumbnail(attachment, merge(options)),
-    };
-  }
-  return found;
+    },
+  };
 }
 
 /** `issues.transition`, built from the descriptors of the two operations it composes. */
