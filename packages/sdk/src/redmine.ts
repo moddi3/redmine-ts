@@ -1,9 +1,19 @@
 // Assembly: engine + generated namespaces + the few hand-written additions = the public client.
 // The only module that imports both the engine and generated slot data.
 
+import { resolveConfig } from "./core/config.ts";
 import type { CallOptions, RedmineConfig } from "./core/config.ts";
+import { createEngine } from "./core/engine.ts";
+import type { Engine } from "./core/engine.ts";
+import { RedmineError } from "./core/errors.ts";
+import { createAttachmentFiles } from "./core/files.ts";
 import type { AttachmentFiles } from "./core/files.ts";
+import type { AnyOp } from "./core/op.ts";
+import { invalidInput, isRecord } from "./core/util.ts";
+import { ops } from "./generated/ops.ts";
 import type { Resources } from "./generated/resources.ts";
+import { SLOTS } from "./generated/slots.ts";
+import { VERSIONS } from "./generated/versions.ts";
 import type { LatestVersion, RedmineVersion } from "./generated/versions.ts";
 
 /**
@@ -41,7 +51,9 @@ export const extrasDoNotShadow: [Shadowed<Resources<LatestVersion>, Extras>] ext
 export interface RawRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
+  /** An array is sent as `key[]=a&key[]=b`. For `include=a,b` pass the joined string. */
   query?: Readonly<Record<string, string | number | boolean | readonly (string | number)[]>>;
+  /** A JSON object. Not allowed on GET. Keys must not repeat a `query` key. */
   body?: unknown;
 }
 
@@ -67,12 +79,156 @@ type MergeNamespaces<G, E> = {
     (K extends keyof E ? E[K] : unknown);
 };
 
+/** Registry lookup by id, tolerant of ids the generated registry does not have. */
+const registry: Readonly<Record<string, AnyOp | undefined>> = ops;
+
 export function createRedmine<const V extends RedmineVersion = LatestVersion>(
-  _config: RedmineConfig<V>,
+  config: RedmineConfig<V>,
 ): Redmine<V> {
-  throw new Error("not implemented");
-  // config = resolveConfig(config); engine = createEngine(config)
-  // build(defaults): walk SLOTS once; each method is (input, options) =>
-  //   engine.call(op, input ?? {}, { ...defaults, ...options })
-  // merge Extras into the namespaces by name, add with (build({ ...defaults, ...d })), request and version; freeze
+  const resolved = resolveConfig(config);
+  const engine = createEngine(resolved);
+
+  const build = (defaults: CallOptions): Redmine<V> => {
+    const merge = (options?: CallOptions): CallOptions => ({ ...defaults, ...options });
+    const namespaces: Record<string, Record<string, unknown>> = {};
+    for (const [namespace, verbs] of Object.entries(SLOTS)) {
+      namespaces[namespace] = Object.fromEntries(
+        Object.entries(verbs).map(([verb, op]) => [
+          verb,
+          (input: unknown, options?: CallOptions) => engine.call(op, input ?? {}, merge(options)),
+        ]),
+      );
+    }
+    for (const [namespace, methods] of Object.entries(extraMethods(engine, merge))) {
+      namespaces[namespace] = { ...namespaces[namespace], ...methods };
+    }
+    const core: Core<V> = {
+      with: (more) => build({ ...defaults, ...more }),
+      request: async (raw, options) => engine.call(rawOp(raw), rawInput(raw), merge(options)),
+      version: config.version,
+    };
+    // The namespaces are assembled from data, so `Redmine<V>` is vouched for by the generator, not provable here.
+    return Object.freeze({ ...namespaces, ...core }) as unknown as Redmine<V>;
+  };
+
+  return build({});
+}
+
+/**
+ * The extras whose operations the registry has. Descriptors are looked up by id so a registry without
+ * them (the pre-generation placeholder) simply gets no extras.
+ */
+function extraMethods(
+  engine: Engine,
+  merge: (options?: CallOptions) => CallOptions,
+): Record<string, Record<string, unknown>> {
+  const found: Record<string, Record<string, unknown>> = {};
+  const get = registry.getIssue;
+  const update = registry.updateIssue;
+  if (get && update) {
+    const transition = createIssueTransition(engine, { get, update });
+    found.issues = {
+      transition: (input: never, options?: CallOptions) => transition(input, merge(options)),
+    };
+  }
+  const upload = registry.uploadAttachmentFile;
+  const download = registry.downloadAttachmentFile;
+  const thumbnail = registry.downloadThumbnail;
+  if (upload && download && thumbnail) {
+    const files = createAttachmentFiles(engine, { upload, download, thumbnail });
+    found.attachments = {
+      upload: (input: never, options?: CallOptions) => files.upload(input, merge(options)),
+      download: (attachment: never, options?: CallOptions) =>
+        files.download(attachment, merge(options)),
+      thumbnail: (attachment: never, options?: CallOptions) =>
+        files.thumbnail(attachment, merge(options)),
+    };
+  }
+  return found;
+}
+
+/** `issues.transition`, built from the descriptors of the two operations it composes. */
+export function createIssueTransition(
+  engine: Engine,
+  { get, update }: { get: AnyOp; update: AnyOp },
+): Extras["issues"]["transition"] {
+  // AnyOp erases the return type, so state what these operations resolve to.
+  const call = (
+    op: AnyOp,
+    input: Record<string, unknown>,
+    options?: CallOptions,
+  ): Promise<unknown> => engine.call(op, input, options);
+  return async ({ issue_id, status_id, notes }, options) => {
+    const issue = await call(get, { issue_id, include: ["allowed_statuses"] }, options);
+    const { current, allowed } = readStatuses(issue, get.id);
+    const hasNotes = notes !== undefined && notes !== "";
+    if (current === status_id && !hasNotes) return;
+    if (current !== status_id && allowed !== undefined && !allowed.includes(status_id)) {
+      throw new RedmineError(
+        { kind: "transition_not_allowed", wanted: status_id, allowed },
+        { op: update.id },
+      );
+    }
+    await call(update, { issue_id, status_id, ...(hasNotes ? { notes } : {}) }, options);
+  };
+}
+
+function readStatuses(
+  issue: unknown,
+  op: string,
+): { current: number | undefined; allowed: number[] | undefined } {
+  if (!isRecord(issue)) {
+    throw new RedmineError(
+      { kind: "protocol", reason: "bad_json", hint: "the issue response is not an object" },
+      { op },
+    );
+  }
+  const idOf = (value: unknown): number | undefined =>
+    isRecord(value) && typeof value.id === "number" ? value.id : undefined;
+  const { status, allowed_statuses: allowed } = issue;
+  return {
+    current: idOf(status),
+    allowed: Array.isArray(allowed) ? allowed.flatMap((s) => idOf(s) ?? []) : undefined,
+  };
+}
+
+/** An Op for `rm.request`: the whole pipeline runs on data, so an untyped request is just an unregistered Op. */
+function rawOp(raw: RawRequest): AnyOp {
+  if (raw.body !== undefined && raw.method === "GET") {
+    throw invalidInput("a GET request cannot carry a body");
+  }
+  const query = Object.fromEntries(
+    Object.entries(raw.query ?? {}).map(
+      ([key, value]) => [key, Array.isArray(value) ? "brackets" : "scalar"] as const,
+    ),
+  );
+  return {
+    id: "request",
+    method: raw.method,
+    path: raw.path,
+    pathParams: [],
+    query,
+    filters: {},
+    customFieldFilters: false,
+    body: raw.body === undefined ? null : { kind: "json", envelope: null, siblings: [] },
+    response: { kind: "item", unwrap: null },
+    includes: [],
+    since: VERSIONS[0],
+    until: null,
+    safety: raw.method === "GET" ? "read" : raw.method === "DELETE" ? "idempotent" : "write",
+    stability: "stable",
+  };
+}
+
+function rawInput(raw: RawRequest): Record<string, unknown> {
+  if (raw.body !== undefined && !isRecord(raw.body)) {
+    throw invalidInput("request body must be a JSON object");
+  }
+  const body = raw.body ?? {};
+  const query = raw.query ?? {};
+  const shared = Object.keys(query).filter((key) => Object.hasOwn(body, key));
+  if (shared.length > 0) {
+    throw invalidInput(`${shared.join(", ")} appear in both query and body`);
+  }
+  return { ...query, ...body };
 }

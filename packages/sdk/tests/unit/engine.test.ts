@@ -1,0 +1,695 @@
+import { describe, expect, test } from "vite-plus/test";
+import type { SdkEvent } from "../../src/core/config.ts";
+import { RedmineError } from "../../src/core/errors.ts";
+import {
+  empty,
+  failure,
+  hang,
+  html,
+  json,
+  sequence,
+  sleep,
+  testEngine,
+} from "./fixtures/fake-fetch.ts";
+import type { Responder } from "./fixtures/fake-fetch.ts";
+import * as ops from "./fixtures/registry.ts";
+
+const issue = { id: 42, subject: "Printer on fire" };
+const ok: Responder = () => json({ issue });
+
+describe("building requests", () => {
+  test("GET keeps the /redmine subpath, joins csv includes and sends JSON Accept without Content-Type", async () => {
+    const { call, requests } = testEngine(ok);
+    await call(ops.getIssue, { issue_id: 42, include: ["journals", "allowed_statuses"] });
+
+    const [request] = requests;
+    expect(request?.url.href.split("?")[0]).toBe(
+      "https://tracker.example.com/redmine/issues/42.json",
+    );
+    expect(request?.url.searchParams.get("include")).toBe("journals,allowed_statuses");
+    expect(request?.method).toBe("GET");
+    expect(request?.headers.get("accept")).toBe("application/json");
+    expect(request?.headers.has("content-type")).toBe(false);
+  });
+
+  test("the API key travels in a header and never in the URL", async () => {
+    const { call, requests } = testEngine(ok);
+    await call(ops.getIssue, { issue_id: 42 });
+
+    expect(requests[0]?.headers.get("x-redmine-api-key")).toBe("secret-key");
+    expect(requests[0]?.url.href).not.toContain("secret-key");
+    expect(requests[0]?.url.searchParams.has("key")).toBe(false);
+  });
+
+  test("path parameters are percent-encoded into a single segment", async () => {
+    const { call, requests } = testEngine(() => empty());
+    await call(ops.removeUsersFromGroup, { group_id: "a/b c", user_ids: [1] });
+
+    expect(requests[0]?.url.pathname).toBe("/redmine/groups/a%2Fb%20c/users.json");
+  });
+
+  test.each([
+    ["a dot-dot segment", { issue_id: ".." }],
+    ["a missing parameter", {}],
+    ["an object", { issue_id: { id: 1 } }],
+  ])("refuses %s as a path parameter before the network", async (_name, input) => {
+    const { call, requests } = testEngine(ok);
+    const error = await failure(call(ops.getIssue, input));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a PUT wraps body fields in the envelope, keeps path params out and decodes 204 to undefined", async () => {
+    const { call, requests } = testEngine(() => empty());
+    const result = await call(ops.updateIssue, { issue_id: 7, subject: "x", notes: "n" });
+
+    expect(result).toBeUndefined();
+    expect(requests[0]?.method).toBe("PUT");
+    expect(requests[0]?.headers.get("content-type")).toBe("application/json");
+    expect(requests[0]?.json()).toEqual({ issue: { subject: "x", notes: "n" } });
+  });
+
+  test("siblings stay outside the envelope and the created item is unwrapped", async () => {
+    const { call, requests } = testEngine(() => json({ user: { id: 9, login: "jsmith" } }, 201));
+    const user = await call(ops.createUser, {
+      login: "jsmith",
+      mail: "j@example.com",
+      send_information: true,
+    });
+
+    expect(requests[0]?.json()).toEqual({
+      user: { login: "jsmith", mail: "j@example.com" },
+      send_information: true,
+    });
+    expect(user).toEqual({ id: 9, login: "jsmith" });
+  });
+
+  test("a scalar body has no envelope", async () => {
+    const { call, requests } = testEngine(() => empty());
+    await call(ops.addWatcher, { issue_id: 3, user_id: 5 });
+
+    expect(requests[0]?.json()).toEqual({ user_id: 5 });
+  });
+
+  test("a bodyless DELETE sends brackets query params, no body and no Content-Type", async () => {
+    const { call, requests } = testEngine(() => empty(), { version: "7.0" });
+    await call(ops.removeUsersFromGroup, { group_id: 3, user_ids: [1, 2] });
+
+    const [request] = requests;
+    expect(request?.method).toBe("DELETE");
+    expect(request?.url.searchParams.getAll("user_ids[]")).toEqual(["1", "2"]);
+    expect(request?.bytes).toHaveLength(0);
+    expect(request?.headers.has("content-type")).toBe(false);
+  });
+
+  test("a key the bodyless operation does not take is refused instead of silently ignored", async () => {
+    const { call, requests } = testEngine(() => empty());
+    const error = await failure(call(ops.deleteIssue, { issue_id: 1, force: true }));
+
+    expect(error.data).toMatchObject({ kind: "invalid_input" });
+    expect(requests).toHaveLength(0);
+  });
+
+  test("`as` sets X-Redmine-Switch-User for that call only", async () => {
+    const { call, requests } = testEngine(ok);
+    await call(ops.getIssue, { issue_id: 1 }, { as: "jsmith" });
+    await call(ops.getIssue, { issue_id: 1 });
+
+    expect(requests[0]?.headers.get("x-redmine-switch-user")).toBe("jsmith");
+    expect(requests[1]?.headers.has("x-redmine-switch-user")).toBe(false);
+  });
+});
+
+describe("interpreting responses", () => {
+  test("422 becomes validation with the raw, localized messages", async () => {
+    const messages = ["Тема не может быть пустым", "Subject is too long"];
+    const { call } = testEngine(() => json({ errors: messages }, 422, { "x-request-id": "req-1" }));
+    const error = await failure(call(ops.updateIssue, { issue_id: 1, subject: "" }));
+
+    expect(error.data).toEqual({ kind: "validation", status: 422, messages });
+    expect(error.op).toBe("updateIssue");
+    expect(error.request_id).toBe("req-1");
+  });
+
+  test("a 422 that is not an errors array is a plain http error, not an empty validation", async () => {
+    const { call } = testEngine(() => json({ oops: true }, 422));
+    const error = await failure(call(ops.updateIssue, { issue_id: 1 }));
+
+    expect(error.data).toMatchObject({ kind: "http", status: 422 });
+  });
+
+  test.each([
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [404, "not_found"],
+    [406, "not_acceptable"],
+  ])("status %i maps to %s", async (status, kind) => {
+    const { call, requests } = testEngine(() => new Response("", { status }));
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.kind).toBe(kind);
+    expect(requests).toHaveLength(1);
+  });
+
+  test("412 names the login that was requested", async () => {
+    const { call } = testEngine(() => new Response("", { status: 412 }));
+    const error = await failure(call(ops.updateIssue, { issue_id: 1 }, { as: "ghost" }));
+
+    expect(error.data).toEqual({ kind: "switch_user_rejected", status: 412, login: "ghost" });
+  });
+
+  test("an unmapped status keeps its body, truncated to 2 KiB", async () => {
+    const { call } = testEngine(() => new Response("x".repeat(5000), { status: 500 }));
+    const error = await failure(call(ops.updateIssue, { issue_id: 1 }));
+
+    expect(error.data).toMatchObject({ kind: "http", status: 500 });
+    expect(error.data.kind === "http" && error.data.body).toBe("x".repeat(2048));
+  });
+
+  test("an HTML 200 is protocol/non_json with a hint about the login page and the subpath", async () => {
+    const { call } = testEngine(() => html("<html>Sign in</html>"));
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.data).toMatchObject({ kind: "protocol", reason: "non_json" });
+    expect(error.data.kind === "protocol" && error.data.hint).toMatch(/login page.*subpath/);
+  });
+
+  test("a JSON content type with a broken body is protocol/bad_json", async () => {
+    const { call } = testEngine(
+      () => new Response("{nope", { headers: { "content-type": "application/json" } }),
+    );
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.data).toMatchObject({ kind: "protocol", reason: "bad_json" });
+  });
+
+  test("an empty 200 on an item operation decodes to undefined", async () => {
+    const { call } = testEngine(() => new Response("", { status: 200 }));
+
+    expect(await call(ops.getIssue, { issue_id: 1 })).toBeUndefined();
+  });
+});
+
+describe("retries by safety class", () => {
+  const cases = [
+    ["GET on 503", ops.getIssue, { issue_id: 1 }, 503, 3],
+    ["GET on 504", ops.getIssue, { issue_id: 1 }, 504, 3],
+    ["GET on 500", ops.getIssue, { issue_id: 1 }, 500, 1],
+    ["GET on 404", ops.getIssue, { issue_id: 1 }, 404, 1],
+    ["DELETE on 502", ops.deleteIssue, { issue_id: 1 }, 502, 3],
+    ["PUT on 503", ops.updateIssue, { issue_id: 1, notes: "n" }, 503, 1],
+    ["POST on 503", ops.createUser, { login: "a" }, 503, 1],
+    ["POST on 429", ops.createUser, { login: "a" }, 429, 3],
+    ["PUT on 429", ops.updateIssue, { issue_id: 1, notes: "n" }, 429, 3],
+  ] as const;
+
+  test.each(cases)("%s makes %i requests", async (_name, op, input, status, expected) => {
+    const { call, requests } = testEngine(() => new Response("", { status }));
+    await failure(call(op, input));
+
+    expect(requests).toHaveLength(expected);
+  });
+
+  test("a retry that succeeds returns the value after the failed attempts", async () => {
+    const { call, requests } = testEngine(sequence(empty(503), json({ issue })));
+
+    expect(await call(ops.getIssue, { issue_id: 42 })).toEqual(issue);
+    expect(requests).toHaveLength(2);
+  });
+
+  test.each([
+    ["retry: false per call", {}, { retry: false as const }, 1],
+    ["retry: false in config", { retry: false as const }, {}, 1],
+    [
+      "a per-call policy re-enabling a disabled client",
+      { retry: false as const },
+      { retry: { attempts: 1, baseMs: 1, maxMs: 1 } },
+      2,
+    ],
+  ])("%s", async (_name, config, options, expected) => {
+    const { call, requests } = testEngine(() => empty(503), config);
+    await failure(call(ops.getIssue, { issue_id: 1 }, options));
+
+    expect(requests).toHaveLength(expected);
+  });
+
+  test("network errors retry GET and never PUT", async () => {
+    const get = testEngine(() => {
+      throw new TypeError("fetch failed");
+    });
+    const error = await failure(get.call(ops.getIssue, { issue_id: 1 }));
+    const put = testEngine(() => {
+      throw new TypeError("fetch failed");
+    });
+    await failure(put.call(ops.updateIssue, { issue_id: 1 }));
+
+    expect(error.data).toEqual({ kind: "network", message: "fetch failed" });
+    expect(get.requests).toHaveLength(3);
+    expect(put.requests).toHaveLength(1);
+  });
+
+  test("Retry-After is honored and capped by maxMs", async () => {
+    const events: SdkEvent[] = [];
+    const { call, requests } = testEngine(
+      sequence(empty(429, { "retry-after": "2" }), json({ issue })),
+      {
+        retry: { attempts: 2, baseMs: 1, maxMs: 40 },
+        onEvent: (event) => events.push(event),
+      },
+    );
+    const started = performance.now();
+    await call(ops.getIssue, { issue_id: 42 });
+
+    expect(requests).toHaveLength(2);
+    expect(events.find((e) => e.type === "retry")).toMatchObject({ delay_ms: 40 });
+    expect(performance.now() - started).toBeGreaterThanOrEqual(35);
+  });
+
+  test("without Retry-After the delay stays inside the jittered backoff window", async () => {
+    const events: SdkEvent[] = [];
+    const { call } = testEngine(() => empty(503), {
+      retry: { attempts: 2, baseMs: 4, maxMs: 1000 },
+      onEvent: (event) => events.push(event),
+    });
+    await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    const delays = events.flatMap((e) => (e.type === "retry" ? [e.delay_ms] : []));
+    expect(delays).toHaveLength(2);
+    expect(delays[0]).toBeLessThanOrEqual(4);
+    expect(delays[1]).toBeLessThanOrEqual(8);
+  });
+
+  test("a streamed body is sent once even on 429", async () => {
+    const { call, requests } = testEngine(() => empty(429));
+    const file = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.close();
+      },
+    });
+    await failure(call(ops.uploadAttachmentFile, { file, filename: "a.bin" }));
+
+    expect(requests).toHaveLength(1);
+    expect([...(requests[0]?.bytes ?? [])]).toEqual([1, 2, 3]);
+  });
+});
+
+describe("timeouts and cancellation", () => {
+  test("a slow server is a timeout carrying the limit, not an abort", async () => {
+    const { call } = testEngine(hang, { timeoutMs: 15, retry: false });
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.data).toEqual({ kind: "timeout", after_ms: 15 });
+  });
+
+  test("a per-call timeout overrides the client's", async () => {
+    const { call } = testEngine(hang, { timeoutMs: 60_000, retry: false });
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }, { timeoutMs: 10 }));
+
+    expect(error.data).toEqual({ kind: "timeout", after_ms: 10 });
+  });
+
+  test("timeouts retry a GET and never a PUT", async () => {
+    const get = testEngine(hang, { timeoutMs: 10 });
+    const put = testEngine(hang, { timeoutMs: 10 });
+    await failure(get.call(ops.getIssue, { issue_id: 1 }));
+    await failure(put.call(ops.updateIssue, { issue_id: 1 }));
+
+    expect(get.requests).toHaveLength(3);
+    expect(put.requests).toHaveLength(1);
+  });
+
+  test.each([
+    ["GET", ops.getIssue],
+    ["PUT", ops.updateIssue],
+  ])(
+    "the caller's signal on a %s is an abort, is not retried and reaches fetch",
+    async (_method, op) => {
+      const controller = new AbortController();
+      const { call, requests } = testEngine(hang, { timeoutMs: 60_000 });
+      const pending = failure(call(op, { issue_id: 1 }, { signal: controller.signal }));
+      await sleep(5);
+      controller.abort();
+      const error = await pending;
+
+      expect(error.data).toEqual({ kind: "aborted" });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.signal.aborted).toBe(true);
+    },
+  );
+
+  test("an already aborted signal never reaches the network", async () => {
+    const { call, requests } = testEngine(ok);
+    const error = await failure(
+      call(ops.getIssue, { issue_id: 1 }, { signal: AbortSignal.abort() }),
+    );
+
+    expect(error.kind).toBe("aborted");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a call waiting for a slot can be aborted and then sends nothing", async () => {
+    const { call, requests } = testEngine(hang, { maxConcurrent: 1, timeoutMs: 60_000 });
+    const first = new AbortController();
+    const second = new AbortController();
+    const running = failure(call(ops.getIssue, { issue_id: 1 }, { signal: first.signal }));
+    const queued = failure(call(ops.getIssue, { issue_id: 2 }, { signal: second.signal }));
+    await sleep(5);
+    second.abort();
+
+    expect((await queued).kind).toBe("aborted");
+    first.abort();
+    await running;
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/redmine/issues/1.json"]);
+  });
+
+  test("a call sleeping between retries can be aborted", async () => {
+    const controller = new AbortController();
+    const { call, requests } = testEngine(() => empty(503, { "retry-after": "5" }), {
+      retry: { attempts: 2, baseMs: 1, maxMs: 5000 },
+    });
+    const pending = failure(call(ops.getIssue, { issue_id: 1 }, { signal: controller.signal }));
+    await sleep(15);
+    controller.abort();
+
+    expect((await pending).kind).toBe("aborted");
+    expect(requests).toHaveLength(1);
+  });
+});
+
+describe("concurrency", () => {
+  test("never exceeds maxConcurrent, and uses all of it", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const { call, requests } = testEngine(
+      async () => {
+        peak = Math.max(peak, ++inFlight);
+        await sleep(5);
+        inFlight--;
+        return json({ issue });
+      },
+      { maxConcurrent: 2 },
+    );
+    await Promise.all(Array.from({ length: 8 }, (_, i) => call(ops.getIssue, { issue_id: i })));
+
+    expect(requests).toHaveLength(8);
+    expect(peak).toBe(2);
+  });
+
+  test("queued calls run in the order they were made", async () => {
+    const { call, requests } = testEngine(
+      async () => {
+        await sleep(2);
+        return json({ issue });
+      },
+      { maxConcurrent: 1 },
+    );
+    await Promise.all([1, 2, 3, 4, 5].map((id) => call(ops.getIssue, { issue_id: id })));
+
+    expect(requests.map((r) => r.url.pathname)).toEqual(
+      [1, 2, 3, 4, 5].map((id) => `/redmine/issues/${id}.json`),
+    );
+  });
+
+  test("a call backing off does not hold its slot", async () => {
+    const attempts = new Map<string, number>();
+    const { call, requests } = testEngine(
+      (request) => {
+        const seen = (attempts.get(request.url.pathname) ?? 0) + 1;
+        attempts.set(request.url.pathname, seen);
+        const flaky = request.url.pathname.endsWith("/1.json") && seen === 1;
+        return flaky ? empty(503, { "retry-after": "1" }) : json({ issue });
+      },
+      { maxConcurrent: 1, retry: { attempts: 2, baseMs: 1, maxMs: 30 } },
+    );
+    await Promise.all([call(ops.getIssue, { issue_id: 1 }), call(ops.getIssue, { issue_id: 2 })]);
+
+    expect(requests.map((r) => r.url.pathname)).toEqual([
+      "/redmine/issues/1.json",
+      "/redmine/issues/2.json",
+      "/redmine/issues/1.json",
+    ]);
+  });
+});
+
+describe("authentication", () => {
+  test("Basic credentials are UTF-8 safe", async () => {
+    const { call, requests } = testEngine(ok, {
+      auth: { basic: { login: "jörg", password: "pässwörd✓" } },
+    });
+    await call(ops.getIssue, { issue_id: 1 });
+
+    const header = requests[0]?.headers.get("authorization") ?? "";
+    const bytes = Uint8Array.from(atob(header.replace("Basic ", "")), (c) => c.charCodeAt(0));
+    expect(header.startsWith("Basic ")).toBe(true);
+    expect(new TextDecoder().decode(bytes)).toBe("jörg:pässwörd✓");
+    expect(requests[0]?.headers.has("x-redmine-api-key")).toBe(false);
+  });
+
+  test("a bearer source is asked for the token on every request", async () => {
+    let token = "t1";
+    const { call, requests } = testEngine(ok, { auth: { bearer: { token: () => token } } });
+    await call(ops.getIssue, { issue_id: 1 });
+    token = "t2";
+    await call(ops.getIssue, { issue_id: 1 });
+
+    expect(requests.map((r) => r.headers.get("authorization"))).toEqual(["Bearer t1", "Bearer t2"]);
+  });
+
+  function expiringBearer(): {
+    auth: { bearer: { token(): string; refresh(): Promise<string> } };
+    refreshes: () => number;
+  } {
+    let token = "old";
+    let refreshes = 0;
+    return {
+      refreshes: () => refreshes,
+      auth: {
+        bearer: {
+          token: () => token,
+          async refresh() {
+            refreshes++;
+            await sleep(10);
+            token = "new";
+            return token;
+          },
+        },
+      },
+    };
+  }
+
+  test("concurrent 401s share one refresh, even those that arrive after it finished, and each replays once", async () => {
+    const bearer = expiringBearer();
+    const { call, requests } = testEngine(
+      async (request, call) => {
+        if (request.headers.get("authorization") === "Bearer new") return json({ issue });
+        await sleep(call * 4);
+        return empty(401);
+      },
+      { auth: bearer.auth, maxConcurrent: 10 },
+    );
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => call(ops.getIssue, { issue_id: i + 1 })),
+    );
+
+    expect(results).toEqual(Array.from({ length: 5 }, () => issue));
+    expect(bearer.refreshes()).toBe(1);
+    expect(requests).toHaveLength(10);
+  });
+
+  test("a second 401 after the refresh is surfaced, not replayed again", async () => {
+    const bearer = expiringBearer();
+    const { call, requests } = testEngine(() => empty(401), { auth: bearer.auth });
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.kind).toBe("unauthorized");
+    expect(requests).toHaveLength(2);
+    expect(bearer.refreshes()).toBe(1);
+  });
+
+  test("a bearer without refresh and a static key are not replayed on 401", async () => {
+    const bearer = testEngine(() => empty(401), { auth: { bearer: { token: () => "t" } } });
+    const key = testEngine(() => empty(401));
+    await failure(bearer.call(ops.getIssue, { issue_id: 1 }));
+    await failure(key.call(ops.getIssue, { issue_id: 1 }));
+
+    expect(bearer.requests).toHaveLength(1);
+    expect(key.requests).toHaveLength(1);
+  });
+
+  test("a streamed body is not replayed after a refresh", async () => {
+    const bearer = expiringBearer();
+    const { call, requests } = testEngine(() => empty(401), { auth: bearer.auth });
+    const file = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+    await failure(call(ops.uploadAttachmentFile, { file, filename: "a" }));
+
+    expect(requests).toHaveLength(1);
+    expect(bearer.refreshes()).toBe(0);
+  });
+
+  test("a failing refresh surfaces the 401 with the cause attached", async () => {
+    const cause = new Error("refresh token revoked");
+    const { call } = testEngine(() => empty(401), {
+      auth: {
+        bearer: {
+          token: () => "t",
+          refresh: () => Promise.reject(cause),
+        },
+      },
+    });
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.kind).toBe("unauthorized");
+    expect(error.cause).toBe(cause);
+  });
+});
+
+describe("declared version", () => {
+  test("an operation newer than the declared version is refused before any request", async () => {
+    const { call, requests } = testEngine(() => empty(), { version: "6.1" });
+    const error = await failure(call(ops.removeUsersFromGroup, { group_id: 1, user_ids: [1] }));
+
+    expect(error.data).toEqual({
+      kind: "unsupported_version",
+      declared: "6.1",
+      since: "7.0",
+      until: null,
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  test("the same operation runs against 7.0", async () => {
+    const { call, requests } = testEngine(() => empty(), { version: "7.0" });
+    await call(ops.removeUsersFromGroup, { group_id: 1, user_ids: [1] });
+
+    expect(requests).toHaveLength(1);
+  });
+
+  test("a refused list is refused when consumed, not when created", async () => {
+    const { list, requests } = testEngine(() => json({}), { version: "6.1" });
+    const newer = { ...ops.getIssues, since: "7.0" } as const;
+    const listing = list(newer);
+
+    expect((await failure(listing.all())).kind).toBe("unsupported_version");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a 404 on an operation newer than the oldest version hints at the server version when none is declared", async () => {
+    const { call } = testEngine(() => empty(404));
+    const error = await failure(call(ops.removeUsersFromGroup, { group_id: 1, user_ids: [1] }));
+
+    expect(error.data).toMatchObject({ kind: "not_found", hint: expect.stringContaining("7.0") });
+    expect(error.op).toBe("removeUsersFromGroup");
+  });
+
+  test.each([
+    [
+      "a declared version",
+      ops.removeUsersFromGroup,
+      { group_id: 1, user_ids: [1] },
+      { version: "7.0" as const },
+    ],
+    ["an operation from the oldest version", ops.getIssue, { issue_id: 1 }, {}],
+  ])("a 404 carries no hint for %s", async (_name, op, input, config) => {
+    const { call } = testEngine(() => empty(404), config);
+    const error = await failure(call(op, input));
+
+    expect(error.data).toEqual({ kind: "not_found", status: 404 });
+  });
+});
+
+describe("events", () => {
+  test("report each attempt, retry and the final error without credentials", async () => {
+    const events: SdkEvent[] = [];
+    const { call } = testEngine(() => empty(503), { onEvent: (e) => events.push(e) });
+    await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(events.map((e) => e.type)).toEqual([
+      "request",
+      "response",
+      "retry",
+      "request",
+      "response",
+      "retry",
+      "request",
+      "response",
+      "error",
+    ]);
+    expect(events[0]).toMatchObject({ op: "getIssue", method: "GET", attempt: 1 });
+    expect(events[1]).toMatchObject({ status: 503, attempt: 1 });
+    expect(JSON.stringify(events)).not.toContain("secret-key");
+  });
+
+  test("an observer that throws does not break the call", async () => {
+    const { call } = testEngine(ok, {
+      onEvent: () => {
+        throw new Error("observer bug");
+      },
+    });
+
+    expect(await call(ops.getIssue, { issue_id: 42 })).toEqual(issue);
+  });
+});
+
+describe("quirks", () => {
+  test.each([
+    ["8/1", 8],
+    ["1.5", 1.5],
+    ["3/2", 1.5],
+    [2.25, 2.25],
+  ])("hours %j reads as %d on a single time entry", async (hours, expected) => {
+    const { call } = testEngine(() => json({ time_entry: { id: 1, hours, comments: "8/1" } }));
+    const entry = await call(ops.getTimeEntry, { time_entry_id: 1 });
+
+    expect(entry).toEqual({ id: 1, hours: expected, comments: "8/1" });
+  });
+
+  test("hours are fixed inside a list and unrelated strings are left alone", async () => {
+    const { list } = testEngine(() =>
+      json({
+        time_entries: [
+          { id: 1, hours: "8/1" },
+          { id: 2, hours: 3 },
+          { id: 3, hours: "n/a" },
+        ],
+        total_count: 3,
+        offset: 0,
+        limit: 100,
+      }),
+    );
+    const entries = await list(ops.getTimeEntries).all();
+
+    expect(entries).toEqual([
+      { id: 1, hours: 8 },
+      { id: 2, hours: 3 },
+      { id: 3, hours: "n/a" },
+    ]);
+  });
+
+  test("normalize: false leaves the server's value", async () => {
+    const { call } = testEngine(() => json({ time_entry: { id: 1, hours: "8/1" } }), {
+      normalize: false,
+    });
+
+    expect(await call(ops.getTimeEntry, { time_entry_id: 1 })).toEqual({
+      id: 1,
+      hours: "8/1",
+    });
+  });
+});
+
+test("every failure a caller can see is a RedmineError", async () => {
+  const { call } = testEngine(
+    () => {
+      throw new TypeError("fetch failed");
+    },
+    { retry: false },
+  );
+
+  expect(await failure(call(ops.getIssue, { issue_id: 1 }))).toBeInstanceOf(RedmineError);
+});
