@@ -1,0 +1,220 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, expectTypeOf, test } from "vite-plus/test";
+import { generate } from "../../generator/generate.ts";
+import { overlay } from "../../generator/overlay.ts";
+import { loadSpecs, type SpecFile } from "../../generator/spec.ts";
+import { ops } from "../../src/generated/ops.ts";
+import type { CustomField, Issue } from "../../src/generated/schemas.ts";
+
+const root = resolve(import.meta.dirname, "../..");
+const specs = loadSpecs(resolve(root, "../../spec/redmine-openapi"));
+const generated = await generate(specs);
+
+const withSpecs = (edit: (byVersion: Record<string, SpecFile["doc"]>) => void): SpecFile[] => {
+  const copy = structuredClone(specs);
+  edit(Object.fromEntries(copy.map((s) => [s.version, s.doc])));
+  return copy;
+};
+
+describe("drift between vendored versions", () => {
+  test("is one added operation and four added properties, with no conflicts", () => {
+    expect(generated.report.drift).toEqual({
+      addedOps: [{ id: "removeUsersFromGroup", since: "7.0" }],
+      removedOps: [],
+      addedSchemas: [],
+      addedProperties: expect.arrayContaining([
+        { pointer: "#/components/schemas/custom_field/properties/is_for_all", since: "7.0" },
+        {
+          pointer: "#/components/schemas/custom_field/properties/default_value_mode",
+          since: "7.0",
+        },
+        { pointer: "#/components/schemas/custom_field/properties/projects", since: "7.0" },
+        { pointer: "#/components/schemas/wiki_page.summary/properties/project", since: "7.0" },
+      ]),
+      conflicts: [],
+      resolved: [],
+    });
+    expect(generated.report.drift.addedProperties).toHaveLength(4);
+  });
+
+  test("a changed property type fails generation until the overlay resolves it", async () => {
+    const changed = withSpecs((v) => {
+      v["6.1"]!.components.schemas.issue!.properties!.done_ratio = { type: "string" };
+    });
+    const pointer = "#/components/schemas/issue/properties/done_ratio";
+    await expect(generate(changed)).rejects.toThrow(pointer);
+    const resolved = await generate(changed, {
+      ...overlay,
+      resolved: { [pointer]: "6.1 sent strings" },
+    });
+    expect(resolved.report.drift.resolved).toEqual([{ pointer, reason: "6.1 sent strings" }]);
+  });
+
+  test("a removed property fails generation", async () => {
+    const removed = withSpecs((v) => {
+      v["6.1"]!.components.schemas.issue!.properties!.legacy_flag = { type: "boolean" };
+    });
+    await expect(generate(removed)).rejects.toThrow(
+      "#/components/schemas/issue/properties/legacy_flag",
+    );
+  });
+
+  test("an overlay resolution that matches no conflict fails generation", async () => {
+    await expect(
+      generate(specs, { ...overlay, resolved: { "#/components/schemas/issue": "stale" } }),
+    ).rejects.toThrow("not a conflict");
+  });
+});
+
+test("committed output matches the generator", () => {
+  for (const [path, code] of Object.entries(generated.files)) {
+    expect(readFileSync(resolve(root, path), "utf8"), path).toBe(code);
+  }
+});
+
+describe("canonical inputs", () => {
+  test("a body field named like a path param fails generation with the operation id", async () => {
+    const colliding = withSpecs((v) => {
+      const body =
+        v["7.0"]!.paths["/issues/{issue_id}.{format}"]!.put!.requestBody!.content[
+          "application/json"
+        ]!.schema!.properties!.issue!;
+      body.properties!.issue_id = { type: "integer" };
+    });
+    await expect(generate(colliding)).rejects.toThrow(
+      'updateIssue: input key collision on "issue_id"',
+    );
+  });
+
+  test("two operations on one namespace verb fail generation", async () => {
+    const { getCurrentUser: _, ...verbs } = overlay.verbs;
+    await expect(generate(specs, { ...overlay, verbs })).rejects.toThrow("users.get");
+  });
+
+  test("hiding a scoped variant requires the sibling to take the scope", async () => {
+    const { getNewsListByProject: _, ...verbs } = overlay.verbs;
+    await expect(
+      generate(specs, {
+        ...overlay,
+        verbs,
+        scopedDuplicates: {
+          ...overlay.scopedDuplicates,
+          getNewsListByProject: { sibling: "getNewsList", key: "project_id" },
+        },
+      }),
+    ).rejects.toThrow('getNewsList takes no "project_id"');
+  });
+});
+
+describe("operation descriptors", () => {
+  test("removeUsersFromGroup sends user_ids[] as repeated query params and no body", () => {
+    expect(ops.removeUsersFromGroup).toMatchObject({
+      method: "DELETE",
+      path: "groups/{group_id}/users.json",
+      query: { user_ids: "brackets" },
+      body: null,
+      since: "7.0",
+      safety: "idempotent",
+    });
+  });
+
+  test("single scalar bodies have no envelope", () => {
+    for (const [op, key] of [
+      [ops.addWatcher, "user_id"],
+      [ops.addUserToGroup, "user_id"],
+      [ops.addRelatedIssue, "issue_id"],
+    ] as const) {
+      expect(op.body, op.id).toEqual({ kind: "json", envelope: null, siblings: [key] });
+    }
+  });
+
+  test("user bodies carry send_information and pref beside the envelope", () => {
+    expect(ops.createUser.body).toEqual({
+      kind: "json",
+      envelope: "user",
+      siblings: ["send_information", "pref"],
+    });
+    expect(ops.updateUser.body).toMatchObject({
+      envelope: "user",
+      siblings: ["send_information", "pref"],
+    });
+    expect(ops.updateMyAccount.body).toMatchObject({ envelope: "user", siblings: ["pref"] });
+  });
+
+  test("getIssue accepts every include the spec lists", () => {
+    expect(ops.getIssue.includes).toEqual([
+      "children",
+      "attachments",
+      "relations",
+      "changesets",
+      "journals",
+      "watchers",
+      "allowed_statuses",
+    ]);
+    expect(ops.getIssue.query).toEqual({ include: "csv" });
+    expect(generated.report.includeMisses).toEqual([]);
+  });
+
+  test("issue lists take documented filters, custom fields and keyset walks", () => {
+    expect(ops.getIssues.response).toEqual({
+      kind: "list",
+      items: "issues",
+      paged: true,
+      keyset: { param: "issue_id" },
+    });
+    expect(ops.getIssues.customFieldFilters).toBe(true);
+    expect(ops.getIssues.filters.status_id).toEqual({
+      ops: ["o", "=", "!", "c", "*", "ev", "!ev", "cf"],
+      words: { open: "o", closed: "c", any: "*" },
+    });
+    expect(ops.getIssues.filters.assigned_to_id?.ops).toEqual([
+      "=",
+      "!",
+      "*",
+      "!*",
+      "ev",
+      "!ev",
+      "cf",
+    ]);
+    expect(Object.keys(ops.getIssues.query)).not.toContain("offset");
+  });
+
+  test("time entry from/to are plain query params, not filters", () => {
+    expect(ops.getTimeEntries.query).toMatchObject({ from: "scalar", to: "scalar" });
+    expect(ops.getTimeEntries.filters).not.toHaveProperty("from");
+    expect(ops.getTimeEntries.filters).toHaveProperty("spent_on");
+  });
+
+  test("response shapes follow the spec", () => {
+    expect(ops.getIssue.response).toEqual({ kind: "item", unwrap: "issue" });
+    expect(ops.updateIssue.response).toEqual({ kind: "empty" });
+    expect(ops.getTrackers.response).toEqual({ kind: "list", items: "trackers", paged: false });
+    expect(ops.downloadAttachmentFile.response).toEqual({ kind: "binary" });
+    expect(ops.uploadAttachmentFile.body).toEqual({ kind: "binary", key: "file" });
+    expect(ops.getMyAccount.response).toEqual({ kind: "item", unwrap: "user" });
+  });
+
+  test("paths are relative with .json baked in", () => {
+    for (const op of Object.values(ops)) {
+      expect(op.path, op.id).not.toMatch(/^\/|\{format\}/);
+    }
+  });
+});
+
+describe("requiredness across versions", () => {
+  type Journal = NonNullable<Issue["journals"]>[number];
+  type Detail = Journal["details"][number];
+
+  test("a property absent from 6.1 is optional even though 7.0 requires it", () => {
+    expectTypeOf<Pick<CustomField, "is_for_all">>().toEqualTypeOf<{ is_for_all?: boolean }>();
+  });
+
+  test("required lists that grew between spec revisions stay required", () => {
+    expectTypeOf<Pick<Journal, "notes" | "details">>().toEqualTypeOf<{
+      notes: string;
+      details: Detail[];
+    }>();
+    expectTypeOf<Pick<Detail, "old_value">>().toEqualTypeOf<{ old_value: string | null }>();
+  });
+});

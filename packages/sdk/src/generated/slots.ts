@@ -1,6 +1,117 @@
 // Generated from spec/redmine-openapi/*.yaml by `vp run gen`. Do not edit.
-// Placeholder until the generator lands: no namespaces.
 
 import type { SlotTable } from "../core/op.ts";
+import { ops } from "./ops.ts";
 
-export const SLOTS: SlotTable = {};
+export const SLOTS: SlotTable = {
+  issues: {
+    list: ops.getIssues,
+    create: ops.createIssue,
+    get: ops.getIssue,
+    update: ops.updateIssue,
+    delete: ops.deleteIssue,
+    addWatcher: ops.addWatcher,
+    removeWatcher: ops.removeWatcher,
+  },
+  projects: {
+    list: ops.getProjects,
+    create: ops.createProject,
+    get: ops.getProject,
+    update: ops.updateProject,
+    delete: ops.deleteProject,
+    archive: ops.archiveProject,
+    unarchive: ops.unarchiveProject,
+    close: ops.closeProject,
+    reopen: ops.reopenProject,
+  },
+  memberships: {
+    list: ops.getMemberships,
+    create: ops.createMembership,
+    get: ops.getMembership,
+    update: ops.updateMembership,
+    delete: ops.deleteMembership,
+  },
+  users: {
+    list: ops.getUsers,
+    create: ops.createUser,
+    get: ops.getUser,
+    update: ops.updateUser,
+    delete: ops.deleteUser,
+    current: ops.getCurrentUser,
+  },
+  timeEntries: {
+    list: ops.getTimeEntries,
+    create: ops.createTimeEntry,
+    get: ops.getTimeEntry,
+    update: ops.updateTimeEntry,
+    delete: ops.deleteTimeEntry,
+  },
+  news: {
+    list: ops.getNewsList,
+    get: ops.getNews,
+    update: ops.updateNews,
+    delete: ops.deleteNews,
+    listByProject: ops.getNewsListByProject,
+    create: ops.createNews,
+  },
+  relations: {
+    list: ops.getIssueRelations,
+    create: ops.createIssueRelation,
+    get: ops.getIssueRelation,
+    delete: ops.deleteIssueRelation,
+  },
+  versions: {
+    list: ops.getVersionsByProject,
+    create: ops.createVersion,
+    get: ops.getVersion,
+    update: ops.updateVersion,
+    delete: ops.deleteVersion,
+  },
+  wiki: {
+    list: ops.getWikiPages,
+    get: ops.getWikiPage,
+    update: ops.updateWikiPage,
+    delete: ops.deleteWikiPage,
+    getVersion: ops.getWikiPageByVersion,
+  },
+  queries: { list: ops.getQueries },
+  attachments: {
+    get: ops.getAttachment,
+    update: ops.updateAttachment,
+    delete: ops.deleteAttachment,
+  },
+  issueStatuses: { list: ops.getIssueStatuses },
+  trackers: { list: ops.getTrackers },
+  issueCategories: {
+    list: ops.getIssueCategories,
+    create: ops.createIssueCategory,
+    get: ops.getIssueCategory,
+    update: ops.updateIssueCategory,
+    delete: ops.deleteIssueCategory,
+  },
+  enumerations: {
+    listIssuePriorities: ops.getIssuePriorities,
+    listTimeEntryActivities: ops.getTimeEntryActivities,
+    listDocumentCategories: ops.getDocumentCategories,
+  },
+  roles: { list: ops.getRoles, get: ops.getRole },
+  groups: {
+    list: ops.getGroups,
+    create: ops.createGroup,
+    get: ops.getGroup,
+    update: ops.updateGroup,
+    delete: ops.deleteGroup,
+    addUser: ops.addUserToGroup,
+    removeUsers: ops.removeUsersFromGroup,
+    removeUser: ops.removeUserFromGroup,
+  },
+  customFields: { list: ops.getCustomFields },
+  search: { list: ops.getSearch, listByProject: ops.getSearchByProject },
+  files: { list: ops.getFiles, create: ops.createFile },
+  myAccount: { get: ops.getMyAccount, update: ops.updateMyAccount },
+  journals: { update: ops.updateJournal },
+  repositories: {
+    addRelatedIssue: ops.addRelatedIssue,
+    removeRelatedIssue: ops.removeRelatedIssue,
+  },
+};
