@@ -17,12 +17,15 @@ try {
   }
 }
 
-await rm.timeEntries.create({ issue_id: 42, hours: 1.5, comments: "Triage" }, { as: "jsmith" });
+await rm.timeEntries.create(
+  { issue_id: 42, hours: 1.5, activity_id: 9, comments: "Triage" },
+  { as: "jsmith" },
+);
 
 const asJsmith = rm.with({ as: "jsmith" });
 try {
   await asJsmith.issues.update({ issue_id: 42, notes: "Picked up by jsmith." });
 } catch (error) {
   if (!RedmineError.is(error, "switch_user_rejected")) throw error;
-  console.error(`Cannot act as ${error.data.login}: unknown, locked, or this key is not an admin`);
+  console.error(`Cannot act as ${error.data.login}: no such active user`);
 }

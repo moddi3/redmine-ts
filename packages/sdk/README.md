@@ -67,6 +67,8 @@ const untriaged: GetIssuesWhere = {
 
 The operators are `not`, `gte`, `lte`, `between`, `contains`, `not_contains`, `starts_with`, `ends_with`, `any`, and `none`. Each field accepts only the operators the spec documents for it, so `status_id: { contains: "x" }` does not compile. Redmine ignores an unknown filter and returns every row. To prevent that, the client throws `invalid_input` before any request when a key is unknown or an operator is undocumented. `{ raw }` sends its string as is, for relative dates and operators the object form does not cover.
 
+Redmine's issue list returns only open issues when `status_id` is absent. Pass `status_id: "any"` to include closed ones.
+
 ### Narrow results with `include`
 
 `include` asks Redmine to embed related data. The included properties become required in the result type:
@@ -231,16 +233,21 @@ for (const attachment of issue.attachments) {
 With an admin API key, Redmine runs a request as another user when it carries `X-Redmine-Switch-User`. Pass `as` for one call, or derive a client with `with`:
 
 ```ts
-await rm.timeEntries.create({ issue_id: 42, hours: 1.5, comments: "Triage" }, { as: "jsmith" });
+await rm.timeEntries.create(
+  { issue_id: 42, hours: 1.5, activity_id: 9, comments: "Triage" },
+  { as: "jsmith" },
+);
 
 const asJsmith = rm.with({ as: "jsmith" });
 try {
   await asJsmith.issues.update({ issue_id: 42, notes: "Picked up by jsmith." });
 } catch (error) {
   if (!RedmineError.is(error, "switch_user_rejected")) throw error;
-  console.error(`Cannot act as ${error.data.login}: unknown, locked, or this key is not an admin`);
+  console.error(`Cannot act as ${error.data.login}: no such active user`);
 }
 ```
+
+Only an admin key can switch users. Redmine ignores the header on a non-admin key and answers as the key's own user, with no error, so check that the key belongs to an admin before you rely on `as`.
 
 A derived client shares the parent's `maxConcurrent` limit. `with` accepts any call option, so `rm.with({ timeoutMs: 5000 })` works too.
 
