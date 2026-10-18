@@ -50,7 +50,7 @@ Never edit `src/generated/` by hand. Change the generator in `packages/sdk/gener
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): subject`, for example `fix(sdk): retry 503 on GET only`. The `commit-msg` hook in `.vite-hooks/` rejects any other first line. A user-facing change also needs a changeset (`vp run changeset`), which drives the version bump and the changelog. See [docs/releasing.md](docs/releasing.md).
 
-CI also lints the workflows with actionlint. To run it locally: `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12`.
+CI also lints the workflows with [jactionlint](https://github.com/jdx/jactionlint), which runs actionlint's checks plus security and pinning rules: every action is pinned to a commit SHA, and Dependabot updates the pins after a 7-day cooldown. To run it locally: `docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/jdx/jactionlint:2.2.0`, or `mise use jactionlint` and `jactionlint`. `--online --fix` pins a newly added action.
 
 ## Run real Redmine servers
 
