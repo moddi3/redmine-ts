@@ -380,9 +380,11 @@ To use an HTTP proxy in Node, pass the `fetch` from [undici](https://github.com/
 
 ## Runtime support
 
-- Node 22 or later, Bun, and Deno. The client uses only web platform APIs, such as `fetch`, `URL`, `AbortSignal.any`, and web streams.
-- Browsers through a same-origin proxy. Redmine sends no CORS headers, and an API key in a browser is readable by anyone who opens the developer tools. Point `baseUrl` at a proxy on your origin that adds the key on the server.
-- The package has no `node:` imports and no dependencies. It is ESM only, so load it with `import`, not `require`.
+- Node 22 and 24. CI runs the unit tests on both, and runs a smoke test of the built package on Node 24 against real Redmine 6.1 and 7.0 servers.
+- Bun. CI runs the same smoke test under the latest Bun release.
+- Browsers through an injected `fetch`, untested. Redmine sends no CORS headers, and an API key in a browser is readable by anyone who opens the developer tools. Pass a `fetch` that sends each request to a proxy on your origin, and let the proxy add the key on the server.
+- Deno is not a target, and CI does not run on it.
+- The package is ESM only, so load it with `import`, not `require`. It has no `node:` imports and no dependencies. The client uses only web platform APIs, such as `fetch`, `URL`, `AbortSignal.any`, and web streams.
 
 ## Namespaces
 

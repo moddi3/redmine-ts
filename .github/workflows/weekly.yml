@@ -1,0 +1,80 @@
+name: Weekly
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  latest-redmine:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  spec-watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    concurrency: spec-watch
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          node-version: "24"
+          run-install: false
+      - name: open, update, or close the tracking issue
+        run: |
+          newer=$(node scripts/spec-watch.ts)
+          issue=$(gh issue list --label spec-watch --state open --json number --jq '.[0].number // empty')
+
+          if [ -z "$newer" ]; then
+            echo "The vendored specs match the newest upstream tags."
+            if [ -n "$issue" ]; then
+              gh issue close "$issue" --comment "The specs in spec/redmine-openapi now match the newest upstream tags."
+            fi
+            exit 0
+          fi
+
+          echo "Newer upstream tags:"
+          echo "$newer"
+          {
+            echo "[d-yoshi/redmine-openapi](https://github.com/d-yoshi/redmine-openapi/tags) has tags newer than the specs in \`spec/redmine-openapi/\`:"
+            echo
+            while read -r tag; do echo "- \`$tag\`"; done <<< "$newer"
+            echo
+            echo "To vendor a newer revision of a supported Redmine version, run \`spec/fetch.sh <tag>\`, delete the older file of the same version, and run \`vp run gen\` in \`packages/sdk\`. For a new Redmine version, follow \"Add a Redmine version\" in the root README."
+            echo
+            echo "The weekly workflow rewrites this issue on each run and closes it when the vendored specs catch up."
+          } > "$RUNNER_TEMP/spec-watch.md"
+
+          gh label create spec-watch --color C5DEF5 --description "Newer upstream Redmine OpenAPI spec tags" --force
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --body-file "$RUNNER_TEMP/spec-watch.md"
+          else
+            gh issue create --title "Newer Redmine OpenAPI spec tags upstream" --label spec-watch --body-file "$RUNNER_TEMP/spec-watch.md"
+          fi
+
+  redmine-org-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          node-version: "24"
+          cache: true
+      - run: vp run -r build
+      - run: node scripts/redmine-org-canary.mjs

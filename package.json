@@ -11,6 +11,7 @@
     "redmine:smoke": "node scripts/redmine-env.ts smoke"
   },
   "devDependencies": {
+    "@changesets/cli": "catalog:",
     "vite-plus": "catalog:"
   },
   "devEngines": {

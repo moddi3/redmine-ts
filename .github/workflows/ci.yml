@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  checks:
+    name: checks (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          node-version: ${{ matrix.node }}
+          cache: true
+      - run: vp check
+      - run: vp run --no-cache -r test
+      - run: vp run -r build
+      - run: vp run gen:check
+        working-directory: packages/sdk
+
+  contract:
+    name: contract and runtime smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          node-version: "24"
+          cache: true
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: latest
+      # The image tags float to the latest patch release, and the weekly workflow relies on this pull.
+      - run: docker compose -f docker/compose.yaml pull
+      - run: node scripts/redmine-env.ts up
+      - run: vp run --no-cache test:contract
+        working-directory: packages/sdk
+      - run: vp run -r build
+      - name: runtime smoke (node)
+        run: node scripts/runtime-smoke.mjs
+      - name: runtime smoke (bun)
+        run: bun scripts/runtime-smoke.mjs
+      - if: always()
+        run: node scripts/redmine-env.ts down

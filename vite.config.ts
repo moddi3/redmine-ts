@@ -15,5 +15,12 @@ export default defineConfig({
   },
   run: {
     cache: true,
+    // Tasks rather than package.json scripts: `cache: true` would replay a script's output on a
+    // second run and skip its side effects, such as the version bump or the publish.
+    tasks: {
+      changeset: { command: "changeset", cache: false },
+      "version-packages": { command: "changeset version", cache: false },
+      release: { command: "vp run -r build && changeset publish", cache: false },
+    },
   },
 });

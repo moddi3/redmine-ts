@@ -1,10 +1,13 @@
 # redmine-ts
 
+[![CI](https://github.com/moddi3/redmine-ts/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moddi3/redmine-ts/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@redmine-ts/sdk)](https://www.npmjs.com/package/@redmine-ts/sdk)
+
 TypeScript tooling for the Redmine REST API.
 
-| Package                           | Path           | What it is                                                                              |
-| --------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
-| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node, Bun, Deno, and browsers behind a proxy. |
+| Package                           | Path           | What it is                                                                                |
+| --------------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
+| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node and Bun, and for browsers through a proxy. |
 
 The SDK is the base for an MCP server and an agent toolkit. Neither is in the repo yet. The operation registry already carries what they need: each operation's `since` version, its safety class, and a flat input that can become a tool's JSON input.
 
@@ -68,6 +71,11 @@ These steps use 7.1 as the example. Adding a version is a minor release, and nob
 5. Run `node scripts/redmine-env.ts up` and `vp run test:contract` in `packages/sdk`.
 
 Dropping a version that reached end of life is a major release.
+
+## Release and plan
+
+- [docs/releasing.md](docs/releasing.md) explains how a change gets a changeset, how the Version Packages pull request and the npm publish work, and what CI and the weekly workflow check.
+- [docs/roadmap.md](docs/roadmap.md) lists the work that is deferred, such as the MCP server package, and marks what comes next.
 
 ## Where the design lives
 
