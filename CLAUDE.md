@@ -25,3 +25,9 @@ release. Add a tool name to select part of the graph. For example, run
 - [ ] If setup, runtime, or package-manager behavior looks wrong, run `vp env doctor` and include its output when asking for help.
 
 <!--VITE PLUS END-->
+
+# Project rules
+
+- Commit messages follow Conventional Commits (`type(scope): subject`, e.g. `feat(sdk): add conflict kind`, `chore(audit): log decisions`). `.vite-hooks/commit-msg` rejects anything else.
+- A user-facing change to a published package needs a changeset: `vp run changeset`.
+- Never edit `packages/sdk/src/generated/` by hand; change `packages/sdk/generator/` and run `vp run gen` in `packages/sdk`.

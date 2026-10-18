@@ -6,6 +6,7 @@ import { DEFAULT_RETRY, resolveRetry } from "./config.ts";
 import type { CallOptions, ResolvedConfig, RetryPolicy, SdkEvent } from "./config.ts";
 import { RedmineError } from "./errors.ts";
 import { toDownload } from "./files.ts";
+import { createAdminGuard, currentUserOp } from "./impersonation.ts";
 import { createListing } from "./listing.ts";
 import type { FetchPage, ListInput } from "./listing.ts";
 import type { AnyOp, InputOf, ReturnOf } from "./op.ts";
@@ -14,7 +15,7 @@ import { isAvailable } from "./version.ts";
 import { decode, decodePage, interpret, planRequest, retryDecision } from "./wire.ts";
 import type { Plan } from "./wire.ts";
 
-/** One engine per createRedmine(). Owns the only shared mutable state in the SDK: the concurrency limiter. */
+/** One engine per createRedmine(). Owns the only shared mutable state in the SDK: the concurrency limiter and the cached admin check. */
 export interface Engine {
   readonly config: ResolvedConfig;
   /** The single dispatch path. Namespaces, extras, files and the future toolkit all go through it. */
@@ -45,6 +46,9 @@ interface Failed {
 
 export function createEngine(config: ResolvedConfig): Engine {
   const limiter = createLimiter(config.maxConcurrent);
+  const adminGuard = createAdminGuard(async () =>
+    decode(currentUserOp, (await run(currentUserOp, {}, {}, undefined, false)).value, false),
+  );
 
   function emit(event: SdkEvent): void {
     try {
@@ -132,6 +136,7 @@ export function createEngine(config: ResolvedConfig): Engine {
         text: await response.text(),
         requestId: response.headers.get("x-request-id"),
         switchUser: options.as,
+        lockVersion: plan.lockVersion,
       });
       if (outcome.type === "ok") return { response, value: outcome.value };
       return { error: outcome.error, sent, retryAfterMs: retryAfter(response) };
@@ -157,6 +162,18 @@ export function createEngine(config: ResolvedConfig): Engine {
       query,
       ...(options.as === undefined ? {} : { as: options.as }),
     });
+    if (
+      options.as !== undefined &&
+      !(await abortable(adminGuard.isAdmin(), options.signal, op.id))
+    ) {
+      return fail(
+        op,
+        new RedmineError(
+          { kind: "switch_user_rejected", login: options.as, reason: "not_admin" },
+          { op: op.id },
+        ),
+      );
+    }
     const policy = callPolicy(options);
     const timeoutMs = options.timeoutMs ?? config.timeoutMs;
     let retries = 0;
@@ -321,6 +338,21 @@ function retryAfter(response: Response): number | undefined {
   if (!raw) return undefined;
   const ms = /^\d+$/.test(raw) ? Number(raw) * 1000 : Date.parse(raw) - Date.now();
   return Number.isFinite(ms) ? Math.max(0, ms) : undefined;
+}
+
+/** Lets a caller stop waiting on work shared with other callers, without cancelling it for them. */
+function abortable<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  op: string,
+): Promise<T> {
+  if (signal === undefined) return promise;
+  return new Promise((resolve, reject) => {
+    const aborted = (): void => reject(new RedmineError({ kind: "aborted" }, { op }));
+    if (signal.aborted) return aborted();
+    signal.addEventListener("abort", aborted, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+  });
 }
 
 function sleep(ms: number, signal: AbortSignal | undefined, op: string): Promise<void> {

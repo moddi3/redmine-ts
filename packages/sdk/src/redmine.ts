@@ -9,7 +9,7 @@ import { RedmineError } from "./core/errors.ts";
 import { createAttachmentFiles } from "./core/files.ts";
 import type { AttachmentFiles } from "./core/files.ts";
 import type { AnyOp } from "./core/op.ts";
-import { invalidInput, isRecord } from "./core/util.ts";
+import { invalidInput, isRecord, own } from "./core/util.ts";
 import { ops } from "./generated/ops.ts";
 import type { Resources } from "./generated/resources.ts";
 import { SLOTS } from "./generated/slots.ts";
@@ -51,11 +51,20 @@ export const extrasDoNotShadow: [Shadowed<Resources<LatestVersion>, Extras>] ext
 export interface RawRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
-  /** An array is sent as `key[]=a&key[]=b`. For `include=a,b` pass the joined string. */
   query?: Readonly<Record<string, string | number | boolean | readonly (string | number)[]>>;
-  /** A JSON object. Not allowed on GET. Keys must not repeat a `query` key. */
+  /** How an array in `query` is written: `k[]=a&k[]=b` (default), `k=a,b`, or `k=a&k=b`. */
+  arrayFormat?: ArrayFormat;
+  /**
+   * Any JSON value, sent verbatim as application/json: an object, array, string, number, boolean or
+   * null. `undefined` sends no body. A function, symbol, bigint or non-finite number is refused.
+   * Not allowed on GET.
+   */
   body?: unknown;
 }
+
+export type ArrayFormat = "brackets" | "comma" | "repeat";
+
+const ARRAY_STYLES = { brackets: "brackets", comma: "csv", repeat: "repeat" } as const;
 
 export interface Core<V extends RedmineVersion> {
   /** A derived client sharing the engine and its concurrency limit, e.g. `rm.with({ as: "jsmith" })`. */
@@ -186,9 +195,13 @@ function rawOp(raw: RawRequest): AnyOp {
   if (raw.body !== undefined && raw.method === "GET") {
     throw invalidInput("a GET request cannot carry a body");
   }
+  const arrays = own(ARRAY_STYLES, raw.arrayFormat ?? "brackets");
+  if (arrays === undefined) {
+    throw invalidInput('arrayFormat must be "brackets", "comma" or "repeat"');
+  }
   const query = Object.fromEntries(
     Object.entries(raw.query ?? {}).map(
-      ([key, value]) => [key, Array.isArray(value) ? "brackets" : "scalar"] as const,
+      ([key, value]) => [key, Array.isArray(value) ? arrays : "scalar"] as const,
     ),
   );
   return {
@@ -199,7 +212,7 @@ function rawOp(raw: RawRequest): AnyOp {
     query,
     filters: {},
     customFieldFilters: false,
-    body: raw.body === undefined ? null : { kind: "json", envelope: null, siblings: [] },
+    body: raw.body === undefined ? null : { kind: "value", key: bodyKey(query) },
     response: { kind: "item", unwrap: null },
     includes: [],
     since: VERSIONS[0],
@@ -210,14 +223,13 @@ function rawOp(raw: RawRequest): AnyOp {
 }
 
 function rawInput(raw: RawRequest): Record<string, unknown> {
-  if (raw.body !== undefined && !isRecord(raw.body)) {
-    throw invalidInput("request body must be a JSON object");
-  }
-  const body = raw.body ?? {};
   const query = raw.query ?? {};
-  const shared = Object.keys(query).filter((key) => Object.hasOwn(body, key));
-  if (shared.length > 0) {
-    throw invalidInput(`${shared.join(", ")} appear in both query and body`);
-  }
-  return { ...query, ...body };
+  return raw.body === undefined ? { ...query } : { ...query, [bodyKey(query)]: raw.body };
+}
+
+/** The input key that carries the body: "body", moved aside when a query parameter has that name. */
+function bodyKey(query: Readonly<Record<string, unknown>>): string {
+  let key = "body";
+  while (Object.hasOwn(query, key)) key = `_${key}`;
+  return key;
 }

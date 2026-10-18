@@ -157,4 +157,80 @@ describeServers("errors and the raw escape hatch", (server) => {
       await admin.request({ method: "DELETE", path: `issues/${created.issue.id}.json` });
     }
   });
+
+  it("an issue update carrying a stale lock_version is a conflict and changes nothing", async () => {
+    const issue = await admin.issues.create({
+      project_id: server.projectIdentifier,
+      subject: "locked",
+    });
+    try {
+      const error = await admin
+        .request({
+          method: "PUT",
+          path: `issues/${issue.id}.json`,
+          body: { issue: { subject: "stale write", lock_version: 9999 } },
+        })
+        .catch((e: unknown) => e);
+
+      expect(RedmineError.is(error, "conflict")).toBe(true);
+      expect((error as RedmineError).data).toEqual({ kind: "conflict", status: 422 });
+      expect((await admin.issues.get({ issue_id: issue.id })).subject).toBe("locked");
+
+      await admin.issues.update({ issue_id: issue.id, subject: "no lock sent" });
+      expect((await admin.issues.get({ issue_id: issue.id })).subject).toBe("no lock sent");
+    } finally {
+      await admin.issues.delete({ issue_id: issue.id });
+    }
+  });
+
+  it("rm.request PUT with an object body updates, and GET with arrayFormat comma includes both keys", async () => {
+    const issue = await admin.issues.create({
+      project_id: server.projectIdentifier,
+      subject: "raw put",
+    });
+    try {
+      const updated = await admin.request({
+        method: "PUT",
+        path: `issues/${issue.id}.json`,
+        body: { issue: { subject: "raw put done", notes: "via request" } },
+      });
+      const read = (await admin.request({
+        method: "GET",
+        path: `issues/${issue.id}.json`,
+        query: { include: ["journals", "watchers"] },
+        arrayFormat: "comma",
+      })) as { issue: { subject: string; journals: unknown[]; watchers: unknown[] } };
+
+      expect(updated).toBeUndefined();
+      expect(read.issue.subject).toBe("raw put done");
+      expect(read.issue.journals).toHaveLength(1);
+      expect(read.issue.watchers).toMatchObject([{ name: "Redmine Admin" }]);
+    } finally {
+      await admin.issues.delete({ issue_id: issue.id });
+    }
+  });
+
+  it("rm.request array formats reach the server: Redmine reads comma and brackets, and keeps only the last repeated key", async () => {
+    const issue = await admin.issues.create({
+      project_id: server.projectIdentifier,
+      subject: "formats",
+    });
+    try {
+      const keys = async (arrayFormat: "brackets" | "comma" | "repeat") => {
+        const { issue: read } = (await admin.request({
+          method: "GET",
+          path: `issues/${issue.id}.json`,
+          query: { include: ["journals", "watchers"] },
+          arrayFormat,
+        })) as { issue: Record<string, unknown> };
+        return ["journals", "watchers"].filter((key) => key in read);
+      };
+
+      expect(await keys("comma")).toEqual(["journals", "watchers"]);
+      expect(await keys("brackets")).toEqual(["journals", "watchers"]);
+      expect(await keys("repeat")).toEqual(["watchers"]);
+    } finally {
+      await admin.issues.delete({ issue_id: issue.id });
+    }
+  });
 });

@@ -10,7 +10,7 @@ Use it to script a Redmine instance, sync it with another system, or build tools
 npm install @redmine-ts/sdk
 ```
 
-The package is ESM only. It runs on Node 22 or later, Bun, Deno, and in browsers behind a proxy. See [Runtime support](#runtime-support).
+The package is ESM only. It runs on Node 22 or later and on Bun, and in browsers through a proxy. See [Runtime support](#runtime-support).
 
 ## Quickstart
 
@@ -134,22 +134,43 @@ try {
 }
 ```
 
-| `kind`                   | Cause                                                                                                                           |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `validation`             | 422. `data.messages` are in the API user's language. Show them, and do not match on them.                                       |
-| `unauthorized`           | 401.                                                                                                                            |
-| `forbidden`              | 403. A disabled REST API also answers 403.                                                                                      |
-| `not_found`              | 404. `data.hint` explains a likely cause when the client knows one.                                                             |
-| `switch_user_rejected`   | 412 from impersonation. See [Act as another user](#act-as-another-user).                                                        |
-| `not_acceptable`         | 406.                                                                                                                            |
-| `http`                   | Any other status. `data.body` holds up to 2 KiB of the response.                                                                |
-| `protocol`               | The response does not match the operation, such as a body that is not JSON or a page that repeats. `data.hint` names the cause. |
-| `network`                | `fetch` threw.                                                                                                                  |
-| `timeout`                | An attempt ran longer than `timeoutMs`.                                                                                         |
-| `aborted`                | Your `signal` aborted the call.                                                                                                 |
-| `unsupported_version`    | The declared `version` lacks the operation. Nothing was sent.                                                                   |
-| `invalid_input`          | Bad config, an unknown filter, or conflicting paging options. Nothing was sent.                                                 |
-| `transition_not_allowed` | `issues.transition` asked for a status the workflow does not allow.                                                             |
+A stale edit is a `conflict`. Pass the `version` you read when you update a wiki page. If someone saved in between, the update fails and the page keeps the other edit:
+
+```ts
+try {
+  await rm.wiki.update({
+    project_id: "web",
+    wiki_page_title: "Runbook",
+    text: "Restart the worker first.",
+    version: 7,
+  });
+} catch (error) {
+  if (!RedmineError.is(error, "conflict")) throw error;
+  const latest = await rm.wiki.get({ project_id: "web", wiki_page_title: "Runbook" });
+  console.error(`Someone saved version ${latest.version} first, merge your change into it`);
+}
+```
+
+| `kind`                   | Cause                                                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `validation`             | 422. `data.messages` are in the API user's language. Show them, and do not match on them.                                        |
+| `conflict`               | A stale edit. 409 for a wiki `version`, or a 422 with no messages when the request carried `lock_version`. Re-read and merge.    |
+| `unauthorized`           | 401.                                                                                                                             |
+| `forbidden`              | 403. A disabled REST API also answers 403.                                                                                       |
+| `not_found`              | 404. `data.hint` explains a likely cause when the client knows one.                                                              |
+| `switch_user_rejected`   | `data.reason` is `"not_admin"`: the key is not an admin's, so nothing was sent. See [Act as another user](#act-as-another-user). |
+| `switch_user_rejected`   | `data.reason` is `"rejected_by_server"`: Redmine answered 412 because the login is unknown or inactive.                          |
+| `not_acceptable`         | 406.                                                                                                                             |
+| `http`                   | Any other status. `data.body` holds up to 2 KiB of the response.                                                                 |
+| `protocol`               | The response does not match the operation, such as a body that is not JSON or a page that repeats. `data.hint` names the cause.  |
+| `network`                | `fetch` threw.                                                                                                                   |
+| `timeout`                | An attempt ran longer than `timeoutMs`.                                                                                          |
+| `aborted`                | Your `signal` aborted the call.                                                                                                  |
+| `unsupported_version`    | The declared `version` lacks the operation. Nothing was sent.                                                                    |
+| `invalid_input`          | Bad config, an unknown filter, or conflicting paging options. Nothing was sent.                                                  |
+| `transition_not_allowed` | `issues.transition` asked for a status the workflow does not allow.                                                              |
+
+An issue carries a `lock_version` that Redmine checks, but the API never returns it, so most callers never send one. If you pass it through `rm.request`, a stale value is a `conflict` with `data.status` 422. Any other 422 with no messages stays `validation`.
 
 Errors and `onEvent` events never contain credentials. `JSON.stringify(error)` gives `name`, `message`, `op`, `request_id`, and the `data` fields, and leaves out `cause`.
 
@@ -243,11 +264,17 @@ try {
   await asJsmith.issues.update({ issue_id: 42, notes: "Picked up by jsmith." });
 } catch (error) {
   if (!RedmineError.is(error, "switch_user_rejected")) throw error;
-  console.error(`Cannot act as ${error.data.login}: no such active user`);
+  console.error(
+    error.data.reason === "not_admin"
+      ? "This API key does not belong to an admin, so it cannot act as another user"
+      : `Cannot act as ${error.data.login}: no such active user`,
+  );
 }
 ```
 
-Only an admin key can switch users. Redmine ignores the header on a non-admin key and answers as the key's own user, with no error, so check that the key belongs to an admin before you rely on `as`.
+Only an admin key can switch users. Redmine ignores the header on a non-admin key and runs the request as the key's own user, with no error, so a write would be saved under the wrong author. The client guards against this. Before the first request that carries `as`, it sends `GET users/current.json` without `as` and reads `admin` from the answer. If the key is not an admin's, the call fails with `switch_user_rejected` and `data.reason` `"not_admin"`, and nothing impersonated is sent.
+
+That check is one extra request per client. Clients derived through `with` share it, and calls that start at the same time wait for the same check. The answer is kept for the life of the client, so a key that changes role later needs a new client. A check that fails, such as a 401 or a network error, throws that error and is repeated on the next call. `onEvent` reports it as a `getCurrentUser` request. A login that Redmine does not know fails with `"rejected_by_server"`.
 
 A derived client shares the parent's `maxConcurrent` limit. `with` accepts any call option, so `rm.with({ timeoutMs: 5000 })` works too.
 
@@ -286,6 +313,10 @@ Every method takes call options as its second argument: `signal`, `timeoutMs`, `
 
 `rm.request` sends an untyped request with the same auth, retries, timeouts, and errors as typed calls. Use it for plugin endpoints. `path` is relative to `baseUrl`, without a leading slash. The result is the parsed JSON as `unknown`, or `undefined` for an empty body.
 
+`body` takes any JSON value: an object, array, string, number, boolean, or `null`. It is sent as it is, with no envelope. A function, symbol, bigint, or non-finite number fails with `invalid_input`, and so does a body on `GET`. Leave `body` out to send none. The body and `query` are separate, so both can use the same key.
+
+An array in `query` goes out as `k[]=a&k[]=b` by default. Set `arrayFormat` to `"comma"` for `k=a,b` or `"repeat"` for `k=a&k=b`. Redmine itself reads the first two. With a repeated key it keeps only the last value, so use `"repeat"` only for a plugin that expects it.
+
 ```ts
 interface ChecklistItem {
   id: number;
@@ -303,6 +334,21 @@ await rm.request({
   path: "issues/42/checklists.json",
   body: { checklist: { subject: "Update the changelog", is_done: false } },
 });
+
+await rm.request({
+  method: "PUT",
+  path: "issues/42/checklists/order.json",
+  body: [3, 1, 2],
+});
+
+const { boards } = (await rm.request({
+  method: "GET",
+  path: "agile_boards.json",
+  query: { project_ids: [1, 2], archived: false },
+  arrayFormat: "repeat",
+})) as { boards: unknown[] };
+
+console.log(`${boards.length} boards`);
 ```
 
 ## Bring your own fetch
@@ -334,9 +380,11 @@ To use an HTTP proxy in Node, pass the `fetch` from [undici](https://github.com/
 
 ## Runtime support
 
-- Node 22 or later, Bun, and Deno. The client uses only web platform APIs, such as `fetch`, `URL`, `AbortSignal.any`, and web streams.
-- Browsers through a same-origin proxy. Redmine sends no CORS headers, and an API key in a browser is readable by anyone who opens the developer tools. Point `baseUrl` at a proxy on your origin that adds the key on the server.
-- The package has no `node:` imports and no dependencies. It is ESM only, so load it with `import`, not `require`.
+- Node 22 and 24. CI runs the unit tests on both, and runs a smoke test of the built package on Node 24 against real Redmine 6.1 and 7.0 servers.
+- Bun. CI runs the same smoke test under the latest Bun release.
+- Browsers through an injected `fetch`, untested. Redmine sends no CORS headers, and an API key in a browser is readable by anyone who opens the developer tools. Pass a `fetch` that sends each request to a proxy on your origin, and let the proxy add the key on the server.
+- Deno is not a target, and CI does not run on it.
+- The package is ESM only, so load it with `import`, not `require`. It has no `node:` imports and no dependencies. The client uses only web platform APIs, such as `fetch`, `URL`, `AbortSignal.any`, and web streams.
 
 ## Namespaces
 
@@ -369,6 +417,12 @@ Methods marked 7.0+ exist since Redmine 7.0. A client declared as `version: "6.1
 | `repositories`    | `addRelatedIssue`, `removeRelatedIssue`                                                    |
 
 Some Redmine endpoints have no method because another method does the same job. For example, `GET /projects/{id}/issues.json` is `issues.list({ where: { project_id } })`. `rm.request` reaches them if you need them.
+
+## Acknowledgements
+
+The types and operations in this package are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi), an unofficial OpenAPI 3.0.3 description of the Redmine REST API released under the MIT license. This release uses its tags `6.1.3-r1` and `7.0.1-r1`.
+
+If a field or operation looks wrong, the cause is most likely in the spec. Please report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues), and open an issue at [moddi3/redmine-ts/issues](https://github.com/moddi3/redmine-ts/issues) so the SDK picks up the fix.
 
 ## License
 

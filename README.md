@@ -1,12 +1,21 @@
 # redmine-ts
 
+[![CI](https://github.com/moddi3/redmine-ts/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moddi3/redmine-ts/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@redmine-ts/sdk)](https://www.npmjs.com/package/@redmine-ts/sdk)
+
 TypeScript tooling for the Redmine REST API.
 
-| Package                           | Path           | What it is                                                                              |
-| --------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
-| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node, Bun, Deno, and browsers behind a proxy. |
+| Package                           | Path           | What it is                                                                                |
+| --------------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
+| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node and Bun, and for browsers through a proxy. |
 
 The SDK is the base for an MCP server and an agent toolkit. Neither is in the repo yet. The operation registry already carries what they need: each operation's `since` version, its safety class, and a flat input that can become a tool's JSON input.
+
+## Built on redmine-openapi
+
+The SDK's types, operation registry, and namespaces are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi). It is an unofficial OpenAPI 3.0.3 description of the Redmine REST API, tested against live Redmine servers and released under the MIT license. Without it, this project would have had to describe roughly 94 operations and 39 schemas by hand.
+
+This repo vendors pinned tags of the spec in [spec/redmine-openapi/](spec/redmine-openapi/), currently `6.1.3-r1` and `7.0.1-r1`, together with its license. [spec/README.md](spec/README.md) explains how the copy is updated. The generator's overlay only records naming and visibility decisions for this SDK. It does not patch the spec, so a wrong field or operation belongs upstream: report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues).
 
 ## Set up
 
@@ -39,6 +48,10 @@ Run these from `packages/sdk`:
 
 Never edit `src/generated/` by hand. Change the generator in `packages/sdk/generator/` and run `vp run gen`.
 
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): subject`, for example `fix(sdk): retry 503 on GET only`. The `commit-msg` hook in `.vite-hooks/` rejects any other first line. A user-facing change also needs a changeset (`vp run changeset`), which drives the version bump and the changelog. See [docs/releasing.md](docs/releasing.md).
+
+CI also lints the workflows with [jactionlint](https://github.com/jdx/jactionlint), which runs actionlint's checks plus security and pinning rules: every action is pinned to a commit SHA, and Dependabot updates the pins after a 7-day cooldown. To run it locally: `docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/jdx/jactionlint:2.2.0`, or `mise use jactionlint` and `jactionlint`. `--online --fix` pins a newly added action.
+
 ## Run real Redmine servers
 
 Contract tests run against Redmine 7.0, Redmine 6.1, and Redmine 7.0 under a `/redmine` subpath, all in Docker. Run these from the repo root:
@@ -62,6 +75,11 @@ These steps use 7.1 as the example. Adding a version is a minor release, and nob
 5. Run `node scripts/redmine-env.ts up` and `vp run test:contract` in `packages/sdk`.
 
 Dropping a version that reached end of life is a major release.
+
+## Release and plan
+
+- [docs/releasing.md](docs/releasing.md) explains how a change gets a changeset, how the Version Packages pull request and the npm publish work, and what CI and the weekly workflow check.
+- [docs/roadmap.md](docs/roadmap.md) lists the work that is deferred, such as the MCP server package, and marks what comes next.
 
 ## Where the design lives
 

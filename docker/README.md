@@ -19,7 +19,7 @@ From the repo root:
 | `6.1`         | `redmine61`         | 6.1     | `http://localhost:3061`         |
 | `7.0-subpath` | `redmine70-subpath` | 7.0     | `http://localhost:3071/redmine` |
 
-The subpath server catches clients that build URLs with `new URL('/issues.json', base)`, which drops `/redmine/`. The image's `rails server` ignores `RAILS_RELATIVE_URL_ROOT` for routing, so `docker/subpath.ru` mounts the app under it.
+The subpath server catches clients that build URLs with `new URL('/issues.json', base)`, which drops `/redmine/`. The image's `rails server` ignores `RAILS_RELATIVE_URL_ROOT` for routing, so a small config.ru, inlined in `docker/compose.yaml` as a compose config, mounts the app under it. Nothing in the compose file references a host path, so `up` from any checkout or worktree yields the same containers instead of recreating them, and the seed sets fixed API keys.
 
 ## Seeded state
 

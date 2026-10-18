@@ -3,11 +3,14 @@ import { createRedmine } from "../../src/redmine.ts";
 import {
   BASE_URL,
   empty,
+  exceptGuard,
   failure,
   fakeFetch,
   hang,
   html,
+  isGuardCheck,
   json,
+  keyOf,
   sequence,
   sleep,
 } from "./fixtures/fake-fetch.ts";
@@ -85,33 +88,63 @@ describe("namespaces", () => {
 
 describe("rm.with", () => {
   test("a derived client carries its defaults and the original does not", async () => {
-    const { rm, requests } = client(() => empty());
+    const { rm, requests } = client(keyOf("admin", () => empty()));
     await rm.with({ as: "jsmith" }).issues.update({ issue_id: 1, notes: "n" });
     await rm.issues.update({ issue_id: 1, notes: "n" });
 
-    expect(requests[0]?.headers.get("x-redmine-switch-user")).toBe("jsmith");
-    expect(requests[1]?.headers.has("x-redmine-switch-user")).toBe(false);
+    const sent = exceptGuard(requests);
+    expect(sent[0]?.headers.get("x-redmine-switch-user")).toBe("jsmith");
+    expect(sent[1]?.headers.has("x-redmine-switch-user")).toBe(false);
   });
 
   test("per-call options beat the derived defaults, and derivations compose", async () => {
-    const { rm, requests } = client(() => empty());
+    const { rm, requests } = client(keyOf("admin", () => empty()));
     const derived = rm.with({ as: "a" }).with({ timeoutMs: 1000 });
     await derived.issues.update({ issue_id: 1 }, { as: "b" });
     await derived.issues.update({ issue_id: 1 });
 
-    expect(requests.map((r) => r.headers.get("x-redmine-switch-user"))).toEqual(["b", "a"]);
+    expect(exceptGuard(requests).map((r) => r.headers.get("x-redmine-switch-user"))).toEqual([
+      "b",
+      "a",
+    ]);
+  });
+
+  test("the original and every derived client share one admin check", async () => {
+    const { rm, requests } = client(keyOf("admin", () => empty()));
+    await Promise.all([
+      rm.with({ as: "a" }).issues.update({ issue_id: 1 }),
+      rm.with({ as: "b" }).with({ timeoutMs: 1000 }).issues.update({ issue_id: 2 }),
+      rm.issues.update({ issue_id: 3 }, { as: "c" }),
+    ]);
+
+    expect(requests.filter(isGuardCheck)).toHaveLength(1);
+    expect(exceptGuard(requests)).toHaveLength(3);
+  });
+
+  test("a derived client on a non-admin key is refused, and the original still works", async () => {
+    const { rm, requests } = client(keyOf("member", () => empty()));
+    const error = await failure(rm.with({ as: "jsmith" }).issues.update({ issue_id: 1 }));
+    await rm.issues.update({ issue_id: 1, notes: "as myself" });
+
+    expect(error.data).toEqual({
+      kind: "switch_user_rejected",
+      login: "jsmith",
+      reason: "not_admin",
+    });
+    expect(exceptGuard(requests)).toHaveLength(1);
+    expect(exceptGuard(requests)[0]?.headers.has("x-redmine-switch-user")).toBe(false);
   });
 
   test("derived clients share the original's concurrency limit", async () => {
     let inFlight = 0;
     let peak = 0;
     const { rm } = client(
-      async () => {
+      keyOf("admin", async () => {
         peak = Math.max(peak, ++inFlight);
         await sleep(5);
         inFlight--;
         return json({ issue });
-      },
+      }),
       { maxConcurrent: 1 },
     );
     const jsmith = rm.with({ as: "jsmith" });
@@ -143,6 +176,13 @@ describe("rm.request", () => {
     expect(request?.headers.get("x-redmine-api-key")).toBe("secret-key");
   });
 
+  test("sends a query parameter named `where` as a plain parameter, not as filters", async () => {
+    const { rm, requests } = client(() => json({ results: [] }));
+    await rm.request({ method: "GET", path: "plugin/search.json", query: { where: "title" } });
+
+    expect(requests[0]?.url.searchParams.get("where")).toBe("title");
+  });
+
   test("sends a JSON body as given and decodes an empty reply to undefined", async () => {
     const { rm, requests } = client(() => empty());
     const result = await rm.request({
@@ -157,14 +197,16 @@ describe("rm.request", () => {
   });
 
   test("shares the pipeline: errors, retries and impersonation defaults", async () => {
-    const { rm, requests } = client(sequence(empty(503), json({ errors: ["No"] }, 422)));
+    const { rm, requests } = client(
+      keyOf("admin", sequence(empty(503), json({ errors: ["No"] }, 422))),
+    );
     const error = await failure(
       rm.with({ as: "jsmith" }).request({ method: "GET", path: "x.json" }),
     );
 
     expect(error.data).toEqual({ kind: "validation", status: 422, messages: ["No"] });
-    expect(requests).toHaveLength(2);
-    expect(requests[0]?.headers.get("x-redmine-switch-user")).toBe("jsmith");
+    expect(exceptGuard(requests)).toHaveLength(2);
+    expect(exceptGuard(requests)[0]?.headers.get("x-redmine-switch-user")).toBe("jsmith");
   });
 
   test("a non-JSON reply is protocol/non_json", async () => {
@@ -185,15 +227,143 @@ describe("rm.request", () => {
     ["a protocol-relative URL", { method: "GET", path: "//evil.example/x.json" }],
     ["a path climbing out of the subpath", { method: "GET", path: "../other/x.json" }],
     ["a body on GET", { method: "GET", path: "x.json", body: { a: 1 } }],
-    ["a non-object body", { method: "POST", path: "x.json", body: [1] }],
-    [
-      "a key in both query and body",
-      { method: "POST", path: "x.json", query: { a: 1 }, body: { a: 2 } },
-    ],
+    ["a body on GET even when it is null", { method: "GET", path: "x.json", body: null }],
+    ["an unknown arrayFormat", { method: "GET", path: "x.json", arrayFormat: "semicolon" }],
   ])("refuses %s before any request", async (_name, raw) => {
     const { rm, requests } = client(() => json({}));
 
     expect((await failure(rm.request(raw))).kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+});
+
+describe("rm.request bodies", () => {
+  test.each([
+    ["an object", { card: { title: "x", done: false } }],
+    ["an array", [{ id: 1 }, { id: 2 }]],
+    ["an empty array", []],
+    ["a string", "plain text"],
+    ["an empty string", ""],
+    ["a number", 0],
+    ["true", true],
+    ["false", false],
+    ["null", null],
+  ])("%s goes out verbatim as JSON on POST, PUT and PATCH", async (_name, body) => {
+    const { rm, requests } = client(() => empty());
+    for (const method of ["POST", "PUT", "PATCH"] as const) {
+      await rm.request({ method, path: "plugin/x.json", body });
+    }
+
+    expect(requests.map((r) => r.method)).toEqual(["POST", "PUT", "PATCH"]);
+    for (const request of requests) {
+      expect(request.text()).toBe(JSON.stringify(body));
+      expect(request.headers.get("content-type")).toBe("application/json");
+    }
+  });
+
+  test("no body sends no Content-Type, and an explicit undefined is the same", async () => {
+    const { rm, requests } = client(() => empty());
+    await rm.request({ method: "POST", path: "plugin/x.json" });
+    await rm.request({ method: "POST", path: "plugin/x.json", body: undefined });
+
+    for (const request of requests) {
+      expect(request.bytes).toHaveLength(0);
+      expect(request.headers.has("content-type")).toBe(false);
+    }
+  });
+
+  test.each([
+    ["a function", () => 1],
+    ["a symbol", Symbol("s")],
+    ["a bigint", 1n],
+    ["NaN", Number.NaN],
+    ["an object holding a function", { run: () => 1 }],
+  ])("refuses %s as a body before any request", async (_name, body) => {
+    const { rm, requests } = client(() => empty());
+    const error = await failure(rm.request({ method: "POST", path: "x.json", body }));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a body and a query may use the same key: they are separate places on the wire", async () => {
+    const { rm, requests } = client(() => empty());
+    await rm.request({ method: "PUT", path: "x.json", query: { id: 1 }, body: { id: 2 } });
+
+    expect(requests[0]?.url.searchParams.get("id")).toBe("1");
+    expect(requests[0]?.json()).toEqual({ id: 2 });
+  });
+
+  test("a query parameter named body does not collide with the body", async () => {
+    const { rm, requests } = client(() => empty());
+    await rm.request({ method: "POST", path: "x.json", query: { body: "q" }, body: [1] });
+
+    expect(requests[0]?.url.searchParams.get("body")).toBe("q");
+    expect(requests[0]?.json()).toEqual([1]);
+  });
+
+  test("a raw body that carries lock_version turns an empty 422 into a conflict", async () => {
+    const { rm } = client(() => json({ errors: [] }, 422));
+    const stale = await failure(
+      rm.request({ method: "PUT", path: "issues/1.json", body: { issue: { lock_version: 0 } } }),
+    );
+    const plain = await failure(
+      rm.request({ method: "PUT", path: "issues/1.json", body: { issue: { subject: "x" } } }),
+    );
+
+    expect(stale.data).toEqual({ kind: "conflict", status: 422 });
+    expect(plain.data).toEqual({ kind: "validation", status: 422, messages: [] });
+  });
+});
+
+describe("rm.request array query formats", () => {
+  const wire = async (
+    arrayFormat: "brackets" | "comma" | "repeat" | undefined,
+    query: Record<string, string | number | boolean | readonly (string | number)[]>,
+  ): Promise<string> => {
+    const { rm, requests } = client(() => json({}));
+    await rm.request({
+      method: "GET",
+      path: "x.json",
+      query,
+      ...(arrayFormat === undefined ? {} : { arrayFormat }),
+    });
+    return decodeURIComponent(requests[0]?.url.search ?? "");
+  };
+
+  test.each([
+    ["brackets", "?k[]=a&k[]=b"],
+    ["comma", "?k=a,b"],
+    ["repeat", "?k=a&k=b"],
+  ] as const)("%s writes an array as %s", async (format, expected) => {
+    expect(await wire(format, { k: ["a", "b"] })).toBe(expected);
+  });
+
+  test("brackets is the default", async () => {
+    expect(await wire(undefined, { k: ["a", "b"] })).toBe("?k[]=a&k[]=b");
+  });
+
+  test.each(["brackets", "comma", "repeat"] as const)(
+    "%s leaves scalars alone, joins numbers and omits an empty array",
+    async (format) => {
+      const query = { n: [1, 2], one: ["x"], s: "v", b: true, none: [] };
+      const text = await wire(format, query);
+
+      expect(text).toContain("s=v&b=true");
+      expect(text).not.toContain("none");
+      expect(text).toContain(
+        { brackets: "n[]=1&n[]=2&one[]=x", comma: "n=1,2&one=x", repeat: "n=1&n=2&one=x" }[format],
+      );
+    },
+  );
+
+  test("the path guard still holds with an array format", async () => {
+    const { rm, requests } = client(() => json({}));
+    const error = await failure(
+      rm.request({ method: "GET", path: "/x.json", query: { k: ["a"] }, arrayFormat: "comma" }),
+    );
+
+    expect(error.kind).toBe("invalid_input");
     expect(requests).toHaveLength(0);
   });
 });
@@ -240,12 +410,12 @@ describe("issues.transition", () => {
   });
 
   test("applies the derived client's impersonation to both requests", async () => {
-    const { rm, requests } = client((request) =>
-      request.method === "GET" ? issueWith(1, [2]) : empty(),
+    const { rm, requests } = client(
+      keyOf("admin", (request) => (request.method === "GET" ? issueWith(1, [2]) : empty())),
     );
     await rm.with({ as: "jsmith" }).issues.transition({ issue_id: 42, status_id: 2 });
 
-    expect(requests.map((r) => r.headers.get("x-redmine-switch-user"))).toEqual([
+    expect(exceptGuard(requests).map((r) => r.headers.get("x-redmine-switch-user"))).toEqual([
       "jsmith",
       "jsmith",
     ]);

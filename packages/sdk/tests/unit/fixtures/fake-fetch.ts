@@ -70,6 +70,26 @@ export function hang(request: Recorded): Promise<Response> {
   });
 }
 
+/** The impersonation guard's own check: users/current without the switch header. */
+export const isGuardCheck = (request: Recorded): boolean =>
+  request.url.pathname.endsWith("/users/current.json") &&
+  !request.headers.has("x-redmine-switch-user");
+
+/**
+ * Answers the guard's check for a key that belongs to an admin or to a plain member, and hands every
+ * other request to `respond` with a call count that does not include the check.
+ */
+export function keyOf(role: "admin" | "member", respond: Responder): Responder {
+  let forwarded = 0;
+  return (request) =>
+    isGuardCheck(request)
+      ? json({ user: { id: 1, login: "key-owner", admin: role === "admin" } })
+      : respond(request, ++forwarded);
+}
+
+export const exceptGuard = (requests: readonly Recorded[]): Recorded[] =>
+  requests.filter((request) => !isGuardCheck(request));
+
 export const BASE_URL = "https://tracker.example.com/redmine";
 
 export interface TestEngine extends Fake {

@@ -35,7 +35,7 @@ describeServers("wiki pages and URL encoding", (server) => {
     );
   });
 
-  it("an update against a stale version is a conflict the SDK reports as http 409", async () => {
+  it("an update against a stale version is a conflict and leaves the page alone", async () => {
     const project = await freshProject(admin, cleanup, "wiki");
     const wiki_page_title = unique("Locked");
     await admin.wiki.update({ project_id: project.id, wiki_page_title, text: "v1" });
@@ -45,8 +45,8 @@ describeServers("wiki pages and URL encoding", (server) => {
       .update({ project_id: project.id, wiki_page_title, text: "stale", version: 1 })
       .catch((e: unknown) => e);
 
-    expect(RedmineError.is(error, "http")).toBe(true);
-    expect((error as RedmineError).data).toMatchObject({ status: 409 });
+    expect(RedmineError.is(error, "conflict")).toBe(true);
+    expect((error as RedmineError).data).toEqual({ kind: "conflict", status: 409 });
     expect((await admin.wiki.get({ project_id: project.id, wiki_page_title })).text).toBe("v2");
   });
 
