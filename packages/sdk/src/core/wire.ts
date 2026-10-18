@@ -36,7 +36,8 @@ export function planRequest(
   const params = url.searchParams;
   for (const [key, style] of Object.entries(op.query))
     appendQuery(params, op, key, style, input[key]);
-  if (input.where !== undefined) {
+  // A raw request may have a real query parameter named `where`; only an op without one has filters there.
+  if (input.where !== undefined && !Object.hasOwn(op.query, "where")) {
     if (!isRecord(input.where)) throw invalidInput("`where` must be an object", op.id);
     for (const [key, value] of Object.entries(compileWhere(op, input.where)))
       params.set(key, value);

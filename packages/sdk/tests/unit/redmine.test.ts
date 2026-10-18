@@ -176,6 +176,13 @@ describe("rm.request", () => {
     expect(request?.headers.get("x-redmine-api-key")).toBe("secret-key");
   });
 
+  test("sends a query parameter named `where` as a plain parameter, not as filters", async () => {
+    const { rm, requests } = client(() => json({ results: [] }));
+    await rm.request({ method: "GET", path: "plugin/search.json", query: { where: "title" } });
+
+    expect(requests[0]?.url.searchParams.get("where")).toBe("title");
+  });
+
   test("sends a JSON body as given and decodes an empty reply to undefined", async () => {
     const { rm, requests } = client(() => empty());
     const result = await rm.request({
