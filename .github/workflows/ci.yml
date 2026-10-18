@@ -37,6 +37,17 @@ jobs:
       - run: vp run gen:check
         working-directory: packages/sdk
 
+  # release.yml and weekly.yml run rarely, so a bad expression there would only show at release time.
+  # The image bundles shellcheck, which also checks every run: script.
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+
   contract:
     name: contract and runtime smoke
     runs-on: ubuntu-latest
