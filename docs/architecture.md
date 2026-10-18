@@ -8,7 +8,7 @@ We want a typed, zero-dependency, runtime-agnostic Redmine client that a later M
 
 1. The server never reports its version.
 2. The community OpenAPI spec (`spec/redmine-openapi/`, pinned tags) is the only structured source of truth.
-3. Redmine has many behaviours a naive client gets wrong. Subpath base URLs get dropped, PUT and DELETE return empty bodies, 422 returns localized error arrays, offsets drift, uploads take two steps, impersonation fails with a 412, and `hours` sometimes arrives as `"8/1"`.
+3. Redmine has many behaviours a naive client gets wrong. Subpath base URLs get dropped, PUT and DELETE return empty bodies, 422 returns localized error arrays, offsets drift, uploads take two steps, impersonation fails with a 412 (or is silently ignored on a non-admin key), and `hours` sometimes arrives as `"8/1"`.
 
 ## Usage
 
@@ -73,11 +73,12 @@ Adding Redmine 7.1 takes five steps. Run `spec/fetch.sh 7.1.0-r1`, then `vp run 
 
 ### Data structures
 
-The central type is `Op<Id, In, Ret>` (`core/op.ts`). It is plain data: method, relative path with `.json` baked in, path params, query styles (`scalar`, `csv`, `brackets`), filter specs, body (`json` with `envelope` and `siblings`, or `binary`), response shape (`item`, `list`, `empty`, `binary`), includes, `since`/`until`, `safety` and `stability`. `In` and `Ret` are phantom types.
+The central type is `Op<Id, In, Ret>` (`core/op.ts`). It is plain data: method, relative path with `.json` baked in, path params, query styles (`scalar`, `csv`, `brackets`, `repeat`), filter specs, body (`json` with `envelope` and `siblings`, `binary`, or `value`), response shape (`item`, `list`, `empty`, `binary`), includes, `since`/`until`, `safety` and `stability`. `In` and `Ret` are phantom types.
 
 - `In` is the canonical flat input: path params, query keys, body fields (inner envelope fields plus siblings), and `where` for filters. It was measured collision-free across all 94 operations, and the generator asserts it.
 - `Ret` is `Promise<T>`, `Listing<T>`, `Promise<void>` or `Promise<Download>`.
 - Envelopes and the `{ errors: [...] }` body never reach the public API.
+- `repeat` (`k=a&k=b`) and the `value` body (any JSON value from `input[key]`, sent verbatim) exist only for `rm.request`. The generator never emits them, which is why they were added to the contract without touching generated code.
 
 Every method is `rm.<namespace>.<verb>(input, options?)`. The input is the same object a tool's JSON input will be, so the later toolkit needs no translation layer for JSON operations.
 
@@ -97,17 +98,18 @@ The engine never imports generated operation data, so it is tested against a han
 
 Hand-written resource logic lives only in `Extras` (`redmine.ts`): `issues.transition` and `attachments.upload/download/thumbnail`. A type check fails the build if an extra shadows a generated method.
 
-Some scoped variants have a global sibling that takes the same scope as a filter or body field. Examples are `getIssuesByProject` next to `getIssues?project_id=`, `createIssueUnderProject` next to `createIssue`, and `getTimeEntriesByIssue`. These are hidden from namespaces so that each task has one way to do it. They stay in the registry. `rm.request()` is the untyped escape hatch for endpoints the spec does not cover, such as plugins.
+Some scoped variants have a global sibling that takes the same scope as a filter or body field. Examples are `getIssuesByProject` next to `getIssues?project_id=`, `createIssueUnderProject` next to `createIssue`, and `getTimeEntriesByIssue`. These are hidden from namespaces so that each task has one way to do it. They stay in the registry. `rm.request()` is the untyped escape hatch for endpoints the spec does not cover, such as plugins. It builds an unregistered `Op` per call, so it shares the whole pipeline. Its `body` is any JSON value (the `value` body kind), validated at that boundary: a function, symbol, bigint or non-finite number is `invalid_input`, because `JSON.stringify` would drop or null them silently. Its `arrayFormat` (`brackets` by default, `comma`, `repeat`) picks the query style for array values. The body travels under a key of its own, so body and query keys never collide.
 
 ### Core behaviour
 
 - **URL.** The base always ends in `/`, and operation paths never start with one, so `new URL(path, base)` keeps `/redmine/`. Userinfo in `baseUrl` is rejected.
 - **Auth.** The options are `{ apiKey }`, `{ basic }` and `{ bearer: string | { token, refresh } }`. The API key goes only in `X-Redmine-API-Key`. Bearer refresh is single-flight across concurrent 401s, with one replay, and only when the body is replayable.
 - **Errors.** One `RedmineError` carries `data`, a discriminated union on `kind`. `RedmineError.is(e, kind)` narrows. The 422 messages are raw and localized, so callers display them and never parse them. `toJSON` drops `cause`.
+- **Conflicts.** `conflict` is a stale edit, and `wire.interpret` is its only classifier. A 409 is always a conflict (observed on a stale wiki `version`, with an empty body). Redmine answers a stale issue `lock_version` with 422 and `{"errors":[]}`, which is indistinguishable from an empty validation failure by the response alone, so a 422 with no messages is a conflict only when the request body carried `lock_version`. `planRequest` records that fact on the `Plan` (`lockVersion`, top level or inside the envelope) and the engine hands it to `interpret`. Any other 422 stays `validation`. The API never returns `lock_version`, so callers rarely send it. Observed in `.audit/probes/conflicts.out.txt`.
 - **Retries.** A 429 retries any method. 502, 503, 504, network errors and timeouts retry only `read` (GET) and `idempotent` (DELETE) operations. POST, PUT and PATCH never retry, because a replayed PUT with notes duplicates a journal. Streamed bodies never retry. Backoff is full-jitter exponential and honours `Retry-After` up to a cap.
 - **Timeouts and cancellation.** Each attempt runs under `AbortSignal.any([caller, AbortSignal.timeout(ms)])`. A timed-out signal maps to `timeout`, the caller's signal to `aborted`. For downloads, the timeout and the concurrency slot cover the request until headers arrive. The body stream then belongs to the caller.
 - **Empty bodies.** Empty 2xx text decodes to `undefined`. Bodyless requests send no Content-Type. A non-JSON 2xx on a JSON operation is `protocol/non_json`, with a hint about login pages and wrong subpaths.
-- **Impersonation.** Per call, `{ as }` becomes `X-Redmine-Switch-User`. `rm.with({ as })` derives a client that shares the engine. A 412 is `switch_user_rejected`.
+- **Impersonation.** Per call, `{ as }` becomes `X-Redmine-Switch-User`. `rm.with({ as })` derives a client that shares the engine. Redmine ignores the header on a non-admin key and runs the request as the key's own user, so a write is silently misattributed (`.audit/probes/redmine-behavior.out.txt`). The engine therefore refuses before sending. The first request that carries `as` waits for one `GET users/current.json`, sent without `as`, and reads `admin` from it (`core/impersonation.ts`). A non-admin key throws `switch_user_rejected` with `reason: "not_admin"` and the impersonated request is never sent. The verdict is cached per engine, so derived clients share it, and concurrent first calls share one in-flight check. A failed check (401, network, timeout) rejects with its own error and is not cached, so it is never reported as `not_admin`. A caller that aborts stops waiting on the shared check without cancelling it for the others. Bad input is refused before the check is spent. Redmine's own 412 on an unknown or inactive login is `switch_user_rejected` with `reason: "rejected_by_server"`, and only when the call sent a switch header: a 412 without one is a plain `http` error. The check shows up in `onEvent` as a `getCurrentUser` request, and the cost is one extra request per engine. The verdict is not refreshed when the key's role changes later.
 - **Concurrency.** A FIFO limiter (default 4) is the SDK's only shared mutable state. It is released during backoff sleeps.
 - **Observability.** One `onEvent` callback receives request, response, retry and error events, which are redacted by construction.
 
@@ -122,7 +124,7 @@ Some scoped variants have a global sibling that takes the same scope as a filter
 - **Unit tests.** They use a fake `fetch` with a hand-made registry, so the engine is tested without the generator. They assert observable behaviour: the exact URL including the subpath, headers (never a `key=` query), body envelopes, retry counts per safety class, decoded output and error kinds.
 - **Type tests.** `tests/types/*.ts` uses `@ts-expect-error` for version gating, include narrowing and filter operator capabilities. `vp check` typechecks them.
 - **Generator tests.** They assert the known 6.1 to 7.0 drift, zero input collisions, and the requiredness rule.
-- **Contract tests.** These run against real Docker Redmine 7.0, 6.1, and 7.0 under `/redmine` (`node scripts/redmine-env.ts up`). They cover CRUD for issues, projects, users and time entries, pagination, filters, upload with attach and download, include narrowing, 404/422/412 errors, and version gating against the real 6.1 server.
+- **Contract tests.** These run against real Docker Redmine 7.0, 6.1, and 7.0 under `/redmine` (`node scripts/redmine-env.ts up`). They cover CRUD for issues, projects, users and time entries, pagination, filters, upload with attach and download, include narrowing, 404/409/422/412 errors, the impersonation guard against an admin and a non-admin key, and version gating against the real 6.1 server.
 
 ### Agent toolkit and MCP (later)
 

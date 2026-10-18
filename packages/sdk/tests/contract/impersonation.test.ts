@@ -1,6 +1,6 @@
 import { expect, it } from "vite-plus/test";
 import { RedmineError } from "../../src/index.ts";
-import { cleanups, clientFor, describeServers, unique } from "./helpers.ts";
+import { cleanups, clientFor, describeServers, recorder, unique } from "./helpers.ts";
 
 describeServers("impersonation", (server) => {
   const admin = clientFor(server);
@@ -44,13 +44,59 @@ describeServers("impersonation", (server) => {
       .catch((e: unknown) => e);
 
     expect(RedmineError.is(error, "switch_user_rejected")).toBe(true);
-    expect((error as RedmineError).data).toMatchObject({ status: 412, login: "nobody" });
+    expect((error as RedmineError).data).toEqual({
+      kind: "switch_user_rejected",
+      reason: "rejected_by_server",
+      status: 412,
+      login: "nobody",
+    });
   });
 
-  it("observed: a non-admin key sending { as } is not rejected, the header is ignored and the key's own user answers", async () => {
-    const jsmith = clientFor(server, "user");
+  it('a non-admin key with { as: "admin" } is refused as not_admin and nothing is created', async () => {
+    const seen = recorder();
+    const jsmith = clientFor(server, "user", { onEvent: seen.onEvent });
+    const subject = unique("misattributed");
+    const control = await jsmith.issues.create({
+      project_id: server.projectIdentifier,
+      subject: unique("own"),
+    });
+    cleanup.add(() => admin.issues.delete({ issue_id: control.id }));
+    seen.events.length = 0;
 
-    expect((await jsmith.users.current({}, { as: "admin" })).login).toBe("jsmith");
-    expect((await jsmith.users.current({}, { as: "nobody" })).login).toBe("jsmith");
+    const error = await jsmith.issues
+      .create({ project_id: server.projectIdentifier, subject }, { as: "admin" })
+      .catch((e: unknown) => e);
+
+    expect(RedmineError.is(error, "switch_user_rejected")).toBe(true);
+    expect((error as RedmineError).data).toEqual({
+      kind: "switch_user_rejected",
+      login: "admin",
+      reason: "not_admin",
+    });
+    expect(seen.requests().map((r) => r.method)).toEqual(["GET"]);
+    const created = await admin.issues
+      .list({ where: { project_id: server.projectIdentifier, status_id: "any", subject } })
+      .all();
+    expect(created).toEqual([]);
+  });
+
+  it("the verdict is cached: a second impersonated call on the non-admin client sends nothing", async () => {
+    const seen = recorder();
+    const jsmith = clientFor(server, "user", { onEvent: seen.onEvent });
+
+    await jsmith.users.current({}, { as: "admin" }).catch(() => undefined);
+    await jsmith.users.current({}, { as: "admin" }).catch(() => undefined);
+
+    expect(seen.requests()).toHaveLength(1);
+  });
+
+  it('an admin key with { as: "jsmith" } still acts as jsmith after one extra check request', async () => {
+    const seen = recorder();
+    const client = clientFor(server, "admin", { onEvent: seen.onEvent });
+
+    expect((await client.users.current({}, { as: "jsmith" })).login).toBe("jsmith");
+    expect((await client.users.current({}, { as: "jsmith" })).login).toBe("jsmith");
+
+    expect(seen.requests()).toHaveLength(3);
   });
 });

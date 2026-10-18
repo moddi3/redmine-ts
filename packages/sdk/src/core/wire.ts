@@ -18,6 +18,8 @@ export interface Plan {
   readonly body: BodyInit | undefined;
   /** False for ReadableStream bodies: no retry and no 401 replay. */
   readonly replayable: boolean;
+  /** The JSON body carried `lock_version`, which decides what an empty-errors 422 means. */
+  readonly lockVersion: boolean;
 }
 
 export function planRequest(
@@ -50,7 +52,14 @@ export function planRequest(
   const { body } = op;
   if (body === null) {
     rejectLeftovers(op, input, owned);
-    return { method: op.method, url, headers, body: undefined, replayable: true };
+    return {
+      method: op.method,
+      url,
+      headers,
+      body: undefined,
+      replayable: true,
+      lockVersion: false,
+    };
   }
   if (body.kind === "binary") {
     owned.add(body.key);
@@ -69,6 +78,21 @@ export function planRequest(
       headers,
       body: source,
       replayable: !(source instanceof ReadableStream),
+      lockVersion: false,
+    };
+  }
+  if (body.kind === "value") {
+    owned.add(body.key);
+    rejectLeftovers(op, input, owned);
+    const value = input[body.key];
+    headers["Content-Type"] = "application/json";
+    return {
+      method: op.method,
+      url,
+      headers,
+      body: jsonText(op, value),
+      replayable: true,
+      lockVersion: carriesLockVersion(value),
     };
   }
 
@@ -81,7 +105,42 @@ export function planRequest(
   const payload =
     body.envelope === null ? { ...fields, ...siblings } : { [body.envelope]: fields, ...siblings };
   headers["Content-Type"] = "application/json";
-  return { method: op.method, url, headers, body: JSON.stringify(payload), replayable: true };
+  return {
+    method: op.method,
+    url,
+    headers,
+    body: JSON.stringify(payload),
+    replayable: true,
+    lockVersion: carriesLockVersion(payload),
+  };
+}
+
+/** `lock_version` at the top of the payload or inside its envelope (`{ issue: { lock_version } }`). */
+function carriesLockVersion(payload: unknown): boolean {
+  const has = (value: unknown): boolean => isRecord(value) && value.lock_version !== undefined;
+  return has(payload) || (isRecord(payload) && Object.values(payload).some(has));
+}
+
+/** JSON.stringify would silently drop a function and turn NaN into null, so those are refused instead. */
+function jsonText(op: AnyOp, value: unknown): string {
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(value, (_key, v: unknown) => {
+      const kind = typeof v;
+      if (kind === "function" || kind === "symbol" || kind === "bigint") {
+        throw new TypeError(`a ${kind} cannot be sent as JSON`);
+      }
+      if (typeof v === "number" && !Number.isFinite(v)) {
+        throw new TypeError(`${String(v)} cannot be sent as JSON`);
+      }
+      return v;
+    });
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : "it cannot be serialized";
+    throw invalidInput(`request body is not JSON: ${reason}`, op.id);
+  }
+  if (text === undefined) throw invalidInput("request body must be a JSON value", op.id);
+  return text;
 }
 
 function fillPath(op: AnyOp, input: Readonly<Record<string, unknown>>): string {
@@ -109,8 +168,23 @@ function appendQuery(
 ): void {
   if (value === undefined || value === null) return;
   const values = (Array.isArray(value) ? value : [value]).map((v) => queryText(op, key, v));
-  if (style === "brackets") for (const v of values) params.append(`${key}[]`, v);
-  else params.set(key, values.join(","));
+  if (Array.isArray(value) && values.length === 0) return;
+  switch (style) {
+    case "brackets":
+      for (const v of values) params.append(`${key}[]`, v);
+      break;
+    case "repeat":
+      for (const v of values) params.append(key, v);
+      break;
+    case "scalar":
+    case "csv":
+      params.set(key, values.join(","));
+      break;
+    default: {
+      const exhaustive: never = style;
+      return exhaustive;
+    }
+  }
 }
 
 function queryText(op: AnyOp, key: string, value: unknown): string {
@@ -157,7 +231,9 @@ export function interpret(
     contentType: string | null;
     text: string;
     requestId: string | null;
+    /** What the request carried, which some statuses need to be read correctly. */
     switchUser: string | undefined;
+    lockVersion: boolean;
   },
 ): Outcome {
   const { status, contentType, text } = response;
@@ -199,10 +275,19 @@ export function interpret(
       return fail({ kind: "not_found", status });
     case 406:
       return fail({ kind: "not_acceptable", status });
+    case 409:
+      return fail({ kind: "conflict", status });
     case 412:
-      return fail({ kind: "switch_user_rejected", status, login: response.switchUser });
+      if (response.switchUser === undefined) break;
+      return fail({
+        kind: "switch_user_rejected",
+        reason: "rejected_by_server",
+        status,
+        login: response.switchUser,
+      });
     case 422: {
       const messages = validationMessages(text);
+      if (messages?.length === 0 && response.lockVersion) return fail({ kind: "conflict", status });
       if (messages !== undefined) return fail({ kind: "validation", status, messages });
       break;
     }

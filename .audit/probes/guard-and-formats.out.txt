@@ -1,0 +1,18 @@
+7.0 adminKey users/current -> admin admin = true
+7.0 userKey users/current -> jsmith admin = false
+7.0 non-admin key + switch to admin answers as jsmith
+7.0 include=journals,watchers -> keys: journals,watchers
+7.0 include[]=journals&include[]=watchers -> keys: journals,watchers
+7.0 include=journals&include=watchers -> keys: watchers
+6.1 adminKey users/current -> admin admin = true
+6.1 userKey users/current -> jsmith admin = false
+6.1 non-admin key + switch to admin answers as jsmith
+6.1 include=journals,watchers -> keys: journals,watchers
+6.1 include[]=journals&include[]=watchers -> keys: journals,watchers
+6.1 include=journals&include=watchers -> keys: watchers
+7.0-subpath adminKey users/current -> admin admin = true
+7.0-subpath userKey users/current -> jsmith admin = false
+7.0-subpath non-admin key + switch to admin answers as jsmith
+7.0-subpath include=journals,watchers -> keys: journals,watchers
+7.0-subpath include[]=journals&include[]=watchers -> keys: journals,watchers
+7.0-subpath include=journals&include=watchers -> keys: watchers

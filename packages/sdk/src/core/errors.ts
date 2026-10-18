@@ -12,8 +12,15 @@ export type RedmineErrorData =
   | { kind: "forbidden"; status: 403 }
   /** `hint` explains likely causes, e.g. an operation newer than an undeclared server version. */
   | { kind: "not_found"; status: 404; hint?: string }
-  /** X-Redmine-Switch-User named an unknown or inactive login. A non-admin key never gets this: Redmine ignores the header for it. */
-  | { kind: "switch_user_rejected"; status: 412; login: string | undefined }
+  /**
+   * A stale edit. A wiki `version` answers 409. An issue `lock_version` answers 422 with an empty errors
+   * array, so a 422 is a conflict only when the request carried `lock_version`. Re-read, merge, resend.
+   */
+  | { kind: "conflict"; status: 409 | 422 }
+  /** Nothing was sent: the key is not an admin's, and Redmine would silently run the request as the key's own user. */
+  | { kind: "switch_user_rejected"; login: string; reason: "not_admin" }
+  /** Redmine answered 412: X-Redmine-Switch-User named an unknown or inactive login. */
+  | { kind: "switch_user_rejected"; login: string; reason: "rejected_by_server"; status: 412 }
   | { kind: "not_acceptable"; status: 406 }
   /** Any other status. `body` is truncated to 2 KiB. */
   | { kind: "http"; status: number; body: string }
@@ -104,8 +111,12 @@ function describe(data: RedmineErrorData, op: string | undefined): string {
       return `Redmine answered ${data.status} (${data.kind})${where}`;
     case "not_found":
       return `Redmine answered 404${where}${data.hint ? `: ${data.hint}` : ""}`;
+    case "conflict":
+      return `Redmine reported a conflicting edit${where} (${data.status}): re-read the record and retry`;
     case "switch_user_rejected":
-      return `Redmine refused to switch to user ${data.login ?? "(unknown)"}${where} (412)`;
+      return data.reason === "not_admin"
+        ? `Cannot act as ${data.login}${where}: the API key does not belong to an admin, so Redmine would ignore the switch`
+        : `Redmine refused to switch to user ${data.login}${where} (412)`;
     case "http":
       return `Redmine answered ${data.status}${where}`;
     case "protocol":

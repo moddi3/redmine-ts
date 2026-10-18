@@ -151,6 +151,15 @@ export const downloadThumbnail = op({
   response: { kind: "binary" },
 });
 
+export const sendValue = op({
+  id: "sendValue",
+  method: "POST",
+  path: "bulk.json",
+  body: { kind: "value", key: "payload" },
+  response: { kind: "empty" },
+  safety: "write",
+});
+
 export const ops: Readonly<Record<string, AnyOp>> = {
   getIssue,
   getIssues,
@@ -166,6 +175,7 @@ export const ops: Readonly<Record<string, AnyOp>> = {
   uploadAttachmentFile,
   downloadAttachmentFile,
   downloadThumbnail,
+  sendValue,
 };
 
 export const SLOTS: SlotTable = {

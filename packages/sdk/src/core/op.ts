@@ -23,8 +23,9 @@ export interface FilterSpec {
 /**
  * How one query input key goes on the wire.
  * scalar: `k=v`. csv: arrays joined with "," (include). brackets: `k[]=a&k[]=b`, the input key has no brackets.
+ * repeat: `k=a&k=b`. Only `rm.request` uses it, the generator never emits it.
  */
-export type QueryStyle = "scalar" | "csv" | "brackets";
+export type QueryStyle = "scalar" | "csv" | "brackets" | "repeat";
 
 export type RequestBody =
   | null
@@ -35,7 +36,9 @@ export type RequestBody =
       readonly siblings: readonly string[];
     }
   /** Raw application/octet-stream taken from `input[key]`. Any other content type is a 406. */
-  | { readonly kind: "binary"; readonly key: string };
+  | { readonly kind: "binary"; readonly key: string }
+  /** Any JSON value taken from `input[key]` and sent verbatim. Only `rm.request` uses it, the generator never emits it. */
+  | { readonly kind: "value"; readonly key: string };
 
 export type ResponseShape =
   /** `{ issue: {...} }` unwrapped to the inner object. A 204 or empty body decodes to undefined. */

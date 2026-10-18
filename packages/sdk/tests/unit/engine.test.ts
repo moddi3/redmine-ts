@@ -3,10 +3,13 @@ import type { SdkEvent } from "../../src/core/config.ts";
 import { RedmineError } from "../../src/core/errors.ts";
 import {
   empty,
+  exceptGuard,
   failure,
   hang,
   html,
+  isGuardCheck,
   json,
+  keyOf,
   sequence,
   sleep,
   testEngine,
@@ -16,6 +19,9 @@ import * as ops from "./fixtures/registry.ts";
 
 const issue = { id: 42, subject: "Printer on fire" };
 const ok: Responder = () => json({ issue });
+
+const circular: Record<string, unknown> = {};
+circular.self = circular;
 
 describe("building requests", () => {
   test("GET keeps the /redmine subpath, joins csv includes and sends JSON Accept without Content-Type", async () => {
@@ -112,12 +118,54 @@ describe("building requests", () => {
   });
 
   test("`as` sets X-Redmine-Switch-User for that call only", async () => {
-    const { call, requests } = testEngine(ok);
+    const { call, requests } = testEngine(keyOf("admin", ok));
     await call(ops.getIssue, { issue_id: 1 }, { as: "jsmith" });
     await call(ops.getIssue, { issue_id: 1 });
 
-    expect(requests[0]?.headers.get("x-redmine-switch-user")).toBe("jsmith");
-    expect(requests[1]?.headers.has("x-redmine-switch-user")).toBe(false);
+    const sent = exceptGuard(requests);
+    expect(sent[0]?.headers.get("x-redmine-switch-user")).toBe("jsmith");
+    expect(sent[1]?.headers.has("x-redmine-switch-user")).toBe(false);
+  });
+
+  test.each([
+    ["an object", { a: 1, b: [true, null] }],
+    ["an array", [{ id: 1 }, { id: 2 }]],
+    ["a string", "text"],
+    ["a number", 0],
+    ["false", false],
+    ["null", null],
+    ["an empty string", ""],
+  ])("a value body takes %s and sends it verbatim as JSON", async (_name, payload) => {
+    const { call, requests } = testEngine(() => empty());
+    await call(ops.sendValue, { payload });
+
+    expect(requests[0]?.text()).toBe(JSON.stringify(payload));
+    expect(requests[0]?.headers.get("content-type")).toBe("application/json");
+  });
+
+  test.each([
+    ["a missing payload", {}],
+    ["undefined", { payload: undefined }],
+    ["a function", { payload: () => 1 }],
+    ["a function nested in an object", { payload: { cb: () => 1 } }],
+    ["a symbol", { payload: Symbol("s") }],
+    ["a bigint", { payload: 1n }],
+    ["NaN", { payload: Number.NaN }],
+    ["Infinity nested in an array", { payload: [Number.POSITIVE_INFINITY] }],
+    ["a circular object", { payload: circular }],
+  ])("a value body refuses %s before the network", async (_name, input) => {
+    const { call, requests } = testEngine(() => empty());
+    const error = await failure(call(ops.sendValue, input));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a value body leaves an undefined property out, as JSON does", async () => {
+    const { call, requests } = testEngine(() => empty());
+    await call(ops.sendValue, { payload: { a: 1, b: undefined } });
+
+    expect(requests[0]?.json()).toEqual({ a: 1 });
   });
 });
 
@@ -152,11 +200,23 @@ describe("interpreting responses", () => {
     expect(requests).toHaveLength(1);
   });
 
-  test("412 names the login that was requested", async () => {
-    const { call } = testEngine(() => new Response("", { status: 412 }));
+  test("412 on an impersonated call is switch_user_rejected by the server and names the login", async () => {
+    const { call } = testEngine(keyOf("admin", () => new Response("", { status: 412 })));
     const error = await failure(call(ops.updateIssue, { issue_id: 1 }, { as: "ghost" }));
 
-    expect(error.data).toEqual({ kind: "switch_user_rejected", status: 412, login: "ghost" });
+    expect(error.data).toEqual({
+      kind: "switch_user_rejected",
+      reason: "rejected_by_server",
+      status: 412,
+      login: "ghost",
+    });
+  });
+
+  test("412 on a call that sent no switch header is a plain http error", async () => {
+    const { call } = testEngine(() => new Response("", { status: 412 }));
+    const error = await failure(call(ops.updateIssue, { issue_id: 1 }));
+
+    expect(error.data).toMatchObject({ kind: "http", status: 412 });
   });
 
   test("an unmapped status keeps its body, truncated to 2 KiB", async () => {
@@ -188,6 +248,244 @@ describe("interpreting responses", () => {
     const { call } = testEngine(() => new Response("", { status: 200 }));
 
     expect(await call(ops.getIssue, { issue_id: 1 })).toBeUndefined();
+  });
+});
+
+describe("conflicts", () => {
+  test.each([
+    ["GET", ops.getIssue, { issue_id: 1 }],
+    ["PUT", ops.updateIssue, { issue_id: 1, notes: "n" }],
+    ["POST", ops.createUser, { login: "a" }],
+    ["DELETE", ops.deleteIssue, { issue_id: 1 }],
+  ] as const)("409 on a %s is a conflict, whatever the body says", async (_method, op, input) => {
+    const { call, requests } = testEngine(sequence(empty(409), json({ errors: ["x"] }, 409)));
+    const empty409 = await failure(call(op, input));
+    const bodied409 = await failure(call(op, input));
+
+    expect(empty409.data).toEqual({ kind: "conflict", status: 409 });
+    expect(bodied409.data).toEqual({ kind: "conflict", status: 409 });
+    expect(requests).toHaveLength(2);
+  });
+
+  test("a 422 with an empty errors array is a conflict when the request carried lock_version", async () => {
+    const { call, requests } = testEngine(() => json({ errors: [] }, 422));
+    const error = await failure(call(ops.updateIssue, { issue_id: 1, lock_version: 0 }));
+
+    expect(error.data).toEqual({ kind: "conflict", status: 422 });
+    expect(requests).toHaveLength(1);
+  });
+
+  test("lock_version at the top of a bare body counts as carried", async () => {
+    const { call } = testEngine(() => json({ errors: [] }, 422));
+    const error = await failure(call(ops.sendValue, { payload: { lock_version: 3 } }));
+
+    expect(error.data).toEqual({ kind: "conflict", status: 422 });
+  });
+
+  test("lock_version inside a value body's envelope counts as carried", async () => {
+    const { call } = testEngine(() => json({ errors: [] }, 422));
+    const error = await failure(call(ops.sendValue, { payload: { issue: { lock_version: 3 } } }));
+
+    expect(error.data).toEqual({ kind: "conflict", status: 422 });
+  });
+
+  test.each([
+    ["no lock_version in the body", { issue_id: 1, notes: "n" }],
+    ["lock_version left undefined", { issue_id: 1, lock_version: undefined }],
+  ])("a 422 with an empty errors array stays validation with %s", async (_name, input) => {
+    const { call } = testEngine(() => json({ errors: [] }, 422));
+    const error = await failure(call(ops.updateIssue, input));
+
+    expect(error.data).toEqual({ kind: "validation", status: 422, messages: [] });
+  });
+
+  test("a 422 with messages stays validation even when the request carried lock_version", async () => {
+    const { call } = testEngine(() => json({ errors: ["Subject cannot be blank"] }, 422));
+    const error = await failure(call(ops.updateIssue, { issue_id: 1, lock_version: 0 }));
+
+    expect(error.data).toEqual({
+      kind: "validation",
+      status: 422,
+      messages: ["Subject cannot be blank"],
+    });
+  });
+
+  test("a 422 with an empty errors array on a bodyless request stays validation", async () => {
+    const { call } = testEngine(() => json({ errors: [] }, 422));
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.data).toEqual({ kind: "validation", status: 422, messages: [] });
+  });
+});
+
+describe("the impersonation guard", () => {
+  const checks = (requests: Parameters<typeof exceptGuard>[0]) => requests.filter(isGuardCheck);
+
+  test("an admin key passes, and one check serves every later impersonated call", async () => {
+    const events: SdkEvent[] = [];
+    const { call, requests } = testEngine(keyOf("admin", ok), {
+      onEvent: (event) => events.push(event),
+    });
+    for (const as of ["jsmith", "jsmith", "other"])
+      await call(ops.getIssue, { issue_id: 1 }, { as });
+
+    expect(checks(requests)).toHaveLength(1);
+    expect(requests[0]?.headers.has("x-redmine-switch-user")).toBe(false);
+    expect(requests[0]?.headers.get("x-redmine-api-key")).toBe("secret-key");
+    expect(exceptGuard(requests).map((r) => r.headers.get("x-redmine-switch-user"))).toEqual([
+      "jsmith",
+      "jsmith",
+      "other",
+    ]);
+    expect(events.filter((e) => e.type === "request").map((e) => e.op)).toEqual([
+      "getCurrentUser",
+      "getIssue",
+      "getIssue",
+      "getIssue",
+    ]);
+  });
+
+  test("calls without `as` never trigger the check", async () => {
+    const { call, requests } = testEngine(keyOf("member", ok));
+    await call(ops.getIssue, { issue_id: 1 });
+
+    expect(requests).toHaveLength(1);
+    expect(checks(requests)).toHaveLength(0);
+  });
+
+  test.each([
+    ["admin: false", { user: { id: 2, admin: false } }],
+    ["no admin field", { user: { id: 2 } }],
+    ["an unexpected shape", { surprise: true }],
+  ])(
+    "a key whose user reports %s is refused, and nothing impersonated is sent",
+    async (_name, user) => {
+      const { call, requests } = testEngine(() => json(user));
+      const error = await failure(
+        call(ops.updateIssue, { issue_id: 1, notes: "n" }, { as: "admin" }),
+      );
+
+      expect(error.data).toEqual({
+        kind: "switch_user_rejected",
+        login: "admin",
+        reason: "not_admin",
+      });
+      expect(error.op).toBe("updateIssue");
+      expect(requests).toHaveLength(1);
+      expect(requests.some((r) => r.headers.has("x-redmine-switch-user"))).toBe(false);
+      expect(requests[0]?.method).toBe("GET");
+    },
+  );
+
+  test("the not-admin verdict is cached: later calls are refused without another check", async () => {
+    const { call, requests } = testEngine(keyOf("member", ok));
+    const first = await failure(call(ops.getIssue, { issue_id: 1 }, { as: "a" }));
+    const second = await failure(call(ops.getIssue, { issue_id: 1 }, { as: "b" }));
+
+    expect(first.data).toMatchObject({ login: "a", reason: "not_admin" });
+    expect(second.data).toMatchObject({ login: "b", reason: "not_admin" });
+    expect(requests).toHaveLength(1);
+  });
+
+  test("concurrent first calls share one check", async () => {
+    const { call, requests } = testEngine(
+      keyOf("admin", async (request) => {
+        await sleep(10);
+        return json({ issue, as: request.headers.get("x-redmine-switch-user") });
+      }),
+      { maxConcurrent: 8 },
+    );
+    const results = await Promise.all(
+      ["a", "b", "c", "d", "e"].map((as) => call(ops.getIssue, { issue_id: 1 }, { as })),
+    );
+
+    expect(results).toHaveLength(5);
+    expect(checks(requests)).toHaveLength(1);
+    expect(exceptGuard(requests)).toHaveLength(5);
+  });
+
+  test("a check that finishes with the limiter full does not deadlock the call", async () => {
+    const { call, requests } = testEngine(keyOf("admin", ok), { maxConcurrent: 1 });
+    await Promise.all([
+      call(ops.getIssue, { issue_id: 1 }, { as: "a" }),
+      call(ops.getIssue, { issue_id: 2 }, { as: "b" }),
+    ]);
+
+    expect(requests).toHaveLength(3);
+  });
+
+  test("a 401 on the check surfaces as unauthorized, sends nothing impersonated and is not cached", async () => {
+    let answer: Response | undefined = empty(401);
+    const { call, requests } = testEngine((request) => {
+      if (isGuardCheck(request)) return answer?.clone() ?? json({ user: { admin: true } });
+      return json({ issue });
+    });
+    const refused = await failure(call(ops.getIssue, { issue_id: 1 }, { as: "jsmith" }));
+    answer = undefined;
+    const value = await call(ops.getIssue, { issue_id: 1 }, { as: "jsmith" });
+
+    expect(refused.data).toEqual({ kind: "unauthorized", status: 401 });
+    expect(refused.op).toBe("getCurrentUser");
+    expect(value).toEqual(issue);
+    expect(
+      requests.map((r) => [
+        r.url.pathname.split("/").pop(),
+        r.headers.get("x-redmine-switch-user"),
+      ]),
+    ).toEqual([
+      ["current.json", null],
+      ["current.json", null],
+      ["1.json", "jsmith"],
+    ]);
+  });
+
+  test("a network failure on the check surfaces as network and the next call asks again", async () => {
+    let down = true;
+    const { call, requests } = testEngine(
+      (request) => {
+        if (!isGuardCheck(request)) return json({ issue });
+        if (down) throw new TypeError("fetch failed");
+        return json({ user: { admin: true } });
+      },
+      { retry: false },
+    );
+    const refused = await failure(call(ops.getIssue, { issue_id: 1 }, { as: "jsmith" }));
+    down = false;
+    await call(ops.getIssue, { issue_id: 1 }, { as: "jsmith" });
+
+    expect(refused.data).toEqual({ kind: "network", message: "fetch failed" });
+    expect(checks(requests)).toHaveLength(2);
+  });
+
+  test("bad input is refused before the check is spent", async () => {
+    const { call, requests } = testEngine(keyOf("admin", ok));
+    const error = await failure(call(ops.getIssue, {}, { as: "jsmith" }));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a caller that aborts while the shared check is pending stops waiting without cancelling it for others", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { call, requests } = testEngine(async (request) => {
+      if (!isGuardCheck(request)) return json({ issue });
+      await gate;
+      return json({ user: { admin: true } });
+    });
+    const controller = new AbortController();
+    const aborted = failure(
+      call(ops.getIssue, { issue_id: 1 }, { as: "a", signal: controller.signal }),
+    );
+    const patient = call(ops.getIssue, { issue_id: 2 }, { as: "b" });
+    await sleep(5);
+    controller.abort();
+    release();
+
+    expect((await aborted).data).toEqual({ kind: "aborted" });
+    expect(await patient).toEqual(issue);
+    expect(checks(requests)).toHaveLength(1);
+    expect(exceptGuard(requests)).toHaveLength(1);
   });
 });
 
