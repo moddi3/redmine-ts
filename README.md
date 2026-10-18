@@ -48,6 +48,10 @@ Run these from `packages/sdk`:
 
 Never edit `src/generated/` by hand. Change the generator in `packages/sdk/generator/` and run `vp run gen`.
 
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): subject`, for example `fix(sdk): retry 503 on GET only`. The `commit-msg` hook in `.vite-hooks/` rejects any other first line. A user-facing change also needs a changeset (`vp run changeset`), which drives the version bump and the changelog. See [docs/releasing.md](docs/releasing.md).
+
+CI also lints the workflows with actionlint. To run it locally: `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12`.
+
 ## Run real Redmine servers
 
 Contract tests run against Redmine 7.0, Redmine 6.1, and Redmine 7.0 under a `/redmine` subpath, all in Docker. Run these from the repo root:
