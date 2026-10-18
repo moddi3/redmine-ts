@@ -16,6 +16,15 @@ The SDK stays free of `@modelcontextprotocol/sdk`. Sources: `research.md` (secti
 
 About a hundred generated tools are too much context for an agent. A small set covers triage: `issue_context`, `search_issues`, `find_similar`, `propose_update` (a dry run that shows the diff and checks the status transition), `apply_update`, `add_note`, `link_issues`, and `log_time`. Inputs and outputs use names instead of ids, because models handle "In Progress" reliably and `status_id: 7` poorly. Name-to-id resolution lives in the toolkit over cached lookups, not in the SDK. Source: `research.md` (section "Агенты и MCP"), and "Tradeoffs accepted" in `docs/architecture.md`.
 
+## Read-only mode and tool hints (next)
+
+Agents and scripts that should only read need a guarantee, not a convention. Two halves share the operation registry, which already classifies each operation as `read`, `idempotent`, or `write`:
+
+- **SDK.** `createRedmine({ readOnly: true })` refuses every operation that is not `read`, and every `rm.request` that is not a `GET`, before anything is sent, with a dedicated error kind. The client type also drops the write methods, so a write fails to compile. This guards scripts and dashboards that hold a powerful key.
+- **MCP.** Every tool carries annotations derived from the registry: `readOnlyHint` for reads, `destructiveHint` for `DELETE`, `idempotentHint` for `PUT` and `DELETE`, and `openWorldHint`. Clients act on them. ChatGPT developer mode treats a tool without `readOnlyHint` as a write tool, and Codex CLI runs read-only tools concurrently. A read-only mode registers only read tools, and include and exclude patterns narrow the tool list further.
+
+Sources: the owner's request, which named a client called devrelay as the model (its link is still to be added here). `research.md` (section "Что есть сейчас") describes onozaty/redmine-mcp-server, which marks tools with `readOnlyHint` and filters them with regex patterns. Section "Агенты и MCP" sets read-only as the default policy.
+
 ## `gen` CLI for an instance config (next)
 
 A command that reads an instance with an admin key and writes a config with literal types: custom field names mapped to `cf_<id>`, and the instance's statuses, trackers, and priorities. With that config, filters can read `cf.severity` instead of `cf_12`. Custom field definitions are visible only to admins, so the CLI also accepts a hand-written config of the same shape. Source: `research.md` (sections "Custom fields" and "Слои").
@@ -47,6 +56,19 @@ A fake transport and fixtures recorded from the Docker Redmine servers, so users
 ## Inline uploads in create and update (later)
 
 Let `issues.create` and `issues.update` take files directly and run the upload step inside the call. The design kept the explicit two-step `attachments.upload` so the extra request stays visible. Adding inline uploads later breaks nothing. Source: "Synthesis decision" in `docs/architecture.md`.
+
+## Effect entrypoint (later)
+
+A separate package, `@redmine-ts/effect`, for applications built on [Effect](https://effect.website). It keeps `effect` out of the SDK's dependencies and builds on the same registry and engine, so both clients cover the same operations. The plan:
+
+- **Service.** The client is a service provided by a `Layer` built from the usual config.
+- **Return types.** Every method returns an `Effect` whose error channel is a tagged union with one tag per `RedmineError` kind, so `Effect.catchTag("validation", ...)` works.
+- **Listings.** They become a `Stream`.
+- **Cancellation.** Effect interruption maps to the engine's `AbortSignal`, so cancelling stops the request.
+- **Retries.** Effect `Schedule` takes over from the SDK's built-in policy.
+- **Response decoding.** It can use Effect Schema. That also covers the Standard Schema hook above, since Effect Schema implements Standard Schema.
+
+Source: the owner's request.
 
 ## Text formatting as config (later)
 
