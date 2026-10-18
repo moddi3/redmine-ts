@@ -10,7 +10,7 @@ Use it to script a Redmine instance, sync it with another system, or build tools
 npm install @redmine-ts/sdk
 ```
 
-The package is ESM only. It runs on Node 22 or later, Bun, Deno, and in browsers behind a proxy. See [Runtime support](#runtime-support).
+The package is ESM only. It runs on Node 22 or later and on Bun, and in browsers through a proxy. See [Runtime support](#runtime-support).
 
 ## Quickstart
 
