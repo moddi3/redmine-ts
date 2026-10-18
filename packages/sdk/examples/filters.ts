@@ -1,4 +1,4 @@
-import { createRedmine, type GetIssuesWhere } from "redmine-ts-sdk";
+import { createRedmine, type GetIssuesWhere } from "@redmine-ts/sdk";
 
 const untriaged: GetIssuesWhere = {
   project_id: "web", // project_id=web

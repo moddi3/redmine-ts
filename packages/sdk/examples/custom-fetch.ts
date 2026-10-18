@@ -1,4 +1,4 @@
-import { createRedmine } from "redmine-ts-sdk";
+import { createRedmine } from "@redmine-ts/sdk";
 
 const throughGateway: typeof fetch = (input, init) => {
   const headers = new Headers(init?.headers);

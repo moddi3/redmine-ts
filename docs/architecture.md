@@ -1,4 +1,4 @@
-# redmine-ts-sdk architecture
+# @redmine-ts/sdk architecture
 
 This is the synthesized design from a three-way design bakeoff, with candidates in `.audit/arena/`. The type contract lives in `packages/sdk/src/core/*.ts`. Bodies marked `not implemented` are filled against it.
 
@@ -13,7 +13,7 @@ We want a typed, zero-dependency, runtime-agnostic Redmine client that a later M
 ## Usage
 
 ```ts
-import { createRedmine, RedmineError } from "redmine-ts-sdk";
+import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 
 const rm = createRedmine({
   baseUrl: "https://tracker.example.com/redmine", // subpath kept

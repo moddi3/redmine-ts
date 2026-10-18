@@ -1,0 +1,8 @@
+6.1 issue JSON exposes lock_version: false
+6.1 issue PUT current lock_version -> 422; stale lock_version -> 422 {"errors":[]}
+6.1 issue PUT without lock_version -> 204
+6.1 wiki PUT current version -> 204; stale version -> 409 
+7.0 issue JSON exposes lock_version: false
+7.0 issue PUT current lock_version -> 422; stale lock_version -> 422 {"errors":[]}
+7.0 issue PUT without lock_version -> 204
+7.0 wiki PUT current version -> 204; stale version -> 409 

@@ -1,4 +1,4 @@
-import { createRedmine, RedmineError } from "redmine-ts-sdk";
+import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 
 const rm = createRedmine({
   baseUrl: "https://tracker.example.com/redmine",

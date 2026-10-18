@@ -1,4 +1,4 @@
-import { createRedmine, parseRedmineVersion, RedmineError } from "redmine-ts-sdk";
+import { createRedmine, parseRedmineVersion, RedmineError } from "@redmine-ts/sdk";
 
 const rm = createRedmine({
   baseUrl: process.env.REDMINE_URL!,

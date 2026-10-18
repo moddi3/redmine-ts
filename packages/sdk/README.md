@@ -1,4 +1,4 @@
-# redmine-ts-sdk
+# @redmine-ts/sdk
 
 A typed TypeScript client for the [Redmine](https://www.redmine.org) REST API, for Redmine 6.1 and 7.0. It has no runtime dependencies and talks to the server through the platform `fetch`. Its types and operations are generated from the community [Redmine OpenAPI spec](https://github.com/d-yoshi/redmine-openapi).
 
@@ -7,7 +7,7 @@ Use it to script a Redmine instance, sync it with another system, or build tools
 ## Install
 
 ```sh
-npm install redmine-ts-sdk
+npm install @redmine-ts/sdk
 ```
 
 The package is ESM only. It runs on Node 22 or later, Bun, Deno, and in browsers behind a proxy. See [Runtime support](#runtime-support).
@@ -15,7 +15,7 @@ The package is ESM only. It runs on Node 22 or later, Bun, Deno, and in browsers
 ## Quickstart
 
 ```ts
-import { createRedmine } from "redmine-ts-sdk";
+import { createRedmine } from "@redmine-ts/sdk";
 
 const rm = createRedmine({
   baseUrl: "https://tracker.example.com/redmine",
@@ -51,7 +51,7 @@ The package exports a type for every input and every schema. Input types are nam
 List operations take filters under `where`. The keys are Redmine's filter parameter names, and custom fields are `cf_<id>`. A value or an array of values means "equals". An object picks another operator:
 
 ```ts
-import { createRedmine, type GetIssuesWhere } from "redmine-ts-sdk";
+import { createRedmine, type GetIssuesWhere } from "@redmine-ts/sdk";
 
 const untriaged: GetIssuesWhere = {
   project_id: "web", // project_id=web
@@ -89,7 +89,7 @@ Redmine does not report its version over the API. You can declare it with `versi
 - With a version read from config, `parseRedmineVersion` turns `"7.0.1"` into `"7.0"` and throws `invalid_input` for an unsupported version. The client type then offers every operation, and the runtime refusal still applies.
 
 ```ts
-import { createRedmine, parseRedmineVersion, RedmineError } from "redmine-ts-sdk";
+import { createRedmine, parseRedmineVersion, RedmineError } from "@redmine-ts/sdk";
 
 const rm = createRedmine({
   baseUrl: process.env.REDMINE_URL!,
@@ -114,7 +114,7 @@ const legacy = createRedmine({
 await legacy.groups.removeUsers({ group_id: 3, user_ids: [7, 9] });
 ```
 
-There is one entrypoint for all supported versions, not `redmine-ts-sdk/6.1` and `redmine-ts-sdk/7.0`. From 6.1 to 7.0 the spec added one operation and four properties, so per-version modules would duplicate every type to express that difference, and every server upgrade would change your imports. A property that only newer servers return is optional and tagged `@since` in its JSDoc. The measurements behind this choice are in [docs/architecture.md](../../docs/architecture.md).
+There is one entrypoint for all supported versions, not `@redmine-ts/sdk/6.1` and `@redmine-ts/sdk/7.0`. From 6.1 to 7.0 the spec added one operation and four properties, so per-version modules would duplicate every type to express that difference, and every server upgrade would change your imports. A property that only newer servers return is optional and tagged `@since` in its JSDoc. The measurements behind this choice are in [docs/architecture.md](https://github.com/moddi3/redmine-ts/blob/main/docs/architecture.md).
 
 ## Handle errors
 

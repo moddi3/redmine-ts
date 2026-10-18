@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { createRedmine } from "redmine-ts-sdk";
+import { createRedmine } from "@redmine-ts/sdk";
 
 const rm = createRedmine({
   baseUrl: "https://tracker.example.com/redmine",

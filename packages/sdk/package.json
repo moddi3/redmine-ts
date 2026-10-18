@@ -1,5 +1,5 @@
 {
-  "name": "redmine-ts-sdk",
+  "name": "@redmine-ts/sdk",
   "version": "0.0.0",
   "description": "Typed, runtime-agnostic TypeScript client for the Redmine REST API",
   "keywords": [
@@ -9,10 +9,20 @@
     "sdk",
     "typescript"
   ],
+  "homepage": "https://github.com/moddi3/redmine-ts/tree/main/packages/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/moddi3/redmine-ts/issues"
+  },
   "license": "MIT",
   "author": "Vlad Ivanov",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moddi3/redmine-ts.git",
+    "directory": "packages/sdk"
+  },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "type": "module",
   "sideEffects": false,
