@@ -1,5 +1,16 @@
 name: redmine-ts
 
+# Every checkout and worktree must produce the same service config, or `up` from one of them recreates
+# a container (fresh data, new state) under the others. So nothing here references a host path.
+configs:
+  subpath_ru:
+    content: |
+      require_relative "/usr/src/redmine/config/environment"
+
+      map ENV.fetch("RAILS_RELATIVE_URL_ROOT") do
+        run Rails.application
+      end
+
 services:
   redmine70:
     image: redmine:7.0
@@ -13,6 +24,8 @@ services:
     image: redmine:7.0
     ports: ["3071:3000"]
     command: ["rails", "server", "-b", "0.0.0.0", "-c", "/subpath.ru"]
-    volumes: ["./subpath.ru:/subpath.ru:ro"]
+    configs:
+      - source: subpath_ru
+        target: /subpath.ru
     environment:
       RAILS_RELATIVE_URL_ROOT: /redmine

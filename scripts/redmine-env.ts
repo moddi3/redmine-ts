@@ -27,6 +27,9 @@ interface ServerEnv {
 }
 
 const adminPassword = "sdk-admin-pass-1";
+// Fixed keys keep .redmine/env.json valid in every checkout even when a container gets recreated.
+const adminKey = "0d1e2a3d4b5e6e7f8a9b0c1d2e3f4a5b6c7d8e9f";
+const userKey = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
 const userPassword = "sdk-user-pass-1";
 const seedMarker = "REDMINE_ENV_JSON ";
 const bootTimeoutMs = 10 * 60_000;
@@ -46,8 +49,15 @@ def seed_user(login, attrs, password)
   user
 end
 
+def seed_api_key(user, value)
+  token = Token.find_by(user_id: user.id, action: 'api') || Token.create!(user: user, action: 'api')
+  token.update_column(:value, value) unless token.value == value
+end
+
 admin = seed_user('admin', { admin: true, firstname: 'Redmine', lastname: 'Admin', mail: 'admin@example.net' }, '${adminPassword}')
 jsmith = seed_user('jsmith', { admin: false, firstname: 'John', lastname: 'Smith', mail: 'jsmith@example.net' }, '${userPassword}')
+seed_api_key(admin, '${adminKey}')
+seed_api_key(jsmith, '${userKey}')
 
 project = Project.find_by(identifier: 'sdk-test') || Project.new(identifier: 'sdk-test')
 project.name = 'SDK Test'
@@ -81,8 +91,8 @@ tags = seed_issue_field('Tags', true)
 raise 'no time entry activities' unless TimeEntryActivity.active.exists?
 
 puts '${seedMarker}' + JSON.generate(
-  adminKey: admin.api_key,
-  userKey: jsmith.api_key,
+  adminKey: admin.reload.api_key,
+  userKey: jsmith.reload.api_key,
   projectIdentifier: project.identifier,
   customFields: { Severity: severity.id, Tags: tags.id }
 )

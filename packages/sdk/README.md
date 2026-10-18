@@ -370,6 +370,12 @@ Methods marked 7.0+ exist since Redmine 7.0. A client declared as `version: "6.1
 
 Some Redmine endpoints have no method because another method does the same job. For example, `GET /projects/{id}/issues.json` is `issues.list({ where: { project_id } })`. `rm.request` reaches them if you need them.
 
+## Acknowledgements
+
+The types and operations in this package are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi), an unofficial OpenAPI 3.0.3 description of the Redmine REST API released under the MIT license. This release uses its tags `6.1.3-r1` and `7.0.1-r1`.
+
+If a field or operation looks wrong, the cause is most likely in the spec. Please report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues), and open an issue at [moddi3/redmine-ts/issues](https://github.com/moddi3/redmine-ts/issues) so the SDK picks up the fix.
+
 ## License
 
 MIT
