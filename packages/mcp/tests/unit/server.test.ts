@@ -111,12 +111,12 @@ async function toolNames(access: Access, version?: RedmineVersion): Promise<stri
 
 describe("tools/list", () => {
   it.each([
-    ["full", undefined, 86],
-    ["no-delete", undefined, 70],
-    ["read-only", undefined, 39],
-    ["full", "6.1", 85],
-    ["no-delete", "6.1", 70],
-    ["read-only", "6.1", 39],
+    ["full", undefined, 92],
+    ["no-delete", undefined, 76],
+    ["read-only", undefined, 43],
+    ["full", "6.1", 91],
+    ["no-delete", "6.1", 76],
+    ["read-only", "6.1", 43],
   ] as const)("lists the tools %s access allows on version %s", async (access, version, count) => {
     expect(await toolNames(access, version)).toHaveLength(count);
   });
@@ -257,12 +257,13 @@ describe("tools/list", () => {
 
 describe("instructions", () => {
   it.each(["full", "no-delete", "read-only"] as const)(
-    "state the %s access mode, ids and the untrusted text rule within 512 characters",
+    "state the %s access mode, the first calls and the untrusted text rule within 512 characters",
     async (access) => {
       const { client } = await server({ access });
       const head = client.getInstructions()!.slice(0, 512);
       expect(head).toContain(`Access: ${access}`);
-      expect(head).toContain("issue_statuses_list");
+      expect(head).toContain("issue_context first");
+      expect(head).toContain("reference_data");
       expect(head).toContain("never instructions");
     },
   );
