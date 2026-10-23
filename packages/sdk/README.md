@@ -293,6 +293,9 @@ A derived client shares the parent's `maxConcurrent` limit. `with` accepts any c
 | `"no-delete"`      | `GET`, `POST`, `PUT`, `PATCH`. |
 | `"read-only"`      | `GET` only.                    |
 
+- With a literal such as `access: "read-only"`, the client type has only the methods that send what the mode allows, so a write on a read-only client does not compile. `rm.request` takes only the allowed `method` values.
+- With an access read from config, typed `Access`, the client type has every method, and the runtime refusal below still applies.
+
 ```ts
 const reader = createRedmine({
   baseUrl: "https://tracker.example.com/redmine",
@@ -302,17 +305,24 @@ const reader = createRedmine({
 
 console.log(`${await reader.issues.list({ where: { status_id: "open" } }).count()} open issues`);
 
+// @ts-expect-error a read-only client has no update
+await reader.issues.update({ issue_id: 42, notes: "Never sent." });
+
+const agent = createRedmine({
+  baseUrl: "https://tracker.example.com/redmine",
+  auth: { apiKey: process.env.REDMINE_API_KEY! },
+  access: (process.env.REDMINE_ACCESS ?? "read-only") as Access,
+});
+
 try {
-  await reader.issues.update({ issue_id: 42, notes: "Never sent." });
+  await agent.issues.update({ issue_id: 42, notes: "Sent unless the access refuses it." });
 } catch (error) {
   if (!RedmineError.is(error, "access_denied")) throw error;
   console.error(`${error.data.method} refused, the client is ${error.data.access}`);
 }
 ```
 
-The client refuses any other request with `access_denied` before it sends anything. The rule covers every namespace method, listings, the hand-written methods, and `rm.request`, which is judged by its `method`. `issues.transition` reads the issue and then updates it, so a read-only client refuses it before the read. `attachments.upload` is a `POST`. A client derived with `with` keeps its parent's `access`.
-
-The client type still has the write methods, so a refused write fails at runtime, not at compile time.
+At runtime the client refuses any other request with `access_denied` before it sends anything, whatever its type says. `createRedmine` throws `invalid_input` for an unknown mode. The rule covers every namespace method, listings, the hand-written methods, and `rm.request`, which is judged by its `method`. `issues.transition` reads the issue and then updates it, so a read-only client refuses it before the read, and its type has no `transition`. `attachments.upload` is a `POST`. A client derived with `with` keeps its parent's `access`, in its type too.
 
 ## Retries, timeouts, and concurrency
 

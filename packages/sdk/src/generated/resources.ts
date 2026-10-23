@@ -950,3 +950,75 @@ export interface Additions70 {
 /** The generated namespaces available on a server declared as V. */
 export type Resources<V extends RedmineVersion> = BaseResources &
   (AtLeast<V, "7.0"> extends true ? Additions70 : unknown);
+
+/** The HTTP method each generated method sends, in every version. `access` narrows the client type by it. */
+export interface HttpMethods {
+  issues: {
+    list: "GET";
+    create: "POST";
+    get: "GET";
+    update: "PUT";
+    delete: "DELETE";
+    addWatcher: "POST";
+    removeWatcher: "DELETE";
+  };
+  projects: {
+    list: "GET";
+    create: "POST";
+    get: "GET";
+    update: "PUT";
+    delete: "DELETE";
+    archive: "PUT";
+    unarchive: "PUT";
+    close: "PUT";
+    reopen: "PUT";
+  };
+  memberships: { list: "GET"; create: "POST"; get: "GET"; update: "PUT"; delete: "DELETE" };
+  users: {
+    list: "GET";
+    create: "POST";
+    get: "GET";
+    update: "PUT";
+    delete: "DELETE";
+    current: "GET";
+  };
+  timeEntries: { list: "GET"; create: "POST"; get: "GET"; update: "PUT"; delete: "DELETE" };
+  news: {
+    list: "GET";
+    get: "GET";
+    update: "PUT";
+    delete: "DELETE";
+    listByProject: "GET";
+    create: "POST";
+  };
+  relations: { list: "GET"; create: "POST"; get: "GET"; delete: "DELETE" };
+  versions: { list: "GET"; create: "POST"; get: "GET"; update: "PUT"; delete: "DELETE" };
+  wiki: { list: "GET"; get: "GET"; update: "PUT"; delete: "DELETE"; getVersion: "GET" };
+  queries: { list: "GET" };
+  attachments: { get: "GET"; update: "PATCH"; delete: "DELETE" };
+  issueStatuses: { list: "GET" };
+  trackers: { list: "GET" };
+  enumerations: {
+    listIssuePriorities: "GET";
+    listTimeEntryActivities: "GET";
+    listDocumentCategories: "GET";
+  };
+  issueCategories: { list: "GET"; create: "POST"; get: "GET"; update: "PUT"; delete: "DELETE" };
+  roles: { list: "GET"; get: "GET" };
+  groups: {
+    list: "GET";
+    create: "POST";
+    get: "GET";
+    update: "PUT";
+    delete: "DELETE";
+    addUser: "POST";
+    removeUsers: "DELETE";
+    removeUser: "DELETE";
+  };
+  customFields: { list: "GET" };
+  search: { list: "GET"; listByProject: "GET" };
+  files: { list: "GET"; create: "POST" };
+  myAccount: { get: "GET"; update: "PUT" };
+  journals: { update: "PUT" };
+  repositories: { addRelatedIssue: "POST"; removeRelatedIssue: "DELETE" };
+}
