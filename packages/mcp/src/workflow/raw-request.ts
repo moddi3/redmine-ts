@@ -25,6 +25,9 @@ const BY_ACCESS: Readonly<Record<Access, { sends: string; annotations: Annotatio
 
 const Scalar = z.union([z.string(), z.number(), z.boolean()]);
 
+/** Any JSON value, one type per branch: some clients send a value whose schema names no type as a string. */
+const Json = z.union([Scalar, z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())]);
+
 export function rawRequestTool(access: Access): ToolSpec {
   const { sends, annotations } = BY_ACCESS[access];
   return defineTool({
@@ -44,7 +47,7 @@ export function rawRequestTool(access: Access): ToolSpec {
         .record(z.string(), z.union([Scalar, z.array(z.union([z.string(), z.number()]))]))
         .optional()
         .describe('URL parameters, such as {status_id: "*", limit: 5}.'),
-      body: z.unknown().optional().describe('A JSON value, such as {issue: {notes: "Done"}}.'),
+      body: Json.optional().describe('A JSON value, such as {issue: {notes: "Done"}}.'),
       array_format: z
         .enum(["brackets", "comma", "repeat"])
         .optional()
@@ -53,7 +56,7 @@ export function rawRequestTool(access: Access): ToolSpec {
         ),
     }),
     output: z.object({
-      response: z.unknown().describe("The parsed JSON response, or null for an empty body."),
+      response: Json.describe("The parsed JSON response, or null for an empty body."),
     }),
     tier: "read",
     annotations,
@@ -65,7 +68,8 @@ export function rawRequestTool(access: Access): ToolSpec {
         ...(body === undefined ? {} : { body }),
         ...(array_format === undefined ? {} : { arrayFormat: array_format }),
       });
-      return { structured: { response: response ?? null } };
+      // rm.request resolves to parsed JSON, or undefined when Redmine sends no body.
+      return { structured: { response: (response ?? null) as z.output<typeof Json> } };
     },
   });
 }
