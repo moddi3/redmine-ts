@@ -6,7 +6,6 @@
 import {
   bearerAuthChallengeResponse,
   createMcpHandler,
-  getOAuthProtectedResourceMetadataUrl,
   hostHeaderValidationResponse,
   OAuthError,
   OAuthErrorCode,
@@ -158,6 +157,8 @@ export function createRedmineMcpHandler(
     }
   }
   const hostnames = allowedOrigins.filter((entry) => !exactOrigins.has(entry));
+  // Pages on the public origin, such as the consent page, are this server's own.
+  if (paths !== undefined) exactOrigins.add(paths.origin);
   const hosts = allowedHosts && [...allowedHosts];
   // fetch below hands the credential over in authInfo.extra, so every server the factory builds has one.
   const mcp = createMcpHandler(
@@ -203,7 +204,7 @@ export function createRedmineMcpHandler(
     // Only the path counts: behind a proxy, the URL's origin is the server's, not the public one.
     const path = comparablePath(new URL(request.url).pathname);
     if (path === paths.endpoint) return endpoint(request);
-    if (bearer !== undefined && path === paths.resourceMetadata) {
+    if (bearer !== undefined && paths.resourceMetadata.includes(path)) {
       return publicDocument(request, bearer.metadata);
     }
     return (
@@ -253,7 +254,7 @@ function bearerGate(
   onError: ((error: Error) => void) | undefined,
 ) {
   const resource = new URL(paths.identifier);
-  const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resource);
+  const resourceMetadataUrl = paths.origin + paths.resourceMetadata.at(-1)!;
   const scopes = scopesFor(access);
   const tokens: OAuthTokenVerifier = {
     async verifyAccessToken(token) {

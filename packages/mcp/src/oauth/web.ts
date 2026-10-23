@@ -1,3 +1,5 @@
+import { getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/server";
+
 // Responses the OAuth paths share. Their documents and endpoints carry no ambient credentials, no
 // cookie and no key, so any origin may read them, as the MCP SDK serves its own metadata.
 
@@ -66,8 +68,17 @@ export interface PublicPaths {
   identifier: string;
   origin: string;
   endpoint: string;
-  resourceMetadata: string;
-  authorizationServerMetadata: string;
+  /**
+   * The protected resource metadata: RFC 9728's path-inserted URL at the origin's root, and the same
+   * document inside the mount, which the 401 challenge names so that it works without the root.
+   */
+  resourceMetadata: readonly string[];
+  /**
+   * The authorization server metadata of an issuer with a path, at every URL the 2026-07-28 spec has
+   * clients try: RFC 8414's path-inserted one, then OpenID Connect's path-inserted and path-appended
+   * ones.
+   */
+  authorizationServerMetadata: readonly string[];
   authorize: string;
   callback: string;
   token: string;
@@ -75,9 +86,10 @@ export interface PublicPaths {
 }
 
 /**
- * Every path the handler serves, derived from the public URL of the MCP endpoint, so the handler
- * never assumes it owns the origin's root: the well-known documents insert the endpoint's path as
- * RFC 9728 and RFC 8414 ask, and the authorization server's own endpoints live under it.
+ * Every path the handler serves, derived from the public URL of the MCP endpoint and never from Host
+ * or X-Forwarded headers. Apart from the root well-known documents, all of them live under the
+ * endpoint's own path, so a proxy forwards that path and the well-known ones, and the handler never
+ * claims the rest of an origin it may share with Redmine.
  */
 export function publicPaths(publicUrl: URL): PublicPaths {
   const path = comparablePath(publicUrl.pathname);
@@ -86,10 +98,17 @@ export function publicPaths(publicUrl: URL): PublicPaths {
     identifier: publicUrl.origin + base,
     origin: publicUrl.origin,
     endpoint: base || "/",
-    resourceMetadata: `/.well-known/oauth-protected-resource${base}`,
-    authorizationServerMetadata: `/.well-known/oauth-authorization-server${base}`,
+    resourceMetadata: [
+      new URL(getOAuthProtectedResourceMetadataUrl(publicUrl)).pathname,
+      `${base}/.well-known/oauth-protected-resource`,
+    ],
+    authorizationServerMetadata: [
+      `/.well-known/oauth-authorization-server${base}`,
+      `/.well-known/openid-configuration${base}`,
+      `${base}/.well-known/openid-configuration`,
+    ],
     authorize: `${base}/oauth/authorize`,
-    callback: `${base}/oauth/callback`,
+    callback: `${base}/oauth/redmine/callback`,
     token: `${base}/oauth/token`,
     register: `${base}/oauth/register`,
   };

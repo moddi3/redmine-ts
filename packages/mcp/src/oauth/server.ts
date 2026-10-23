@@ -327,6 +327,11 @@ export function createAuthorizationServer(
 
   /** The consent form's answer. It must come from the browser the page was shown to. */
   async function decide(request: Request): Promise<Response> {
+    // Browsers name the page a form was posted from; the consent page is on the public origin.
+    const origin = request.headers.get("origin");
+    if (origin !== null && origin !== paths.origin) {
+      return errorPage(403, "The sign-in form was sent from another site.");
+    }
     const form = await readForm(request);
     const consent =
       form === undefined
@@ -648,7 +653,9 @@ export function createAuthorizationServer(
   }
 
   const routes = new Map<string, (request: Request) => Promise<Response>>([
-    [paths.authorizationServerMetadata, async (request) => publicDocument(request, metadata)],
+    ...paths.authorizationServerMetadata.map(
+      (path) => [path, async (request: Request) => publicDocument(request, metadata)] as const,
+    ),
     [paths.authorize, authorize],
     [paths.callback, callback],
     [paths.token, token],
