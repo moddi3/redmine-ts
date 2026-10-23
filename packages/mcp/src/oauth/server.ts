@@ -99,7 +99,10 @@ const FLOW_TTL = 600;
 const ACCESS_TTL = 3600;
 /** Refreshing renews it, so only a client idle this long signs in again. */
 const REFRESH_TTL = 30 * 24 * 3600;
-/** Margin between our token's end and Redmine's, for clocks and slow requests. */
+/**
+ * Margin between our token's end and Redmine's, for clocks and slow requests. A Redmine token shorter
+ * than twice this keeps half its life as the margin, so ours is never issued expired.
+ */
 const EXPIRY_SKEW = 60;
 /** claude.ai gives token calls 10 seconds. */
 const REDMINE_TIMEOUT_MS = 8000;
@@ -181,7 +184,7 @@ interface Upstream {
 const RedmineTokens = z.object({
   access_token: z.string().min(1),
   refresh_token: z.string().min(1),
-  expires_in: z.number().positive().optional(),
+  expires_in: z.number().int().positive().optional(),
 });
 
 type TokenError = { status: number; error: string; description: string };
@@ -523,7 +526,9 @@ export function createAuthorizationServer(
     const code = await sealer.open<CodePayload>("code", form.get("code") ?? "");
     if (code === undefined) return invalidGrant("The code is invalid or has expired");
     if (code.client !== client) return invalidGrant("The code was issued to another client");
-    if (form.get("redirect_uri") !== code.redirect) {
+    // OAuth 2.1 clients leave redirect_uri out; PKCE binds the exchange. When sent, it must match.
+    const redirectUri = form.get("redirect_uri");
+    if (redirectUri !== null && redirectUri !== code.redirect) {
       return invalidGrant("redirect_uri differs from the authorization request");
     }
     const verifier = form.get("code_verifier") ?? "";
@@ -593,7 +598,8 @@ export function createAuthorizationServer(
 
   /** Our token pair over Redmine's credential, never outliving Redmine's access token. */
   async function issue(upstream: Upstream, scopes: Scope[], client: string): Promise<TokenSet> {
-    const lifetime = Math.min(ACCESS_TTL, upstream.expiresIn - EXPIRY_SKEW);
+    const skew = Math.min(EXPIRY_SKEW, Math.floor(upstream.expiresIn / 2));
+    const lifetime = Math.min(ACCESS_TTL, upstream.expiresIn - skew);
     const accessPayload: AccessPayload = {
       credential: upstream.credential,
       scopes,

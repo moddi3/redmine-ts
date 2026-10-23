@@ -368,6 +368,44 @@ describe("built-in authorization server", () => {
     expect(await replayed.json()).toMatchObject({ error: "invalid_grant" });
   });
 
+  it.each([
+    [30, 15],
+    [1, 1],
+    [120, 60],
+  ])("never issues an expired token over a Redmine token of %i s: %i s", async (redmine, ours) => {
+    const setupped = setup();
+    const short = fakeRedmine({ expiresIn: redmine });
+    const handle = createRedmineMcpHandler({
+      baseUrl: REDMINE_INTERNAL,
+      fetch: short.fetch,
+      publicUrl: PUBLIC_URL,
+      oauth: {
+        secret: secret(),
+        redmineApp: REDMINE_APP,
+        redminePublicUrl: REDMINE_PUBLIC,
+        fetchClientMetadata: async () =>
+          Response.json({ client_id: CLAUDE, redirect_uris: [CLAUDE_REDIRECT] }),
+      },
+    });
+    const issued = await tokens({ ...setupped, handle, redmine: short });
+    expect(issued.expires_in).toBe(ours);
+    expect(
+      (await callTool(handle, { Authorization: `Bearer ${issued.access_token}` })).status,
+    ).toBe(200);
+  });
+
+  it("takes a code exchange without redirect_uri, as OAuth 2.1 clients send it", async () => {
+    const setupped = setup();
+    const { landed, verifier } = await signIn(setupped);
+    const response = await form(setupped.handle, TOKEN, {
+      grant_type: "authorization_code",
+      code: landed.searchParams.get("code")!,
+      client_id: CLAUDE,
+      code_verifier: verifier,
+    });
+    expect(response.status).toBe(200);
+  });
+
   it("maps a read scope to read-only tools, under the server's own cap", async () => {
     const setupped = setup({ access: "no-delete" });
     const read = await tokens(setupped, { scope: "redmine:read" });
