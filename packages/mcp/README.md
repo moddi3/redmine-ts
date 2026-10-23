@@ -219,7 +219,7 @@ Change the secret, without keeping the old one, when you point the same public U
 
 ### Grant store
 
-Codes, Redmine states and consent pages must each be used once, and a refresh token should be. A grant store marks them: two operations on namespaced keys, `consume(key, ttlSeconds)`, which marks a key used and resolves false when it already was, and `has(key)`. Every instance that serves the public URL must share one, and `consume` must be atomic across them.
+Codes, Redmine states and consent pages must each be used once, and a refresh token should be. A grant store marks them: two operations on namespaced keys, `consume(key, ttlSeconds)`, which marks a key used and resolves false when it already was, and `has(key)`. Every instance that serves the public URL must share one, and `consume` must be atomic across them. Every instance that shares the secret must share the store, or none may have one: an instance without it neither rotates refresh tokens nor ends API-key sign-ins after 30 days, so a refresh token sealed by an instance with the store would renew there without either.
 
 With a store:
 
@@ -229,7 +229,7 @@ With a store:
 - A code or refresh token is checked before the server asks Redmine and marked after Redmine answers, so a Redmine outage spends nothing and the client can retry.
 - A store that fails, by throwing or rejecting, fails closed: the token endpoint answers 503 `temporarily_unavailable`, the consent page and Redmine's return show an error page to retry from, the MCP endpoint answers 503, and `onError` gets the cause.
 
-The CLI is one process, so it keeps the store in its memory. An embedded server passes `oauth.store`: `memoryGrantStore()` for a single process, or an adapter for something shared. On Workers that is a Durable Object, one per key, which runs its storage calls one at a time; Workers KV is eventually consistent, so two isolates could both consume one key.
+The CLI is one process, so it keeps the store in its memory. An embedded server passes `oauth.store`: `memoryGrantStore()` for a single process, or an adapter for something shared. The memory store grows with use: each refresh leaves a marker that lives 30 days, as long as the token it marks, so a client that refreshes every hour adds about 720 entries a month, and an ended sign-in adds one more. That suits the CLI; for a busy server, use a store that keeps its keys elsewhere. On Workers that is a Durable Object, one per key, which runs its storage calls one at a time; Workers KV is eventually consistent, so two isolates could both consume one key.
 
 ```ts
 import { DurableObject } from "cloudflare:workers";
@@ -260,6 +260,8 @@ export function grantStore(keys: DurableObjectNamespace<GrantKey>): GrantStore {
   };
 }
 ```
+
+The adapter costs one Durable Object call on every MCP request that carries a token, to check whether its sign-in was ended, besides the calls that sign-ins and refreshes make, and one object per key.
 
 Without a store, the server keeps the weaker guarantees of each process's or isolate's own memory:
 
