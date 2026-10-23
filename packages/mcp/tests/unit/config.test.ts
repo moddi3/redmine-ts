@@ -1,3 +1,6 @@
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { parseCli } from "../../src/config.ts";
 
@@ -54,6 +57,31 @@ describe("parseCli", () => {
     expect(command.kind === "error" && command.message).toContain(message);
   });
 
+  it("reads REDMINE_MCP_FILES_DIR as an absolute directory", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "redmine-mcp-config-")));
+    expect(parseCli([], { ...env, REDMINE_MCP_FILES_DIR: dir })).toMatchObject({
+      kind: "serve",
+      filesDir: dir,
+    });
+    expect(
+      parseCli([], { ...env, REDMINE_MCP_FILES_DIR: relative(process.cwd(), dir) }),
+    ).toMatchObject({
+      filesDir: dir,
+    });
+    expect(parseCli([], { ...env, REDMINE_MCP_FILES_DIR: " " })).not.toHaveProperty("filesDir");
+  });
+
+  it.each(["missing", "file"])("refuses a REDMINE_MCP_FILES_DIR that is a %s", (what) => {
+    const dir = mkdtempSync(join(tmpdir(), "redmine-mcp-config-"));
+    const path = join(dir, what);
+    if (what === "file") writeFileSync(path, "");
+    const command = parseCli([], { ...env, REDMINE_MCP_FILES_DIR: path });
+    expect(command).toEqual({
+      kind: "error",
+      message: "REDMINE_MCP_FILES_DIR must be an existing directory",
+    });
+  });
+
   it("never echoes the API key", () => {
     const command = parseCli([], {
       REDMINE_URL: KEY,
@@ -85,16 +113,29 @@ describe("parseCli --http", () => {
         allowedOrigins: [],
         allowedHosts: [...LOCAL, "127.0.0.1"],
       },
-      apiKeyIgnored: false,
+      warnings: [],
     });
   });
 
-  it("reports REDMINE_API_KEY as ignored and keeps it out of the command", () => {
+  it("warns about REDMINE_API_KEY and keeps it out of the command", () => {
     const command = parseCli(["--http"], env);
-    expect(command).toMatchObject({ kind: "http", apiKeyIgnored: true });
+    expect(command).toMatchObject({
+      kind: "http",
+      warnings: [
+        "REDMINE_API_KEY is ignored over HTTP; each request sends its own key in X-Redmine-API-Key",
+      ],
+    });
     expect(JSON.stringify(command)).not.toContain(KEY);
-    expect(parseCli(["--http"], { ...url, REDMINE_API_KEY: " " })).toMatchObject({
-      apiKeyIgnored: false,
+    expect(parseCli(["--http"], { ...url, REDMINE_API_KEY: " " })).toMatchObject({ warnings: [] });
+  });
+
+  it("warns about REDMINE_MCP_FILES_DIR instead of reading it, even when it is not a directory", () => {
+    const command = parseCli(["--http"], { ...url, REDMINE_MCP_FILES_DIR: "/no/such/dir" });
+    expect(command).toMatchObject({
+      kind: "http",
+      warnings: [
+        "REDMINE_MCP_FILES_DIR is ignored over HTTP; clients over HTTP cannot use the server's local files",
+      ],
     });
   });
 

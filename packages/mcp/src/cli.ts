@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { parseCli, USAGE } from "./config.ts";
-import { API_KEY_HEADER, createRedmineMcpHandler } from "./http.ts";
+import { createRedmineMcpHandler } from "./http.ts";
 import { toNodeListener } from "./node-http.ts";
 import { createRedmineMcpServer } from "./server.ts";
 
@@ -18,11 +18,7 @@ switch (command.kind) {
     break;
   case "http": {
     const report = (error: Error) => console.error(`redmine-mcp: ${error.message}`);
-    if (command.apiKeyIgnored) {
-      console.error(
-        `redmine-mcp: REDMINE_API_KEY is ignored over HTTP; each request sends its own key in ${API_KEY_HEADER}`,
-      );
-    }
+    for (const warning of command.warnings) console.error(`redmine-mcp: ${warning}`);
     const mcp = createRedmineMcpHandler({ ...command.options, onError: report });
     const server = createServer(
       toNodeListener(
@@ -52,8 +48,8 @@ switch (command.kind) {
     break;
   }
   case "serve": {
-    const { config } = command;
-    serveStdio(() => createRedmineMcpServer(config), {
+    const { config, filesDir } = command;
+    serveStdio(() => createRedmineMcpServer(config, { filesDir }), {
       onerror: (error) => console.error(`redmine-mcp: ${error.message}`),
     });
   }
