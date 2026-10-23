@@ -55,7 +55,7 @@ describeServers("generated tools", (server) => {
 
   it("lists groups_remove_users only where the declared version has it", () => {
     const names = tools.map((tool) => tool.name);
-    expect(names).toHaveLength(server.version === "6.1" ? 85 : 86);
+    expect(names).toHaveLength(server.version === "6.1" ? 91 : 92);
     if (server.version === "6.1") expect(names).not.toContain("groups_remove_users");
     else expect(names).toContain("groups_remove_users");
   });
