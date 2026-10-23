@@ -2,15 +2,12 @@
 
 An MCP server for the Redmine REST API. It exposes one tool per operation of [`@redmine-ts/sdk`](../sdk), 86 in all, plus 6 workflow tools for the common jobs, such as reading an issue with its history in one call, and a `redmine://issues/{id}` resource. It serves them over stdio or Streamable HTTP. Every tool has a JSON Schema for its input and its output, and annotations that tell the client whether it reads, writes, or deletes.
 
-The package is not on npm yet. Until the first release, build it from this repo and run `packages/mcp/dist/cli.mjs` with Node 22 or later:
+It needs Node 22 or later. `npx` runs it without an install, and a global install puts the command `redmine-mcp` on your `PATH`:
 
 ```sh
-vp install
-vp run -r build
-REDMINE_URL=https://tracker.example.com REDMINE_API_KEY=... node packages/mcp/dist/cli.mjs --help
+REDMINE_URL=https://tracker.example.com REDMINE_API_KEY=... npx -y @redmine-ts/mcp --help
+npm install -g @redmine-ts/mcp && redmine-mcp --help
 ```
-
-After the release, `npx -y @redmine-ts/mcp` runs the same command, `redmine-mcp`.
 
 ## Add the server to a client
 
@@ -58,7 +55,7 @@ The server name, `redmine` above, is the prefix clients put in front of the tool
 With `--http`, one server serves Streamable HTTP at `/mcp` for many users. Each request carries its user's API key in the `X-Redmine-API-Key` header, and the server answers it with a fresh MCP server for that key. `REDMINE_URL` is fixed at startup, so a client cannot point the server at another host. The server does not read `REDMINE_API_KEY` in this mode; when it is set, the server says once on stderr that it ignores it.
 
 ```sh
-REDMINE_URL=https://tracker.example.com node packages/mcp/dist/cli.mjs --http --no-delete
+REDMINE_URL=https://tracker.example.com npx -y @redmine-ts/mcp --http --no-delete
 # redmine-mcp: serving MCP at http://127.0.0.1:3737/mcp
 ```
 

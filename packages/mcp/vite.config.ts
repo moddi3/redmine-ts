@@ -12,7 +12,8 @@ export default defineConfig({
     dts: {
       generator: "tsgo",
     },
-    exports: { exclude: ["cli"] },
+    // The command is redmine-mcp; without a name, tsdown names it after the package, mcp.
+    exports: { exclude: ["cli"], bin: { "redmine-mcp": "./src/cli.ts" } },
     publint: { level: "error" },
     attw: { profile: "esm-only", level: "error" },
   },
