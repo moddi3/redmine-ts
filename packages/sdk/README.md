@@ -167,6 +167,7 @@ try {
 | `timeout`                | An attempt ran longer than `timeoutMs`.                                                                                          |
 | `aborted`                | Your `signal` aborted the call.                                                                                                  |
 | `unsupported_version`    | The declared `version` lacks the operation. Nothing was sent.                                                                    |
+| `access_denied`          | The client's `access` does not allow the request's HTTP method. `data.access` and `data.method` say which. Nothing was sent.     |
 | `invalid_input`          | Bad config, an unknown filter, or conflicting paging options. Nothing was sent.                                                  |
 | `transition_not_allowed` | `issues.transition` asked for a status the workflow does not allow.                                                              |
 
@@ -278,6 +279,37 @@ That check is one extra request per client. Clients derived through `with` share
 
 A derived client shares the parent's `maxConcurrent` limit. `with` accepts any call option, so `rm.with({ timeoutMs: 5000 })` works too.
 
+## Restrict the client to reads
+
+`access` limits the HTTP methods the client sends. Use it for scripts, dashboards, and agents that hold a powerful key but should never change data:
+
+| `access`           | Sends                          |
+| ------------------ | ------------------------------ |
+| `"full"` (default) | Every method.                  |
+| `"no-delete"`      | `GET`, `POST`, `PUT`, `PATCH`. |
+| `"read-only"`      | `GET` only.                    |
+
+```ts
+const reader = createRedmine({
+  baseUrl: "https://tracker.example.com/redmine",
+  auth: { apiKey: process.env.REDMINE_API_KEY! },
+  access: "read-only",
+});
+
+console.log(`${await reader.issues.list({ where: { status_id: "open" } }).count()} open issues`);
+
+try {
+  await reader.issues.update({ issue_id: 42, notes: "Never sent." });
+} catch (error) {
+  if (!RedmineError.is(error, "access_denied")) throw error;
+  console.error(`${error.data.method} refused, the client is ${error.data.access}`);
+}
+```
+
+The client refuses any other request with `access_denied` before it sends anything. The rule covers every namespace method, listings, the hand-written methods, and `rm.request`, which is judged by its `method`. `issues.transition` reads the issue and then updates it, so a read-only client refuses it before the read. `attachments.upload` is a `POST`. A client derived with `with` keeps its parent's `access`.
+
+The client type still has the write methods, so a refused write fails at runtime, not at compile time.
+
 ## Retries, timeouts, and concurrency
 
 | Option           | Default | Meaning                                                               |
@@ -385,6 +417,37 @@ To use an HTTP proxy in Node, pass the `fetch` from [undici](https://github.com/
 - Browsers through an injected `fetch`, untested. Redmine sends no CORS headers, and an API key in a browser is readable by anyone who opens the developer tools. Pass a `fetch` that sends each request to a proxy on your origin, and let the proxy add the key on the server.
 - Deno is not a target, and CI does not run on it.
 - The package is ESM only, so load it with `import`, not `require`. It has no `node:` imports and no dependencies. The client uses only web platform APIs, such as `fetch`, `URL`, `AbortSignal.any`, and web streams.
+
+## Catalog for tool layers
+
+`@redmine-ts/sdk/catalog` describes every client method as data, for tool layers such as MCP servers and agent toolkits that turn methods into tools. It is a separate entrypoint, so an app that only calls the client never loads its schemas.
+
+```ts
+import { catalog } from "@redmine-ts/sdk/catalog";
+
+const readTools = catalog
+  .filter((entry) => entry.method === "GET")
+  .map((entry) => ({
+    name: `${entry.namespace}_${entry.verb}`,
+    description: [entry.title, entry.description].filter(Boolean).join("\n\n"),
+    inputSchema: entry.inputSchema,
+    annotations: { readOnlyHint: true },
+  }));
+console.log(`${readTools.length} read tools`);
+
+const listIssues = catalog.find((entry) => entry.id === "getIssues");
+console.log(listIssues?.output.kind); // "list": output.schema describes one issue
+```
+
+`catalog` has one entry per method: the generated namespace methods and the hand-written `issues.transition`, `attachments.upload`, `attachments.download`, and `attachments.thumbnail`. Each entry has:
+
+- `id`, the spec's operation id, or a stable id for a hand-written method. `namespace` and `verb` name the method, `rm[namespace][verb](input)`.
+- `title`, `description`, and `docsUrl`, from the spec.
+- `method`, `safety`, `since`, `until`, and `stability`. `method` is what `access` checks.
+- `inputSchema`, a JSON Schema (draft 2020-12) of the method's input object. It refuses unknown keys and requires what the TypeScript input requires. For a list, `where` accepts each filter in the forms the client compiles, with only the operators the spec documents for that filter, and `cf_<id>` keys where custom field filters apply.
+- `output`, with `kind` `"item"`, `"list"`, `"empty"`, or `"binary"`. For an item or a list, `schema` describes one returned record. Output schemas allow properties they do not name and require only what the types require, and the contract tests validate real responses from Redmine 6.1 and 7.0 against them. `optional: true` on an item means Redmine can answer with no body, as `wiki.update` does for an existing page.
+
+The schemas carry no `$ref`, so each one stands alone. The `file` input of `attachments.upload` has no JSON type, because JSON cannot carry bytes. The tool layer decides how to accept them, for example as base64 text.
 
 ## Namespaces
 

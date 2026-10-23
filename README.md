@@ -9,7 +9,7 @@ TypeScript tooling for the Redmine REST API.
 | --------------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
 | [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node and Bun, and for browsers through a proxy. |
 
-The SDK is the base for an MCP server and an agent toolkit. Neither is in the repo yet. The operation registry already carries what they need: each operation's `since` version, its safety class, and a flat input that can become a tool's JSON input.
+The SDK is the base for an MCP server and an agent toolkit. Neither is in the repo yet. The SDK's `@redmine-ts/sdk/catalog` entrypoint already carries what they need: each method's input and output as JSON Schema, its `since` version and its safety class.
 
 ## Built on redmine-openapi
 
