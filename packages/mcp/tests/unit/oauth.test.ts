@@ -1149,6 +1149,112 @@ describe("API key sign-in, the opt-in fallback", () => {
     expect(redmine.apiCalls.filter((call) => call.path === "/users/current.json")).toHaveLength(5);
   });
 
+  it("checks at most four keys at Redmine at once, and asks the fifth to try again", async () => {
+    const redmine = fakeRedmine();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let waiting = 0;
+    const slow: typeof fetch = async (input, init) => {
+      if (new Request(input, init).url.endsWith("/users/current.json")) {
+        waiting++;
+        await held;
+      }
+      return redmine.fetch(input, init);
+    };
+    const { handle } = setup({ fetch: slow }, {
+      redmineApp: undefined,
+      apiKeyLogin: true,
+    } as never);
+    const pages = await Promise.all(Array.from({ length: 5 }, () => consent(handle, redmine)));
+    const running = pages.slice(0, 4).map(({ submit }) => submit("wrong-key"));
+    await vi.waitFor(() => expect(waiting).toBe(4));
+    const fifth = await pages[4]!.submit("another-key");
+    expect(fifth.status).toBe(503);
+    const busy = await fifth.text();
+    expect(busy).toContain("Many keys are being checked right now. Try again in a moment.");
+    release();
+    expect((await Promise.all(running)).map(({ status }) => status)).toEqual([400, 400, 400, 400]);
+    // The busy page is a fresh page, so the person retries from it once Redmine is free.
+    const retried = await pages[4]!.submit("jsmith-api-key", consentValue(busy));
+    expect(retried.status).toBe(303);
+  });
+
+  it("with a store, refuses a browser that failed ten keys within the hour", async () => {
+    const { handle, redmine } = setup({}, {
+      redmineApp: undefined,
+      apiKeyLogin: true,
+      store: memoryGrantStore(),
+    } as never);
+    const person = browser(handle, ORIGIN, redmine);
+    const signIn = async () =>
+      (
+        await person.send(
+          authorizeUrl({
+            response_type: "code",
+            client_id: CLAUDE,
+            redirect_uri: CLAUDE_REDIRECT,
+            code_challenge: pkce().challenge,
+            code_challenge_method: "S256",
+          }),
+        )
+      ).text();
+    const submit = (page: string, apiKey: string) =>
+      person.send(new URL(AUTHORIZE), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          consent: consentValue(page),
+          api_key: apiKey,
+          decision: "allow",
+        }),
+      });
+    // Two sign-ins of five wrong keys each, the most one sign-in may try.
+    for (let round = 0; round < 2; round++) {
+      let page = await signIn();
+      for (let tried = 1; tried <= 5; tried++) {
+        const answer = await submit(page, `wrong-${round}-${tried}`);
+        page = await answer.text();
+      }
+      expect(page).toContain("Too many keys were tried on this sign-in.");
+    }
+    const third = await submit(await signIn(), "jsmith-api-key");
+    expect(third.status).toBe(429);
+    expect(await third.text()).toContain(
+      "Too many keys were tried from this browser in the last hour.",
+    );
+    expect(redmine.apiCalls.filter((call) => call.path === "/users/current.json")).toHaveLength(10);
+    // Another browser is not affected: the count is per browser, not a lockout of the account.
+    const other = await consent(handle, redmine);
+    expect((await other.submit("jsmith-api-key")).status).toBe(303);
+  });
+
+  it("says Redmine did not answer when that ends a sign-in", async () => {
+    const redmine = fakeRedmine();
+    const down: typeof fetch = async (input, init) => {
+      if (new Request(input, init).url.endsWith("/users/current.json")) {
+        throw new TypeError("fetch failed");
+      }
+      return redmine.fetch(input, init);
+    };
+    const { handle } = setup({ fetch: down }, {
+      redmineApp: undefined,
+      apiKeyLogin: true,
+    } as never);
+    const { html, submit } = await consent(handle, redmine);
+    let page = html;
+    for (let tried = 1; tried < 5; tried++) {
+      const answer = await submit("jsmith-api-key", consentValue(page));
+      expect(answer.status).toBe(503);
+      page = await answer.text();
+      expect(page).toContain("Redmine did not answer. Try again in a moment.");
+    }
+    const last = await submit("jsmith-api-key", consentValue(page));
+    expect(last.status).toBe(503);
+    const text = await last.text();
+    expect(text).toContain("Redmine did not answer, so this sign-in stops here.");
+    expect(text).not.toContain("Too many keys");
+  });
+
   it("seals the key into tokens, refuses a replayed code, and ends with a reset key", async () => {
     const { handle, redmine } = keySetup();
     const { submit, verifier } = await consent(handle, redmine);

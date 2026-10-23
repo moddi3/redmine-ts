@@ -275,7 +275,13 @@ Without a store, the server keeps the weaker guarantees of each process's or iso
 
 ### API key sign-in
 
-For a Redmine without OAuth applications, `--api-key-login` replaces `REDMINE_OAUTH_CLIENT_ID` and `REDMINE_OAUTH_CLIENT_SECRET`: the consent page asks for the person's API key, checks it with `GET /users/current.json`, and seals it into the code and the tokens. A refresh checks the key again, so resetting it in Redmine, under My account, ends the session. One sign-in may try 5 keys; each try needs the page that came back from the last one, so going back does not reset the count. This keeps the page from being a fast oracle for leaked keys; it is not a rate limit across sign-ins.
+For a Redmine without OAuth applications, `--api-key-login` replaces `REDMINE_OAUTH_CLIENT_ID` and `REDMINE_OAUTH_CLIENT_SECRET`: the consent page asks for the person's API key, checks it with `GET /users/current.json`, and seals it into the code and the tokens. A refresh checks the key again, so resetting it in Redmine, under My account, ends the session. Checking keys has limits, so the page is a slow oracle for a list of leaked keys:
+
+- One sign-in may try 5 keys. Each try needs the page that came back from the last one, so going back does not reset the count. A key Redmine did not answer for counts too, and the page says Redmine did not answer.
+- With a grant store, one browser may fail 10 keys an hour; after that it gets an error page.
+- One process checks at most 4 keys at Redmine at once; above that the page asks the person to try again in a moment, with a 503.
+
+None of this limits a source address: a browser that drops its cookie starts again. Behind a proxy, rate-limit `POST` to the consent page, `/mcp/oauth/authorize` for `https://mcp.example.com/mcp`, by client address there.
 
 Prefer Redmine sign-in where you can. A page that asks people to paste a master key is what phishing looks like, and it teaches them to do it. The page says which address bar it belongs to and where the key goes, but people rarely check. The key is also stronger than a token: it never expires, and Redmine permissions do not narrow it, so only the access mode limits it.
 

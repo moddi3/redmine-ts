@@ -133,10 +133,18 @@ const BROWSER_COOKIE = "__Host-redmine-mcp-oauth";
 const BROWSER_TTL = 3600;
 
 /**
- * API keys one sign-in may try. Each consent value is used once, so the count holds; across sign-ins
- * it does not, so this keeps the page from being a fast oracle for leaked keys, not a rate limit.
+ * API keys one sign-in may try. Each consent value is used once, so the count holds within a
+ * sign-in; a new sign-in starts again, which the per-browser count and the in-flight cap bound.
  */
 const KEY_ATTEMPTS = 5;
+/**
+ * Failed keys one browser may try in an hour, counted in the grant store. A browser that drops its
+ * cookie starts again, so this is no rate limit per address; a proxy in front can add one.
+ */
+const KEY_FAILURES_PER_HOUR = 10;
+const HOUR = 3600;
+/** Keys the consent form may be checking at Redmine at once, in this process. */
+const KEY_CHECKS_IN_FLIGHT = 4;
 
 const OTHER_BROWSER =
   "This sign-in did not start in this browser, or the browser dropped its cookie. Start again from your client.";
@@ -265,6 +273,7 @@ export function createAuthorizationServer(
   const end = async (family: string) => {
     await families?.consume(`family:${family}`, REFRESH_TTL);
   };
+  let keyChecks = 0;
   const metadata = {
     issuer,
     authorization_endpoint: paths.origin + paths.authorize,
@@ -450,28 +459,53 @@ export function createAuthorizationServer(
     consent: ConsentPayload & { exp?: number },
   ): Promise<Response> {
     const apiKey = form.get("api_key")?.trim() ?? "";
-    const check = apiKey === "" ? "missing" : await checkApiKey(apiKey);
-    if (check !== "ok") {
-      const attempts = consent.attempts + (check === "missing" ? 0 : 1);
-      if (attempts >= KEY_ATTEMPTS) {
-        return errorPage(
-          400,
-          "Too many keys were tried on this sign-in. Start again from your client.",
-        );
-      }
-      const keyError = {
-        missing: "Paste your API key.",
-        refused: "Redmine does not accept this key.",
-        unreachable: "Redmine did not answer. Try again in a moment.",
-      }[check];
+    // The page that answered is spent; the next try needs a new one, which carries the count.
+    const again = async (attempts: number, status: number, keyError: string) => {
       const client = await clients.resolve(consent.client);
       if (typeof client === "string") {
         return errorPage(400, `This server refuses the client: ${client}.`);
       }
-      // The page that answered is spent; the next try needs this one, which carries the count.
       const next: ConsentPayload = { ...consent, id: randomToken(), attempts };
       const sealed = await sealer.seal("consent", next, consent.exp! - now());
-      return showConsent(client, next, sealed, { status: 400, keyError });
+      return showConsent(client, next, sealed, { status, keyError });
+    };
+    if (apiKey === "") return again(consent.attempts, 400, "Paste your API key.");
+    const failures = `keyfail:${consent.n}`;
+    if (families !== undefined && (await families.has(`${failures}:${KEY_FAILURES_PER_HOUR}`))) {
+      return errorPage(
+        429,
+        "Too many keys were tried from this browser in the last hour. Try again later.",
+      );
+    }
+    if (keyChecks >= KEY_CHECKS_IN_FLIGHT) {
+      return again(
+        consent.attempts,
+        503,
+        "Many keys are being checked right now. Try again in a moment.",
+      );
+    }
+    keyChecks++;
+    let check: Awaited<ReturnType<typeof checkApiKey>>;
+    try {
+      check = await checkApiKey(apiKey);
+    } finally {
+      keyChecks--;
+    }
+    if (check !== "ok") {
+      if (families !== undefined) await countFailure(families, failures);
+      const attempts = consent.attempts + 1;
+      const unanswered = check === "unreachable";
+      if (attempts >= KEY_ATTEMPTS) {
+        return errorPage(
+          unanswered ? 503 : 400,
+          unanswered
+            ? "Redmine did not answer, so this sign-in stops here. Start again from your client in a moment."
+            : "Too many keys were tried on this sign-in. Start again from your client.",
+        );
+      }
+      return unanswered
+        ? again(attempts, 503, "Redmine did not answer. Try again in a moment.")
+        : again(attempts, 400, "Redmine does not accept this key.");
     }
     const ours: CodePayload = {
       id: randomToken(),
@@ -489,6 +523,13 @@ export function createAuthorizationServer(
       { code: await sealer.seal("code", ours, CODE_TTL), state: consent.state },
       303,
     );
+  }
+
+  /** Records one failed key in the first free hourly slot under `key`. */
+  async function countFailure(store: GrantStore, key: string): Promise<void> {
+    for (let slot = 1; slot <= KEY_FAILURES_PER_HOUR; slot++) {
+      if (await store.consume(`${key}:${slot}`, HOUR)) return;
+    }
   }
 
   /** Whether Redmine accepts `apiKey`, refuses it with 401, or did not answer. */
