@@ -5,6 +5,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { parseCli, USAGE } from "./config.ts";
 import { createRedmineMcpHandler } from "./http.ts";
 import { toNodeListener } from "./node-http.ts";
+import { publicPaths } from "./oauth/web.ts";
 import { createRedmineMcpServer } from "./server.ts";
 import { localFiles } from "./workflow/files-dir.ts";
 
@@ -20,11 +21,14 @@ switch (command.kind) {
   case "http": {
     const report = (error: Error) => console.error(`redmine-mcp: ${error.message}`);
     for (const warning of command.warnings) console.error(`redmine-mcp: ${warning}`);
+    const { publicUrl, oauth } = command.options;
+    const paths = publicUrl === undefined ? undefined : publicPaths(new URL(publicUrl));
     const mcp = createRedmineMcpHandler({ ...command.options, onError: report });
+    // With a public URL, the handler routes its own paths and answers 404 for the rest.
     const server = createServer(
       toNodeListener(
         async (request) =>
-          new URL(request.url).pathname === "/mcp"
+          paths !== undefined || new URL(request.url).pathname === "/mcp"
             ? mcp(request)
             : new Response("Not Found: the MCP endpoint is /mcp", { status: 404 }),
         report,
@@ -37,7 +41,14 @@ switch (command.kind) {
     server.listen(command.port, command.host, () => {
       const { address, family, port } = server.address() as AddressInfo;
       const host = family === "IPv6" ? `[${address}]` : address;
-      console.error(`redmine-mcp: serving MCP at http://${host}:${port}/mcp`);
+      console.error(
+        `redmine-mcp: serving MCP at http://${host}:${port}${paths?.endpoint ?? "/mcp"}`,
+      );
+      if (paths !== undefined && oauth?.redmineApp !== undefined) {
+        console.error(
+          `redmine-mcp: OAuth for ${paths.identifier}; the Redmine application's redirect URI is ${paths.origin}${paths.callback}`,
+        );
+      }
     });
     // close() lets in-flight requests finish and drops idle connections. A second signal stops at once.
     const signals = ["SIGINT", "SIGTERM"] as const;

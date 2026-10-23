@@ -216,26 +216,28 @@ export function createRedmineMcpHandler(
 
 /** publicUrl as a URL, refused when created rather than misrouting every request. */
 function resourceUrl(publicUrl: string, oauth: boolean): URL {
+  const problem = publicUrlProblem(publicUrl, oauth);
+  if (problem !== undefined) throw new TypeError(`publicUrl ${problem}`);
+  return new URL(publicUrl);
+}
+
+/** Why `publicUrl` cannot name the MCP endpoint, or undefined. The CLI checks with it too. */
+export function publicUrlProblem(publicUrl: string, oauth: boolean): string | undefined {
   let url: URL;
   try {
     url = new URL(publicUrl);
   } catch {
-    throw new TypeError("publicUrl is not a URL");
+    return "is not a URL";
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new TypeError("publicUrl must be an http or https URL");
-  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return "must be an http or https URL";
   if (url.search !== "" || url.hash !== "" || url.username !== "" || url.password !== "") {
-    throw new TypeError("publicUrl must not carry a query, a fragment or credentials");
+    return "must not carry a query, a fragment or credentials";
   }
-  if (oauth && url.protocol !== "https:" && !isLocalhost(url)) {
-    throw new TypeError("publicUrl must be https for OAuth, except on localhost");
+  const localhost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (oauth && url.protocol !== "https:" && !localhost) {
+    return "must be https for OAuth, except on localhost";
   }
-  return url;
-}
-
-function isLocalhost(url: URL): boolean {
-  return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  return undefined;
 }
 
 function withSlash(url: URL): URL {
