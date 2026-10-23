@@ -9,11 +9,12 @@ Items marked **next** come after the first release. Items marked **later** wait 
 `@redmine-ts/mcp` in `packages/mcp` is a new server built on the 2026-07-28 MCP spec and the official TypeScript SDK v2. It is not a clone of the owner's earlier generic Redmine MCP. Agents increasingly use code mode, so the server optimizes for precise, typed tools rather than a small tool count. The owner's decisions: access is full by default, deletes included; `--read-only` and `--no-delete` (or `REDMINE_MCP_ACCESS`) narrow it, and the strictest wins; `raw_request` stays available but obeys the access mode; OAuth waits until after v1.
 
 - **Done (phase 2):** one generated tool per SDK operation (86), named `<namespace>_<verb>`, with the catalog's input and output schemas, explicit annotations (updates count as destructive, as the spec defines it), agent-oriented descriptions, rewritten filter descriptions, paged list results with a concise default, actionable error results, version and access filtering, and stdio.
+- **Done (phase 3):** hand-written workflow tools on the same tool path as the generated ones: `issue_context` (the issue, allowed statuses, relations read from the issue, subtasks with status, attachments, watchers, and journals as readable changes with names), `reference_data` (names to ids, globals cached for 5 minutes per server), `issues_transition` (status by id or name, refusals list the allowed statuses by id and name), `attachments_upload` (text, base64, or a path in `REDMINE_MCP_FILES_DIR`, capped at 5 MB), `attachments_download` (small images as image content, small text as text, thumbnails), `attachments_save` (only with a files directory), `raw_request` (listed in every mode, hints and description by mode), and the `redmine://issues/{id}` resource as Markdown.
 - **Done (phase 4):** Streamable HTTP. `redmine-mcp --http` serves `/mcp` on `127.0.0.1:3737` by default, and `createRedmineMcpHandler` is the same server as a web-standard handler for Bun and Workers. Each request brings its user's key in `X-Redmine-API-Key` against the one `REDMINE_URL`, the access modes apply as over stdio, 2025-era clients are served statelessly next to 2026-07-28 ones, and Origin and, on loopback, Host are checked with the MCP SDK's helpers.
-- **Next:** hand-written tools (`issue_context`, `reference_data`, `raw_request`, `issues_transition`, attachments), an `issues/{id}` resource, then the first release.
+- **Next:** the first release of `@redmine-ts/mcp`.
 - **Open after phase 4:** CORS for browser clients on other origins (`--allow-origin` only lifts the 403 today), a Host allowlist flag for proxies that keep the client's Host, tool schemas without `type` arrays (the MCP Inspector's `--strict` warns 552 times across 52 tools that single-type dialects such as Gemini's may reject them), and the request id in the server's own HTTP error bodies (they send `id: null`, as the SDK's do).
 - **Later:** OAuth for ChatGPT and claude.ai connectors, an eval set of golden prompts measuring tool selection on Claude and GPT, prompts, and project, tracker and field allowlists for writes.
-- **Follow-ups found while building:** expose filter value words (such as `open`) in the SDK catalog so the server does not infer them; resolve the SDK for tests with tsdown's dev exports instead of tsconfig paths; shorten the longest tool descriptions.
+- **Follow-ups found while building:** expose filter value words (such as `open`) in the SDK catalog so the server does not infer them; resolve the SDK for tests with tsdown's dev exports instead of tsconfig paths; shorten the longest tool descriptions. From phase 3: Redmine 6.1 and 7.0 ignore `assigned_to_id: null` on an issue update and clear the field only for `""`, while the SDK types and `issues_update` accept only an integer or null, so an agent cannot unassign without `raw_request`; and `where: { issue_id: [1, 2] }` compiles to `issue_id=1|2`, which Redmine reads as issue 1 only, because its `issue_id` filter takes a comma-separated list in one value.
 
 The SDK stays free of `@modelcontextprotocol/sdk`. Sources: `research.md` (sections "Агенты и MCP" and "OAuth2 не заменяет клиентскую политику"), `docs/architecture.md`, and the MCP design proposal in this repository's decision log (`.audit/decisions.tsv`, phase `mcp-design`).
 
@@ -35,9 +36,11 @@ Sources: the owner's request, which named a client called devrelay as the model 
 
 A command that reads an instance with an admin key and writes a config with literal types: custom field names mapped to `cf_<id>`, and the instance's statuses, trackers, and priorities. With that config, filters can read `cf.severity` instead of `cf_12`. Custom field definitions are visible only to admins, so the CLI also accepts a hand-written config of the same shape. Source: `research.md` (sections "Custom fields" and "Слои").
 
-## Journal details as a readable diff (next)
+## Journal details as a readable diff (done in MCP)
 
 Redmine returns journal details with ids as strings, such as `status_id` from `"1"` to `"2"`. A normalizer turns them into names through the same cached lookups, which is the main input a triage agent needs. `issue_context` depends on it. Source: `research.md` (section "Журналы").
+
+Done for MCP: the normalizer lives in `packages/mcp/src/workflow/journals.ts` for now, with the name lookups it needs. It can move to the curated toolkit when that package exists, so scripts get the same diff.
 
 ## Webhook verification for Redmine 7.0 (later)
 
