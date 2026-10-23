@@ -18,6 +18,11 @@ export interface FilterSpec {
   readonly ops: readonly string[];
   /** Value words compiled to wire values, e.g. status_id: { open: "o", closed: "c", any: "*" }. */
   readonly words?: Readonly<Record<string, string>>;
+  /**
+   * Separator for a list under `=` and `!`. Absent means "|", which Redmine's short syntax splits on. A filter
+   * that reads only its first value and splits that on commas (issue_id, parent_id, relations) sets ",".
+   */
+  readonly join?: ",";
 }
 
 /**
@@ -34,6 +39,8 @@ export type RequestBody =
       readonly kind: "json";
       readonly envelope: string | null;
       readonly siblings: readonly string[];
+      /** Fields Redmine ignores as `null` but clears as `""`: a `null` input value goes on the wire as `""`. */
+      readonly clear?: readonly string[];
     }
   /** Raw application/octet-stream taken from `input[key]`. Any other content type is a 406. */
   | { readonly kind: "binary"; readonly key: string }

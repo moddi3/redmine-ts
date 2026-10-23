@@ -101,7 +101,8 @@ export function planRequest(
   const siblings: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     if (owned.has(key)) continue;
-    (body.siblings.includes(key) ? siblings : fields)[key] = value;
+    const sent = value === null && body.clear?.includes(key) ? "" : value;
+    (body.siblings.includes(key) ? siblings : fields)[key] = sent;
   }
   const payload =
     body.envelope === null ? { ...fields, ...siblings } : { [body.envelope]: fields, ...siblings };

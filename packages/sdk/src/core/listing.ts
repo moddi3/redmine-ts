@@ -80,7 +80,7 @@ function compileCond(
   spec: FilterSpec,
   at: string,
 ): { code: string | null; wire: string } {
-  if (!isRecord(cond)) return { code: "=", wire: joinValues(cond, at, spec.words) };
+  if (!isRecord(cond)) return { code: "=", wire: joinValues(cond, at, spec.join, spec.words) };
   const keys = Object.keys(cond).filter((k) => cond[k] !== undefined);
   const [name] = keys;
   if (keys.length !== 1 || name === undefined) {
@@ -91,7 +91,7 @@ function compileCond(
   const value = cond[name];
   switch (name) {
     case "not":
-      return { code: "!", wire: `!${joinValues(value, at)}` };
+      return { code: "!", wire: `!${joinValues(value, at, spec.join)}` };
     case "between": {
       if (!Array.isArray(value) || value.length !== 2) {
         throw invalidInput(`${at}: between takes a [from, to] pair`);
@@ -118,7 +118,12 @@ function scalar(value: unknown, at: string): string {
   throw invalidInput(`${at}: expected a string, number or boolean, got ${describeType(value)}`);
 }
 
-function joinValues(value: unknown, at: string, words?: FilterSpec["words"]): string {
+function joinValues(
+  value: unknown,
+  at: string,
+  separator: "|" | NonNullable<FilterSpec["join"]> = "|",
+  words?: FilterSpec["words"],
+): string {
   const values: readonly unknown[] = Array.isArray(value) ? value : [value];
   if (values.length === 0) throw invalidInput(`${at}: an empty list matches nothing useful`);
   return values
@@ -126,7 +131,7 @@ function joinValues(value: unknown, at: string, words?: FilterSpec["words"]): st
       const text = scalar(v, at);
       return own(words, text) ?? text;
     })
-    .join("|");
+    .join(separator);
 }
 
 function describeType(value: unknown): string {

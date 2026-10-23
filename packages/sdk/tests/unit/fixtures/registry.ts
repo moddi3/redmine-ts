@@ -40,7 +40,8 @@ export const getIssues = op({
     assigned_to_id: { ops: ["=", "!", "*", "!*"] },
     updated_on: { ops: ["=", ">=", "<=", "><", "!*", "*"] },
     subject: { ops: ["=", "~", "!~", "^", "$"] },
-    issue_id: { ops: ["=", "!", ">="] },
+    issue_id: { ops: ["=", "!", ">="], join: "," },
+    done_ratio: { ops: ["=", ">=", "><"], join: "," },
   },
   customFieldFilters: true,
   response: { kind: "list", items: "issues", paged: true, keyset: { param: "issue_id" } },
@@ -80,7 +81,7 @@ export const updateIssue = op({
   method: "PUT",
   path: "issues/{issue_id}.json",
   pathParams: ["issue_id"],
-  body: { kind: "json", envelope: "issue", siblings: [] },
+  body: { kind: "json", envelope: "issue", siblings: [], clear: ["assigned_to_id"] },
   response: { kind: "empty" },
   safety: "write",
 });

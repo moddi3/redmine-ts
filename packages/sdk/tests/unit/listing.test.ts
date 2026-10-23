@@ -27,6 +27,20 @@ describe("compileWhere", () => {
     ["ends_with", { subject: { ends_with: "?" } }, { subject: "$?" }],
     ["raw, verbatim and unchecked", { updated_on: { raw: "<t-30" } }, { updated_on: "<t-30" }],
     ["a custom field list", { cf_12: ["S1", "S2"] }, { cf_12: "S1|S2" }],
+    ["a comma list for a filter that reads one value", { issue_id: [4, 9] }, { issue_id: "4,9" }],
+    ["a single value for that filter", { issue_id: 4 }, { issue_id: "4" }],
+    ["not with a comma list", { issue_id: { not: [4, 9] } }, { issue_id: "!4,9" }],
+    [
+      "a range stays pipe-separated",
+      { done_ratio: { between: [10, 50] } },
+      { done_ratio: "><10|50" },
+    ],
+    ["a bound for a comma filter", { issue_id: { gte: 4 } }, { issue_id: ">=4" }],
+    [
+      "a comma filter beside a pipe filter",
+      { done_ratio: [30, 40], assigned_to_id: [1, 2] },
+      { done_ratio: "30,40", assigned_to_id: "1|2" },
+    ],
     ["an operator on a custom field", { cf_7: { contains: "x" } }, { cf_7: "~x" }],
     [
       "an undefined condition",

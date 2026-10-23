@@ -147,9 +147,14 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
       const caps = (Object.keys(CAPS) as Cap[]).filter((c) =>
         CAPS[c].some((code) => codes.includes(code)),
       );
+      const join = overlay.commaLists.some((g) => g.ops.includes(id) && g.filters.includes(p.name));
       where.push({
         name: p.name,
-        spec: Object.keys(words).length > 0 ? { ops: codes, words } : { ops: codes },
+        spec: {
+          ops: codes,
+          ...(Object.keys(words).length > 0 ? { words } : {}),
+          ...(join ? { join: "," as const } : {}),
+        },
         caps,
         doc: jsDoc(p.description, sinceTag(p["x-since"])),
         description: p.description,
@@ -191,7 +196,13 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
       fail(`ambiguous body envelope ${envelopes.map(([k]) => k).join(", ")}`);
     const envelope = envelopes[0];
     const siblings = top.filter(([k]) => k !== envelope?.[0]).map(([k]) => k);
-    body = { kind: "json", envelope: envelope?.[0] ?? null, siblings };
+    const clear = overlay.clearAsEmpty[id];
+    body = {
+      kind: "json",
+      envelope: envelope?.[0] ?? null,
+      siblings,
+      ...(clear ? { clear } : {}),
+    };
     if (envelope) fields.push(...members(envelope[1]));
     fields.push(...members(schema).filter((f) => siblings.includes(f.key)));
   } else if (Object.keys(content).length > 0) {
@@ -371,6 +382,25 @@ function checkOverlay(ops: OpModel[], doc: OpenApi, overlay: Overlay): void {
       throw new Error(`overlay.keyset.${id} is not a paged list`);
     }
     if (!op.descriptor.filters[param]) throw new Error(`overlay.keyset.${id}: no filter ${param}`);
+  }
+  for (const [id, keys] of Object.entries(overlay.clearAsEmpty)) {
+    const op = need("clearAsEmpty", id);
+    for (const key of keys) {
+      const field = op.fields.find((f) => f.key === key);
+      if (!field?.type.includes("null")) {
+        throw new Error(`overlay.clearAsEmpty.${id}: ${key} is not a nullable body field`);
+      }
+    }
+  }
+  for (const { ops: ids, filters } of overlay.commaLists) {
+    for (const id of ids) {
+      const op = need("commaLists", id);
+      for (const name of filters) {
+        if (!op.descriptor.filters[name]?.ops.includes("=")) {
+          throw new Error(`overlay.commaLists.${id}: no filter ${name} documents =`);
+        }
+      }
+    }
   }
   for (const [name, words] of Object.entries(overlay.filterWords)) {
     const specs = ops.flatMap((o) => o.where.filter((f) => f.name === name).map((f) => f.spec));
