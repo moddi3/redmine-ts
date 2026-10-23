@@ -14,7 +14,7 @@ import type { Client } from "./clients.ts";
 import { consentPage, errorPage } from "./pages.ts";
 import { grantedScopes, redmineScope, scopeNames, scopesFor } from "./scopes.ts";
 import type { Scope } from "./scopes.ts";
-import { createSealer, MIN_SECRET_LENGTH, now, randomToken, sha256 } from "./seal.ts";
+import { createSealer, isStrongSecret, now, randomToken, SECRET_RULE, sha256 } from "./seal.ts";
 import {
   comparablePath,
   methodNotAllowed,
@@ -44,8 +44,8 @@ export type RedmineOAuthOptions = OAuthSettings &
 
 interface OAuthSettings {
   /**
-   * The secret everything the server hands out is sealed with, at least 32 characters, such as the
-   * output of `openssl rand -base64 32`. Changing it signs every client out.
+   * The secret everything the server hands out is sealed with: at least 32 random characters, such as
+   * the output of `openssl rand -base64 32`, never a passphrase. Changing it signs every client out.
    */
   secret: string;
   /** The secret before the last change, still accepted to open what it sealed. */
@@ -196,8 +196,8 @@ export function createAuthorizationServer(
   // Called unbound, never as context.fetch(): Workers refuse their fetch called as a method.
   const { paths, redmineUrl, fetch: send, version, access, onError } = context;
   const secrets = [options.secret, ...(options.previousSecret ? [options.previousSecret] : [])];
-  if (secrets.some((secret) => secret.length < MIN_SECRET_LENGTH)) {
-    throw new TypeError(`oauth.secret must be at least ${MIN_SECRET_LENGTH} characters`);
+  if (!secrets.every(isStrongSecret)) {
+    throw new TypeError(`oauth.secret and oauth.previousSecret ${SECRET_RULE}`);
   }
   const app = options.redmineApp;
   if (app === undefined ? options.apiKeyLogin !== true : !app.clientId || !app.clientSecret) {

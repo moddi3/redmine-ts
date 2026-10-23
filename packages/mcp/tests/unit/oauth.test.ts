@@ -1039,7 +1039,11 @@ describe("built-in authorization server", () => {
         });
     expect(create({ publicUrl: "http://mcp.example.com/mcp" })).toThrow("https");
     expect(create({ publicUrl: "http://127.0.0.1:3737/mcp" })).not.toThrow();
-    expect(create({}, { secret: "short" })).toThrow("32 characters");
+    for (const weak of ["short", "a".repeat(44), "ab".repeat(22), "0123456789".repeat(4)]) {
+      expect(create({}, { secret: weak })).toThrow("at least 32 random characters");
+      expect(create({}, { previousSecret: weak })).toThrow("at least 32 random characters");
+    }
+    expect(create({}, { secret: randomBytes(32).toString("hex") })).not.toThrow();
     expect(create({}, { redmineApp: { clientId: "", clientSecret: "" } })).toThrow("clientId");
     expect(create({ publicUrl: undefined })).toThrow("publicUrl");
     // Clients choose the metadata URLs, so the handler has no unguarded default fetch for them.

@@ -102,6 +102,9 @@ interface RequestAuth {
 
 const ORIGIN_SCHEME = /^https?:\/\//i;
 
+/** RFC 6750's credentials: the scheme in any case, spaces, one b64token, nothing else. */
+const BEARER = /^Bearer +([\w.~+/-]+=*)$/i;
+
 /** An entry of allowedOrigins that names scheme, host and port, as a browser writes an Origin. */
 export function isOrigin(value: string): boolean {
   try {
@@ -238,6 +241,9 @@ export function publicUrlProblem(publicUrl: string, oauth: boolean): string | un
   if (oauth && url.protocol !== "https:" && !localhost) {
     return "must be https for OAuth, except on localhost";
   }
+  // The metadata advertises this exact string as the resource, which clients compare as written.
+  const canonical = publicPaths(url).identifier;
+  if (publicUrl !== canonical) return `must be written as ${canonical}`;
   return undefined;
 }
 
@@ -302,8 +308,17 @@ function bearerGate(
         );
       }
       const challenge = { requiredScopes: scopes, resourceMetadataUrl };
+      // One Bearer credential and nothing after it; the SDK's parser ignores trailing fields.
+      const token = BEARER.exec(authorization)?.[1];
+      if (token === undefined) {
+        const malformed = new OAuthError(
+          OAuthErrorCode.InvalidToken,
+          "Send one token as Authorization: Bearer <token>",
+        );
+        return bearerAuthChallengeResponse(malformed, challenge);
+      }
       try {
-        const authInfo = await verifyBearerToken(authorization, {
+        const authInfo = await verifyBearerToken(`Bearer ${token}`, {
           verifier: tokens,
           expectedResource: resource,
           resourceMetadataUrl,

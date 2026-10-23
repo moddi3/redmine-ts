@@ -30,6 +30,19 @@ const encoder = new TextEncoder();
 /** The secret must carry at least 256 bits, written as 32 characters or more. */
 export const MIN_SECRET_LENGTH = 32;
 
+/** What the secret must be, for messages that refuse one. */
+export const SECRET_RULE: string = `must be at least ${MIN_SECRET_LENGTH} random characters, such as the output of openssl rand -base64 32, not a phrase or a pattern`;
+
+/**
+ * Whether `secret` is long and looks random. Anyone can read a sealed consent value off the consent
+ * page and try guesses offline, so a guessable secret opens every token. This catches repeated
+ * patterns; it cannot tell a long passphrase, which the rule forbids, from random text.
+ */
+export function isStrongSecret(secret: string): boolean {
+  // 64 random hex digits use all 16 almost always, and fewer than 12 practically never.
+  return secret.length >= MIN_SECRET_LENGTH && new Set(secret).size >= 12;
+}
+
 /**
  * Seals with the first secret and opens with any of them, so a rotation lists the new secret first
  * and the old one after it until what the old one sealed has expired.

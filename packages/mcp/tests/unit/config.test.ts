@@ -270,7 +270,17 @@ describe("parseCli --http with OAuth", () => {
     [
       { REDMINE_MCP_AUTH_SECRET: "short" },
       [],
-      "REDMINE_MCP_AUTH_SECRET must be at least 32 characters",
+      "REDMINE_MCP_AUTH_SECRET must be at least 32 random characters",
+    ],
+    [
+      { REDMINE_MCP_AUTH_SECRET: "redmine".repeat(6) },
+      [],
+      "REDMINE_MCP_AUTH_SECRET must be at least 32 random characters",
+    ],
+    [
+      { REDMINE_MCP_PUBLIC_URL: "https://redmine.example.com/redmine/mcp/" },
+      [],
+      "REDMINE_MCP_PUBLIC_URL must be written as https://redmine.example.com/redmine/mcp",
     ],
     [
       { REDMINE_MCP_PUBLIC_URL: undefined },

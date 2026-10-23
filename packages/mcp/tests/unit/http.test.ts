@@ -482,6 +482,18 @@ describe("createRedmineMcpHandler with a verifier", () => {
     expect(seen).toEqual([]);
   });
 
+  it.each([
+    ["Bearer alice extra", 401],
+    ["Bearer alice, Bearer bob", 401],
+    ["Bearer", 401],
+    ["Basic YWxpY2U6eA==", 401],
+    ["bearer alice", 200],
+    ["BEARER  alice", 200],
+  ])("takes exactly one Bearer token: %j answers %i", async (authorization, status) => {
+    const { call } = gated();
+    expect((await call({ Authorization: authorization })).status).toBe(status);
+  });
+
   it("answers 403 insufficient_scope for a token without a redmine scope", async () => {
     const response = await gated().call({ Authorization: "Bearer unscoped" });
     expect(response.status).toBe(403);
@@ -548,6 +560,17 @@ describe("createRedmineMcpHandler with a verifier", () => {
     expect(create({ verifier })).toThrow("publicUrl");
     expect(create({ verifier, publicUrl: "http://redmine.example.com/mcp" })).toThrow("https");
     expect(create({ verifier, publicUrl: `${publicUrl}?x=1` })).toThrow("query");
+    // The metadata advertises publicUrl as written, so only its canonical spelling is accepted.
+    for (const [written, canonical] of [
+      [`${publicUrl}/`, publicUrl],
+      ["https://Redmine.Example.com/redmine/mcp", publicUrl],
+      ["https://redmine.example.com:443/redmine/mcp", publicUrl],
+      ["https://redmine.example.com/redmine/./mcp", publicUrl],
+      ["https://mcp.example.com/", "https://mcp.example.com"],
+    ]) {
+      expect(create({ verifier, publicUrl: written })).toThrow(`must be written as ${canonical}`);
+    }
+    expect(create({ verifier, publicUrl: "https://mcp.example.com" })).not.toThrow();
     expect(
       create({
         verifier,

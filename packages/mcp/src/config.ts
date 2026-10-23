@@ -11,7 +11,7 @@ import type { Access, RedmineConfig } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { API_KEY_HEADER, isOrigin, publicUrlProblem } from "./http.ts";
 import type { RedmineMcpHandlerOptions } from "./http.ts";
-import { MIN_SECRET_LENGTH } from "./oauth/seal.ts";
+import { isStrongSecret, MIN_SECRET_LENGTH, SECRET_RULE } from "./oauth/seal.ts";
 import type { RedmineOAuthOptions } from "./oauth/server.ts";
 import { publicFetch } from "./public-fetch.ts";
 import { ACCESS_ORDER, strictest } from "./tools.ts";
@@ -56,8 +56,9 @@ Environment for OAuth over HTTP:
                        https://mcp.example.com/mcp. The server then serves its path,
                        and the OAuth paths under it, instead of /mcp
   REDMINE_MCP_AUTH_SECRET
-                       Turns OAuth sign-in on: ${MIN_SECRET_LENGTH} characters or more that seal
-                       codes and tokens, such as from openssl rand -base64 32
+                       Turns OAuth sign-in on: ${MIN_SECRET_LENGTH} or more random characters that
+                       seal codes and tokens, from openssl rand -base64 32, never a
+                       passphrase
   REDMINE_MCP_AUTH_PREVIOUS_SECRET
                        Optional: the secret before the last change, still accepted
   REDMINE_OAUTH_CLIENT_ID, REDMINE_OAUTH_CLIENT_SECRET
@@ -141,12 +142,7 @@ const optionalText = z.preprocess(blankToUndefined, z.string().trim().optional()
 
 const authSecret = z.preprocess(
   blankToUndefined,
-  z
-    .string()
-    .min(MIN_SECRET_LENGTH, {
-      error: `must be at least ${MIN_SECRET_LENGTH} characters, such as the output of openssl rand -base64 32`,
-    })
-    .optional(),
+  z.string().refine(isStrongSecret, { error: SECRET_RULE }).optional(),
 );
 
 /** Settings that mean nothing without REDMINE_MCP_AUTH_SECRET. */
