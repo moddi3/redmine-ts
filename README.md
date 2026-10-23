@@ -32,12 +32,12 @@ Run `vp install` again after you pull changes.
 
 Run these from the repo root:
 
-| Command           | What it does                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| `vp check`        | Checks formatting, lints, and typechecks everything, including the SDK's type tests and `examples/`. |
-| `vp run -r test`  | Runs the unit and generator tests of every package. Contract tests skip when no server is up.        |
-| `vp run -r build` | Builds every package. Each build runs publint and Are the Types Wrong and fails on any issue.        |
-| `vp run ready`    | Runs the three commands above in order.                                                              |
+| Command           | What it does                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------- |
+| `vp check`        | Checks formatting, lints, and typechecks everything, including the SDK's type tests and `examples/`.    |
+| `vp run -r test`  | Runs the unit and generator tests of every package. Contract tests skip when no server is up.           |
+| `vp run -r build` | Builds every package. Each build runs publint and Are the Types Wrong and fails on any issue.           |
+| `vp run ready`    | Runs the three commands above, building before testing, because the MCP HTTP tests start the built CLI. |
 
 Run these from `packages/sdk`:
 

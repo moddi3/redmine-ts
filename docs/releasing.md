@@ -110,7 +110,7 @@ This way needs no token in GitHub. It is how the first version of each package i
 
 3. Create a GitHub release for each new tag, with that version's section of the package's `CHANGELOG.md` as notes: `gh release create <tag> --verify-tag --title <tag> --notes-file <section.md>`.
 4. For a package's first version, add the trusted publisher as described above.
-5. Rerun the failed Release run. It finds nothing to publish and ends in `none` mode.
+5. Rerun the whole failed Release run with `gh run rerun <run-id>`, not only its failed job: `select-mode` must ask npm again, then it finds nothing to publish and ends in `none` mode. `--failed` reruns `publish` with the old plan, which tries the same versions again and fails.
 
 ## What CI and the weekly workflow check
 
