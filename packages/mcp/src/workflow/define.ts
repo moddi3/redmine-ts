@@ -4,6 +4,7 @@
 import type { ContentBlock } from "@modelcontextprotocol/server";
 import { RedmineError, VERSIONS } from "@redmine-ts/sdk";
 import { z } from "zod";
+import { portable } from "../portable.ts";
 import type { Annotations, Client, Schema, Tier, ToolContext, ToolSpec } from "../tools.ts";
 
 export interface WorkflowTool<I extends z.ZodObject, O extends z.ZodObject> {
@@ -38,13 +39,15 @@ export function defineTool<I extends z.ZodObject, O extends z.ZodObject>(
 
 /** z.int() bounds every integer to the safe range, which tells an agent nothing. */
 function jsonSchema(schema: z.ZodObject, io: "input" | "output"): Schema {
-  return z.toJSONSchema(schema, {
-    io,
-    override: ({ jsonSchema: node }) => {
-      if (node.maximum === Number.MAX_SAFE_INTEGER) delete node.maximum;
-      if (node.minimum === Number.MIN_SAFE_INTEGER) delete node.minimum;
-    },
-  }) as Schema;
+  return portable(
+    z.toJSONSchema(schema, {
+      io,
+      override: ({ jsonSchema: node }) => {
+        if (node.maximum === Number.MAX_SAFE_INTEGER) delete node.maximum;
+        if (node.minimum === Number.MIN_SAFE_INTEGER) delete node.minimum;
+      },
+    }) as Schema,
+  );
 }
 
 /** A failure the tool explains itself, such as a status name that matches nothing. */
