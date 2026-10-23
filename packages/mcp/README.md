@@ -184,7 +184,7 @@ Give the client the public URL. Every client below finds the rest from the serve
 
 Clients that can send headers, such as Claude Code, Codex, Cursor, and VS Code, may keep using `X-Redmine-API-Key` instead. A request with both uses the key. A token goes in `Authorization: Bearer <token>`, alone.
 
-Every client is public: it proves itself with PKCE alone. A metadata document or a registration that declares another `token_endpoint_auth_method`, such as `private_key_jwt`, is refused, since the server would not check what it declares. A registration takes at most 5 redirect URIs of 256 characters each and a name of 100. The server refuses a metadata document URL with a port, which the draft allows; no known client uses one.
+Every client is public: it proves itself with PKCE alone. A registration that asks for `client_secret_basic` or `client_secret_post`, or names no method, is answered `token_endpoint_auth_method: "none"`, which the client then uses; one that asks for a key-based method, such as `private_key_jwt` or `tls_client_auth`, is refused. A metadata document is the client's own declaration, so one that declares anything but `none` is refused, since the server would not check it. A registration takes at most 5 redirect URIs of 256 characters each; an empty name, or one over 100 characters, is dropped. The server refuses a metadata document URL with a port, which the draft allows; no known client uses one.
 
 ### Scopes and access modes
 

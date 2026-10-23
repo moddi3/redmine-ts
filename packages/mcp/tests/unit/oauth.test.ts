@@ -795,12 +795,31 @@ describe("built-in authorization server", () => {
       return { status: response.status, body: (await response.json()) as Record<string, string> };
     };
     const uri = (length: number) => `https://app.example.com/${"c".repeat(length - 24)}`;
+    // A client asking for a secret gets none, which it must then use, as RFC 7591 lets the server say.
+    for (const method of [undefined, "none", "client_secret_basic", "client_secret_post"]) {
+      const registered = await register({
+        redirect_uris: [uri(40)],
+        ...(method === undefined ? {} : { token_endpoint_auth_method: method }),
+      });
+      expect([method, registered.status, registered.body.token_endpoint_auth_method]).toEqual([
+        method,
+        201,
+        "none",
+      ]);
+      expect(registered.body).not.toHaveProperty("client_secret");
+    }
+    // A name that is empty or too long is dropped, and the client registers anyway.
+    for (const client_name of ["", "   ", "n".repeat(101)]) {
+      const registered = await register({ redirect_uris: [uri(40)], client_name });
+      expect(registered.status).toBe(201);
+      expect(registered.body).not.toHaveProperty("client_name");
+    }
     for (const refused of [
-      { redirect_uris: [uri(40)], token_endpoint_auth_method: "client_secret_basic" },
       { redirect_uris: [uri(40)], token_endpoint_auth_method: "private_key_jwt" },
+      { redirect_uris: [uri(40)], token_endpoint_auth_method: "tls_client_auth" },
+      { redirect_uris: [uri(40)], token_endpoint_auth_method: "self_signed_tls_client_auth" },
       { redirect_uris: Array.from({ length: 6 }, (_, at) => `${uri(40)}${at}`) },
       { redirect_uris: [uri(257)] },
-      { redirect_uris: [uri(40)], client_name: "n".repeat(101) },
     ]) {
       expect(await register(refused)).toMatchObject({
         status: 400,

@@ -46,7 +46,8 @@ const Document = z.object({
 });
 
 const Registration = z.object({
-  client_name: z.string().trim().min(1).max(NAME_MAX_LENGTH).optional(),
+  // An empty or long name is dropped, not refused: the client still registers.
+  client_name: z.string().trim().min(1).max(NAME_MAX_LENGTH).optional().catch(undefined),
   redirect_uris: z.array(z.string().max(REDIRECT_MAX_LENGTH)).min(1).max(REGISTERED_REDIRECTS),
   token_endpoint_auth_method: z.string().optional(),
 });
@@ -140,12 +141,12 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
         };
       }
       const { client_name, redirect_uris, token_endpoint_auth_method } = parsed.data;
-      if (!publicClient(token_endpoint_auth_method)) {
+      if (!REGISTERABLE_METHODS.has(token_endpoint_auth_method ?? "none")) {
         return {
           ok: false,
           error: "invalid_client_metadata",
           description:
-            "This server registers public clients only: token_endpoint_auth_method must be none",
+            "This server registers public clients only: it answers token_endpoint_auth_method none, and cannot verify a key",
         };
       }
       if (!redirect_uris.every(isRedirectUri)) {
@@ -213,6 +214,18 @@ export function redirectMatches(registered: string, requested: string): boolean 
 function publicClient(method: string | undefined): boolean {
   return method === undefined || method === "none";
 }
+
+/**
+ * What a registration may ask for. The server is the registrar, so it may answer `none` to a client
+ * that asked for a secret it never gets, as RFC 7591 allows, and an omitted method means
+ * client_secret_basic there. Key-based methods are refused: their clients expect to prove a key. A
+ * metadata document is the client's own declaration, so it gets no such rewrite.
+ */
+const REGISTERABLE_METHODS: ReadonlySet<string> = new Set([
+  "none",
+  "client_secret_basic",
+  "client_secret_post",
+]);
 
 /** Whether `requested` is one of the client's redirect URIs. */
 export function allowsRedirect(client: Client, requested: string): boolean {
