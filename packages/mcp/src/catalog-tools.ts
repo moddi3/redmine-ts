@@ -30,7 +30,7 @@ export const HEAVY_KEYS: readonly string[] = [
 export const DEFAULT_LIMIT = 25;
 export const MAX_LIMIT = 100;
 
-const BY_METHOD: Readonly<
+export const BY_METHOD: Readonly<
   Record<CatalogEntry["method"], { tier: Tier; annotations: Annotations }>
 > = {
   GET: {
@@ -165,7 +165,7 @@ function toolFor(entry: CatalogEntry): ToolSpec {
         ...common,
         inputSchema: pagedInput(entry.inputSchema),
         outputSchema: pageOutput(output.schema),
-        run: (rm, input) => listPage(call, rm, input),
+        run: async (rm, input) => ({ structured: await listPage(call, rm, input) }),
       };
     case "item":
       return {
@@ -174,8 +174,11 @@ function toolFor(entry: CatalogEntry): ToolSpec {
         outputSchema: output.optional
           ? { $schema: DRAFT, type: "object", anyOf: [withoutDraft(output.schema), OK] }
           : output.schema,
-        run: async (rm, input) =>
-          ((await call(rm, input)) as Record<string, unknown> | undefined) ?? { ok: true },
+        run: async (rm, input) => ({
+          structured: ((await call(rm, input)) as Record<string, unknown> | undefined) ?? {
+            ok: true,
+          },
+        }),
       };
     case "empty":
       return {
@@ -184,7 +187,7 @@ function toolFor(entry: CatalogEntry): ToolSpec {
         outputSchema: { $schema: DRAFT, ...OK },
         run: async (rm, input) => {
           await call(rm, input);
-          return { ok: true };
+          return { structured: { ok: true } };
         },
       };
     case "binary":

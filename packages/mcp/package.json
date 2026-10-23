@@ -1,7 +1,6 @@
 {
   "name": "@redmine-ts/mcp",
   "version": "0.0.0",
-  "private": true,
   "description": "MCP server for the Redmine REST API, with one typed tool per operation",
   "keywords": [
     "mcp",
@@ -20,7 +19,7 @@
     "directory": "packages/mcp"
   },
   "bin": {
-    "mcp": "./dist/cli.mjs"
+    "redmine-mcp": "./dist/cli.mjs"
   },
   "files": [
     "dist",
@@ -30,6 +29,7 @@
   "sideEffects": false,
   "exports": {
     ".": "./dist/index.mjs",
+    "./node": "./dist/node.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {

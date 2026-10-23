@@ -66,7 +66,11 @@ Repeat this for every new package in the repo. A trusted publisher made with `np
 
 When npm refuses the exchange, pnpm publishes without a token and npm answers with a bare `404 Not Found`. The `publish` job then runs one more step that asks npm directly and prints its reason, or says that npm accepted the workflow and refused the publish itself.
 
-The trusted publisher form lives in a package's settings, so the package must exist on npm first. Publish the first version of each package in one of the two ways below, then add the trusted publisher.
+The trusted publisher form lives in a package's settings, so the package must exist on npm first. Publish the first version of each package in one of the two ways below, then add the trusted publisher. From a terminal, run `npm trust github @redmine-ts/<name> --file release.yml --repo moddi3/redmine-ts --allow-publish` outside this repo, because npm refuses to run inside it under the pnpm `devEngines` setting.
+
+#### Blocked for this repository: npm/cli#9969
+
+As of October 2026, npm refuses the exchange for this repository with `404 {"message":"OIDC token exchange error - package not found"}`, although the trusted publisher matches. GitHub repositories created after 2026-07-15 issue OIDC tokens with [immutable subject claims](https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/) (`gh api repos/moddi3/redmine-ts/actions/oidc/customization/sub` shows `use_immutable_subject: true`), which cannot be turned off, and npm's exchange rejects them: [npm/cli#9969](https://github.com/npm/cli/issues/9969). Until npm fixes it, every release is published from the owner's machine, as in [Publish from your machine](#publish-from-your-machine), after the Version Packages pull request is merged. The `publish` job keeps trying and fails with that message, which shows when the fix lands.
 
 ### First publish with a temporary token
 
@@ -85,25 +89,28 @@ This way keeps provenance on the first version.
 
 If your npm account requires two-factor authentication for publishing, the token needs the option that bypasses it. npm is phasing those tokens out, which is one more reason to delete the token once trusted publishing works.
 
-### First publish from your machine
+### Publish from your machine
 
-This way needs no token in GitHub, and the first version has no provenance.
+This way needs no token in GitHub. It is how the first version of each package is published, and how every release is published while [npm/cli#9969](#blocked-for-this-repository-npmcli9969) blocks trusted publishing. These versions carry no provenance.
 
-1. Merge the Version Packages pull request. Its `publish` job fails because nothing can authenticate yet.
+1. Merge the Version Packages pull request. Its `publish` job fails because nothing can authenticate.
 2. Publish from an up-to-date `main`:
 
    ```sh
    git switch main && git pull
    vp install
-   npm login
+   pnpm whoami || pnpm login
    vp run release
    git push --follow-tags
    ```
 
-   `vp run release` builds every package and runs `changeset publish`, which publishes unpublished versions and creates their git tags.
+   - `pnpm login`, not `npm login`: pnpm 12 keeps its own login (on macOS in `~/Library/Preferences/pnpm/config.yaml`) and uses it instead of `~/.npmrc`. An expired pnpm login ends in the same bare `404 Not Found` as a refused exchange, even while `npm whoami` works.
+   - `vp run release` builds every package and runs `changeset publish`, which publishes unpublished versions and creates their git tags. npm asks for two-factor authentication in the browser.
+   - npm reviews each new version before it is available. The package page shows it as **Validating** for a minute or so, and `npm view` does not list it until then.
 
-3. Add the trusted publisher as described above.
-4. Rerun the failed Release run. It finds nothing to publish and ends in `none` mode.
+3. Create a GitHub release for each new tag, with that version's section of the package's `CHANGELOG.md` as notes: `gh release create <tag> --verify-tag --title <tag> --notes-file <section.md>`.
+4. For a package's first version, add the trusted publisher as described above.
+5. Rerun the failed Release run. It finds nothing to publish and ends in `none` mode.
 
 ## What CI and the weekly workflow check
 

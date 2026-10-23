@@ -1,6 +1,7 @@
-// Plain JS so `node` and `bun` run the built package unchanged. Run `vp run -r build` and
+// Plain JS so `node` and `bun` run the built packages unchanged. Run `vp run -r build` and
 // `node scripts/redmine-env.ts up` first.
 import { readFileSync } from "node:fs";
+import { createRedmineMcpHandler } from "../packages/mcp/dist/index.mjs";
 import { createRedmine, RedmineError } from "../packages/sdk/dist/index.mjs";
 
 const runtime = globalThis.Bun ? `bun ${Bun.version}` : `node ${process.versions.node}`;
@@ -37,6 +38,33 @@ async function smoke(name, server) {
     await check("users.current", async () => {
       const me = await rm.users.current();
       expect(me.login === "admin", `login ${me.login}`);
+    });
+
+    await check("mcp http handler", async () => {
+      const handle = createRedmineMcpHandler({ baseUrl: server.baseUrl, version });
+      // A 2025-era tools/call, which a stateless server answers without a handshake.
+      const call = (headers) =>
+        handle(
+          new Request("http://localhost/mcp", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json, text/event-stream",
+              ...headers,
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name: "users_current", arguments: {} },
+            }),
+          }),
+        );
+      const refused = await call({});
+      expect(refused.status === 401, `no key answered ${refused.status}`);
+      const body = await (await call({ "X-Redmine-API-Key": server.adminKey })).text();
+      const message = JSON.parse(/^data: (.*)$/m.exec(body)?.[1] ?? body);
+      expect(message.result?.structuredContent?.login === "admin", body.slice(0, 200));
     });
 
     await check("issues.create", async () => {

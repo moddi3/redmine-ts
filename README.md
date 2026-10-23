@@ -5,10 +5,10 @@
 
 TypeScript tooling for the Redmine REST API.
 
-| Package                           | Path           | What it is                                                                                |
-| --------------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
-| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node and Bun, and for browsers through a proxy. |
-| [`@redmine-ts/mcp`](packages/mcp) | `packages/mcp` | MCP server with one typed tool per SDK operation, over stdio. Not published yet.          |
+| Package                           | Path           | What it is                                                                                          |
+| --------------------------------- | -------------- | --------------------------------------------------------------------------------------------------- |
+| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node and Bun, and for browsers through a proxy.           |
+| [`@redmine-ts/mcp`](packages/mcp) | `packages/mcp` | MCP server with one typed tool per SDK operation and workflow tools, over stdio or Streamable HTTP. |
 
 The MCP server builds its tools from the SDK's `@redmine-ts/sdk/catalog` entrypoint, which describes each method's input and output as JSON Schema, with its `since` version and its HTTP method. An agent toolkit with a small set of triage tools is planned on the same base.
 

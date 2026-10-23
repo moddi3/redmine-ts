@@ -62,18 +62,43 @@ jobs:
           cache: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: "1.4.4"
       # The image tags float to the latest patch release, and the weekly workflow relies on this pull.
       - run: docker compose -f docker/compose.yaml pull
       - run: node scripts/redmine-env.ts up
       - run: vp run --no-cache test:contract
         working-directory: packages/sdk
+      # The MCP contract suite starts the built CLI with --http.
+      - run: vp run -r build
       - run: vp run --no-cache test:contract
         working-directory: packages/mcp
-      - run: vp run -r build
       - name: runtime smoke (node)
         run: node scripts/runtime-smoke.mjs
       - name: runtime smoke (bun)
         run: bun scripts/runtime-smoke.mjs
+      # Another client against the built CLI over HTTP. --strict fails on tool schemas a client
+      # cannot use. The version is pinned; dlx resolves its dependencies without a lockfile.
+      - name: MCP Inspector smoke (http)
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/mcp-http.log"
+          REDMINE_URL=$(jq -r '."7.0".baseUrl' .redmine/env.json) node packages/mcp/dist/cli.mjs --http &> "$log" &
+          server=$!
+          trap 'kill "$server"; cat "$log"' EXIT
+          timeout 15 bash -c 'until curl -s -o /dev/null http://127.0.0.1:3737/mcp; do sleep 0.2; done'
+          key=$(jq -r '."7.0".adminKey' .redmine/env.json)
+          inspector() {
+            vp dlx --silent @modelcontextprotocol/inspector@2.10.1 --cli http://127.0.0.1:3737/mcp \
+              --header "X-Redmine-API-Key: $key" "$@"
+          }
+          inspector --method tools/list --strict > /dev/null
+          inspector --method tools/call --tool-name users_current | jq -e '.structuredContent.login == "admin"'
+      # A test sees only "Redmine answered 500"; the server's log names the exception.
+      - if: failure()
+        name: Redmine server errors
+        shell: bash
+        run: |
+          docker compose -f docker/compose.yaml logs --no-color 2>&1 \
+            | grep -E -A15 'Completed 500' || echo "no 500 in the Redmine logs"
       - if: always()
         run: node scripts/redmine-env.ts down

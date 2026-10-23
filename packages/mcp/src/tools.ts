@@ -1,9 +1,11 @@
 // The one shape every tool takes, generated or hand-written, so listing, filtering and calling never
 // ask where a tool came from.
 
+import type { ContentBlock } from "@modelcontextprotocol/server";
 import { VERSIONS } from "@redmine-ts/sdk";
 import type { Access, Redmine, RedmineVersion } from "@redmine-ts/sdk";
 import type { JsonSchema } from "@redmine-ts/sdk/catalog";
+import type { Lookups } from "./workflow/lookups.ts";
 
 /** Any declared version: tools see the whole client surface, and the SDK guards versions at runtime. */
 export type Client = Redmine<RedmineVersion>;
@@ -21,6 +23,37 @@ export interface Annotations {
   readonly openWorldHint: boolean;
 }
 
+/**
+ * The one local directory tools may use. Only Node code builds one (`localFiles` from
+ * `@redmine-ts/mcp/node`), so a server without it, such as every HTTP server, cannot reach the file
+ * system at all.
+ */
+export interface LocalFiles {
+  /** A regular file inside the directory, refused with kind invalid_input before anything is read otherwise. */
+  open(path: string): Promise<{ size: number; bytes(): Promise<Uint8Array> }>;
+  /** Writes `body` to a new file named after `filename` that never replaces an existing one. */
+  save(
+    filename: string,
+    fallback: string,
+    body: ReadableStream<Uint8Array>,
+  ): Promise<{ path: string; bytes: number }>;
+}
+
+/** What one server lends its tools across calls. */
+export interface ToolContext {
+  /** Statuses, trackers and the other global lists, cached for a few minutes. */
+  readonly lookups: Lookups;
+  /** Where `path` inputs read from and saved attachments go, when the server has a files directory. */
+  readonly files: LocalFiles | undefined;
+}
+
+export interface ToolResult {
+  /** Becomes structuredContent and the JSON text block. */
+  readonly structured: Record<string, unknown>;
+  /** Blocks JSON cannot carry, such as an image, sent after the JSON block. */
+  readonly extra?: readonly ContentBlock[];
+}
+
 export interface ToolSpec {
   /** `<namespace>_<verb>` in snake_case. */
   readonly name: string;
@@ -32,8 +65,12 @@ export interface ToolSpec {
   readonly tier: Tier;
   readonly since: RedmineVersion;
   readonly until: RedmineVersion | null;
-  /** Resolves to the structured result. Redmine failures reject with a RedmineError. */
-  readonly run: (rm: Client, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  /** Redmine failures reject with a RedmineError. */
+  readonly run: (
+    rm: Client,
+    input: Record<string, unknown>,
+    context: ToolContext,
+  ) => Promise<ToolResult>;
 }
 
 const TIERS: Readonly<Record<Access, readonly Tier[]>> = {

@@ -8,11 +8,12 @@ export default defineConfig({
   pack: {
     // Without the paths to SDK source, so declarations import the built SDK instead of emitting its source.
     tsconfig: "tsconfig.build.json",
-    entry: ["src/index.ts", "src/cli.ts"],
+    entry: ["src/index.ts", "src/node.ts", "src/cli.ts"],
     dts: {
       generator: "tsgo",
     },
-    exports: { exclude: ["cli"] },
+    // The command is redmine-mcp; without a name, tsdown names it after the package, mcp.
+    exports: { exclude: ["cli"], bin: { "redmine-mcp": "./src/cli.ts" } },
     publint: { level: "error" },
     attw: { profile: "esm-only", level: "error" },
   },
