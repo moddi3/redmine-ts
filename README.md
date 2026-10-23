@@ -87,5 +87,5 @@ Dropping a version that reached end of life is a major release.
 ## Where the design lives
 
 - [docs/architecture.md](docs/architecture.md) explains the design and why it is this way: one entrypoint for all versions, the operation registry, retries, pagination, and testing.
-- [.audit/](.audit/) holds the record behind it. `arena/` has the three competing designs and the judge's scores, `decisions.tsv` logs each decision with its evidence, `plan.md` is the build plan, and `probes/` has scripts and their output against real Redmine servers.
+- [.audit/](.audit/) holds the record behind it. `arena/` has the three competing designs and the judge's scores, `decisions.tsv` logs each decision with its evidence, `plan.md` is the build plan, `probes/` has scripts and their output against real Redmine servers, and `research/` has the briefs behind later decisions, such as OAuth and evals.
 - [research.md](research.md) is the original research, in Russian.
