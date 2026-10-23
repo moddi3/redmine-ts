@@ -12,7 +12,7 @@ import type { BearerGrant, BearerVerifier } from "../http.ts";
 import { allowsRedirect, createClients } from "./clients.ts";
 import type { Client } from "./clients.ts";
 import { consentPage, errorPage } from "./pages.ts";
-import { grantedScopes, redmineScope, scopesFor } from "./scopes.ts";
+import { grantedScopes, redmineScope, scopeNames, scopesFor } from "./scopes.ts";
 import type { Scope } from "./scopes.ts";
 import { createSealer, MIN_SECRET_LENGTH, now, randomToken, sha256 } from "./seal.ts";
 import {
@@ -265,25 +265,31 @@ export function createAuthorizationServer(
     if (!allowsRedirect(client, redirectUri)) {
       return errorPage(400, "The redirect_uri is not one the client registered.");
     }
+    // Until the person decides, nothing redirects: a registered client could otherwise send a
+    // malformed request and turn this trusted URL into a redirect to wherever it registered.
+    const refuse = (reason: string) =>
+      errorPage(
+        400,
+        `The client's sign-in request is invalid: ${reason}. Start again from your client.`,
+      );
     const state = params.get("state") ?? undefined;
     if (state !== undefined && state.length > STATE_MAX_LENGTH) {
-      return back(redirectUri, {
-        error: "invalid_request",
-        error_description: "state is too long",
-      });
+      return refuse(`state is longer than ${STATE_MAX_LENGTH} characters`);
     }
-    const fail = (error: string, description: string) =>
-      back(redirectUri, { error, error_description: description, state });
     if (params.get("response_type") !== "code") {
-      return fail("unsupported_response_type", "Only response_type=code is supported");
+      return refuse("only response_type=code is supported");
     }
     const challenge = params.get("code_challenge") ?? "";
     if (params.get("code_challenge_method") !== "S256" || !S256_CHALLENGE.test(challenge)) {
-      return fail("invalid_request", "PKCE with code_challenge_method=S256 is required");
+      return refuse("PKCE with code_challenge_method=S256 is required");
     }
     const resource = params.get("resource");
     if (resource !== null && !sameResource(resource, issuer)) {
-      return fail("invalid_target", `This server issues tokens only for ${issuer}`);
+      return refuse(`this server issues tokens only for ${issuer}`);
+    }
+    const scopes = grantedScopes(params.get("scope"), access);
+    if (scopes === undefined) {
+      return refuse(`the scope names none of ${scopesFor(access).join(", ")}`);
     }
     const nonce = (await browserNonce(request)) ?? randomToken();
     const consent: ConsentPayload = {
@@ -291,7 +297,7 @@ export function createAuthorizationServer(
       client: clientId,
       redirect: redirectUri,
       challenge,
-      scopes: grantedScopes(params.get("scope")?.split(" ") ?? [], access),
+      scopes,
       state,
     };
     return showConsent(client, consent, await sealer.seal("consent", consent, FLOW_TTL), {
@@ -564,11 +570,19 @@ export function createAuthorizationServer(
     if (old.client !== client) {
       return invalidGrant("The refresh token was issued to another client");
     }
-    const requested = form.get("scope");
-    const top = requested === null ? old.scopes.length - 1 : lastIndexIn(old.scopes, requested);
-    if (top === -1) {
-      return { status: 400, error: "invalid_scope", description: "scope exceeds the grant" };
+    // A refresh may narrow the grant, never widen it or name anything else.
+    const requested = scopeNames(form.get("scope"));
+    if (requested.some((name) => !(old.scopes as string[]).includes(name))) {
+      return {
+        status: 400,
+        error: "invalid_scope",
+        description: "scope names what the grant lacks",
+      };
     }
+    const top =
+      requested.length === 0
+        ? old.scopes.length - 1
+        : old.scopes.findLastIndex((scope) => requested.includes(scope));
     const upstream = await refreshUpstream(old.grant);
     return "error" in upstream ? upstream : issue(upstream, old.scopes.slice(0, top + 1), client);
   }
@@ -730,12 +744,6 @@ const UNREACHABLE: TokenError = {
 
 /** Turning apiKeyLogin off ends the key-based grants, and the other way round. */
 const METHOD_CHANGED = invalidGrant("This server signs people in another way now. Sign in again.");
-
-/** The index of the highest of `granted` that `requested` names, or -1. */
-function lastIndexIn(granted: readonly Scope[], requested: string): number {
-  const names = requested.split(" ");
-  return granted.findLastIndex((scope) => names.includes(scope));
-}
 
 /** Codes redeemed by this process, until they expire. */
 function replayGuard(): (id: string, exp: number) => boolean {

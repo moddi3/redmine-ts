@@ -458,41 +458,110 @@ describe("built-in authorization server", () => {
     expect(setupped.redmine.tokenRequests).toEqual([]);
   });
 
-  it("sends PKCE, response_type and resource errors back to the client with iss", async () => {
+  it("answers a request it refuses before consent with a page, never a redirect", async () => {
     const setupped = setup();
     const person = browser(setupped.handle, ORIGIN, setupped.redmine);
-    const { challenge } = pkce();
+    // Anyone may register a client whose redirect URI is a phishing page.
+    const registered = await direct(setupped.handle)(REGISTER, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ redirect_uris: ["https://evil.example/phish"] }),
+    });
+    const evil = ((await registered.json()) as { client_id: string }).client_id;
     const base = {
       response_type: "code",
-      client_id: CLAUDE,
-      redirect_uri: CLAUDE_REDIRECT,
-      code_challenge: challenge,
+      client_id: evil,
+      redirect_uri: "https://evil.example/phish",
+      code_challenge: pkce().challenge,
       code_challenge_method: "S256",
       state: "s1",
     };
     const cases: [Record<string, string>, string][] = [
-      [{ code_challenge_method: "plain" }, "invalid_request"],
-      [{ code_challenge: "" }, "invalid_request"],
-      [{ response_type: "token" }, "unsupported_response_type"],
-      [{ resource: "https://mcp.example.com/other" }, "invalid_target"],
+      [{ code_challenge_method: "plain" }, "PKCE with code_challenge_method=S256 is required"],
+      [{ code_challenge: "" }, "PKCE with code_challenge_method=S256 is required"],
+      [{ response_type: "token" }, "only response_type=code is supported"],
+      [{ resource: "https://mcp.example.com/other" }, "this server issues tokens only for"],
+      [{ state: "s".repeat(1025) }, "state is longer than 1024 characters"],
+      [{ scope: "openid offline_access" }, "the scope names none of"],
     ];
-    for (const [params, error] of cases) {
+    for (const [params, reason] of cases) {
       const response = await person.send(authorizeUrl({ ...base, ...params }));
-      expect(response.status).toBe(302);
-      const location = new URL(response.headers.get("location")!);
-      expect(location.origin + location.pathname).toBe(CLAUDE_REDIRECT);
-      expect(Object.fromEntries(location.searchParams)).toMatchObject({
-        error,
-        state: "s1",
-        iss: PUBLIC_URL,
-      });
+      expect(response.status).toBe(400);
+      expect(response.headers.get("location")).toBeNull();
+      expect(await response.text()).toContain(reason);
     }
-    // An unknown redirect URI never gets a redirect.
+    // An unknown redirect URI never gets a redirect either.
     const stray = await person.send(
-      authorizeUrl({ ...base, redirect_uri: "https://evil.example/cb" }),
+      authorizeUrl({ ...base, client_id: CLAUDE, redirect_uri: "https://evil.example/cb" }),
     );
     expect(stray.status).toBe(400);
     expect(stray.headers.get("location")).toBeNull();
+  });
+
+  it("redirects only after the person decides", async () => {
+    const setupped = setup();
+    const person = browser(setupped.handle, ORIGIN, setupped.redmine);
+    const page = await person.send(
+      authorizeUrl({
+        response_type: "code",
+        client_id: CLAUDE,
+        redirect_uri: CLAUDE_REDIRECT,
+        code_challenge: pkce().challenge,
+        code_challenge_method: "S256",
+        state: "s3",
+      }),
+    );
+    expect(page.headers.get("location")).toBeNull();
+    const denied = await person.send(new URL(AUTHORIZE), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ consent: consentValue(await page.text()), decision: "deny" }),
+    });
+    expect(denied.status).toBe(303);
+    expect(new URL(denied.headers.get("location")!).searchParams.get("error")).toBe(
+      "access_denied",
+    );
+  });
+
+  it("grants what a scope names, everything offered without one, and refuses one naming none of ours", async () => {
+    const setupped = setup();
+    const scopeOf = async (scope: string | undefined) => {
+      const response = await browser(setupped.handle, ORIGIN, setupped.redmine).send(
+        authorizeUrl({
+          response_type: "code",
+          client_id: CLAUDE,
+          redirect_uri: CLAUDE_REDIRECT,
+          code_challenge: pkce().challenge,
+          code_challenge_method: "S256",
+          ...(scope === undefined ? {} : { scope }),
+        }),
+      );
+      const text = await response.text();
+      return response.status === 200 ? (text.match(/<li>/g) ?? []).length : response.status;
+    };
+    expect(await scopeOf(undefined)).toBe(3);
+    expect(await scopeOf("")).toBe(3);
+    expect(await scopeOf("redmine:read openid")).toBe(1);
+    expect(await scopeOf("redmine:write")).toBe(2);
+    expect(await scopeOf("redmine:raed")).toBe(400);
+    expect(await scopeOf("openid offline_access")).toBe(400);
+  });
+
+  it("refuses a refresh that names a scope the grant lacks, and narrows on request", async () => {
+    const setupped = setup();
+    const issued = await tokens(setupped, { scope: "redmine:write" });
+    const refresh = async (scope: string) =>
+      (await (
+        await form(setupped.handle, TOKEN, {
+          grant_type: "refresh_token",
+          refresh_token: issued.refresh_token,
+          client_id: CLAUDE,
+          scope,
+        })
+      ).json()) as Record<string, string>;
+    expect(await refresh("redmine:delete")).toMatchObject({ error: "invalid_scope" });
+    expect(await refresh("redmine:read profile")).toMatchObject({ error: "invalid_scope" });
+    expect(await refresh("redmine:read")).toMatchObject({ scope: "redmine:read" });
   });
 
   it("guards the consent form with a sealed value bound to a __Host- cookie", async () => {

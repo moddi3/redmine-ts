@@ -31,13 +31,22 @@ export function accessFor(scopes: readonly string[]): Access | undefined {
 }
 
 /**
- * What a client asking for `requested` gets: everything up to the highest scope it names that this
- * server offers, or all the server offers when it names none of them.
+ * What a client asking for the `scope` parameter `requested` gets: everything up to the highest scope
+ * it names, capped by what this server offers. Without a scope it gets all the server offers; names
+ * that are not ours, next to ours, are ignored. Undefined when it names none of ours, which is
+ * `invalid_scope`.
  */
-export function grantedScopes(requested: readonly string[], access: Access): Scope[] {
+export function grantedScopes(requested: string | null, access: Access): Scope[] | undefined {
   const offered = scopesFor(access);
-  const top = offered.findLastIndex((scope) => requested.includes(scope));
-  return top === -1 ? offered : offered.slice(0, top + 1);
+  const names = scopeNames(requested);
+  if (names.length === 0) return offered;
+  const top = SCOPES.findLastIndex((scope) => names.includes(scope));
+  return top === -1 ? undefined : offered.slice(0, top + 1);
+}
+
+/** The names in a `scope` parameter, which separates them with spaces. */
+export function scopeNames(scope: string | null): string[] {
+  return scope?.split(" ").filter((name) => name !== "") ?? [];
 }
 
 /**
