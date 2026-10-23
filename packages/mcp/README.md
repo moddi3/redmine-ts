@@ -227,6 +227,7 @@ With a store:
 - Refresh tokens rotate: each works once. A refresh token or a code that comes back a second time means one leaked, so the server ends every token of that sign-in, and refuses its access tokens from then on.
 - Except within 30 seconds of the first use: then the second use is the same client racing itself, such as two processes refreshing at once, or retrying after a timeout. It is refused, and the sign-in stays. The window is the price of not signing people out for that; someone who steals a refresh token and uses it within those 30 seconds is refused too, but does not end the sign-in.
 - A code or refresh token is checked before the server asks Redmine and marked after Redmine answers, so a Redmine outage spends nothing and the client can retry.
+- A store that fails, by throwing or rejecting, fails closed: the token endpoint answers 503 `temporarily_unavailable`, the consent page and Redmine's return show an error page to retry from, the MCP endpoint answers 503, and `onError` gets the cause.
 
 The CLI is one process, so it keeps the store in its memory. An embedded server passes `oauth.store`: `memoryGrantStore()` for a single process, or an adapter for something shared. On Workers that is a Durable Object, one per key, which runs its storage calls one at a time; Workers KV is eventually consistent, so two isolates could both consume one key.
 

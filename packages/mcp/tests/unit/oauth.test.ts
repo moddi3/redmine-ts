@@ -7,7 +7,7 @@ import {
 import type { OAuthClientProvider } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { createRedmineMcpHandler, memoryGrantStore } from "../../src/index.ts";
-import type { RedmineMcpHandlerOptions } from "../../src/index.ts";
+import type { GrantStore, RedmineMcpHandlerOptions } from "../../src/index.ts";
 import {
   browser,
   consentValue,
@@ -1481,6 +1481,118 @@ describe("the grant store", () => {
         (await callTool(setupped.handle, { Authorization: `Bearer ${winner.body.access_token}` }))
           .status,
       ).toBe(200);
+    },
+  );
+
+  it.each([
+    [
+      "rejects",
+      {
+        consume: () => Promise.reject(new Error("store down")),
+        has: () => Promise.reject(new Error("store down")),
+      },
+    ],
+    [
+      "throws",
+      {
+        consume: () => {
+          throw new Error("store down");
+        },
+        has: () => {
+          throw new Error("store down");
+        },
+      },
+    ],
+  ] as [string, GrantStore][])(
+    "fails closed, with answers to retry, when the store %s",
+    async (_, broken) => {
+      const shared = secret();
+      const working = setup({}, { secret: shared, store: memoryGrantStore() });
+      const person = browser(working.handle, ORIGIN, working.redmine);
+      // A sign-in on the working instance, up to Redmine's answer, and a full one for tokens.
+      const page = await person.send(
+        authorizeUrl({
+          response_type: "code",
+          client_id: CLAUDE,
+          redirect_uri: CLAUDE_REDIRECT,
+          code_challenge: pkce().challenge,
+          code_challenge_method: "S256",
+        }),
+      );
+      const consentPage = await page.text();
+      const decision = await person.send(new URL(AUTHORIZE), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ consent: consentValue(consentPage), decision: "allow" }),
+      });
+      const returned = new URL(
+        working.redmine
+          .authorize(new URL(decision.headers.get("location")!))
+          .headers.get("location")!,
+      );
+      const { landed, verifier } = await signIn(working);
+      const issued = await tokens(working);
+
+      const down = setup({}, { secret: shared, store: broken });
+      const cookie = [...person.jar.get(ORIGIN)!]
+        .map(([name, value]) => `${name}=${value}`)
+        .join("; ");
+      const internal = (url: URL) =>
+        new URL(url.pathname + url.search, "http://127.0.0.1:3737").href;
+
+      const mcp = await callTool(down.handle, { Authorization: `Bearer ${issued.access_token}` });
+      expect(mcp.status).toBe(503);
+      expect(await mcp.json()).toMatchObject({ error: "temporarily_unavailable" });
+
+      for (const params of [
+        {
+          grant_type: "refresh_token",
+          refresh_token: issued.refresh_token,
+          client_id: CLAUDE,
+        } as Record<string, string>,
+        {
+          grant_type: "authorization_code",
+          code: landed.searchParams.get("code")!,
+          client_id: CLAUDE,
+          code_verifier: verifier,
+        },
+      ]) {
+        const answer = await form(down.handle, TOKEN, params);
+        expect(answer.status).toBe(503);
+        expect(await answer.json()).toMatchObject({ error: "temporarily_unavailable" });
+      }
+
+      const fresh = await browser(down.handle, ORIGIN, down.redmine).send(
+        authorizeUrl({
+          response_type: "code",
+          client_id: CLAUDE,
+          redirect_uri: CLAUDE_REDIRECT,
+          code_challenge: pkce().challenge,
+          code_challenge_method: "S256",
+        }),
+      );
+      const posted = await down.handle(
+        new Request(internal(new URL(AUTHORIZE)), {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: fresh.headers.getSetCookie()[0]!.split(";")[0]!,
+          },
+          body: new URLSearchParams({
+            consent: consentValue(await fresh.text()),
+            decision: "allow",
+          }),
+        }),
+      );
+      const callback = await down.handle(new Request(internal(returned), { headers: { cookie } }));
+      for (const answer of [posted, callback]) {
+        expect(answer.status).toBe(503);
+        expect(answer.headers.get("location")).toBeNull();
+        expect(await answer.text()).toContain("Sign-in is unavailable for a moment.");
+      }
+      expect(down.errors.map(({ message }) => message)).toContain(
+        "The grant store failed: store down",
+      );
     },
   );
 

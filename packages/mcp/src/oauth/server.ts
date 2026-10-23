@@ -15,7 +15,7 @@ import { consentPage, errorPage } from "./pages.ts";
 import { grantedScopes, redmineScope, scopeNames, scopesFor } from "./scopes.ts";
 import type { Scope } from "./scopes.ts";
 import { createSealer, isStrongSecret, now, randomToken, SECRET_RULE, sha256 } from "./seal.ts";
-import { memoryGrantStore } from "./store.ts";
+import { failingClosed, memoryGrantStore, StoreUnavailable } from "./store.ts";
 import type { GrantStore } from "./store.ts";
 import {
   comparablePath,
@@ -266,9 +266,10 @@ export function createAuthorizationServer(
   });
   const callbackUrl = paths.origin + paths.callback;
   // Codes and states are used once: across instances through the store, or in this process.
-  const once = options.store ?? memoryGrantStore();
+  const shared = options.store && failingClosed(options.store);
+  const once = shared ?? memoryGrantStore();
   // Rotation and ending families need every instance to agree, so they need a store.
-  const families = options.store;
+  const families = shared;
   /** Ends every token of a sign-in: a reused code or refresh token means one leaked. */
   const end = async (family: string) => {
     await families?.consume(`family:${family}`, REFRESH_TTL);
@@ -861,14 +862,33 @@ export function createAuthorizationServer(
         );
   }
 
+  /**
+   * A grant store that fails refuses what needs it, closed, with an answer to retry: an error page
+   * for a person, temporarily_unavailable for a client.
+   */
+  const whenStoreFails =
+    (serve: (request: Request) => Promise<Response>, answer: () => Response) =>
+    async (request: Request): Promise<Response> => {
+      try {
+        return await serve(request);
+      } catch (error) {
+        if (!(error instanceof StoreUnavailable)) throw error;
+        onError?.(error);
+        return answer();
+      }
+    };
+  const pageWhenStoreFails = () =>
+    errorPage(503, "Sign-in is unavailable for a moment. Try again shortly from your client.");
   const routes = new Map<string, (request: Request) => Promise<Response>>([
     ...paths.authorizationServerMetadata.map(
       (path) => [path, async (request: Request) => publicDocument(request, metadata)] as const,
     ),
-    [paths.authorize, authorize],
+    [paths.authorize, whenStoreFails(authorize, pageWhenStoreFails)],
     // API key sign-in never sends anyone to Redmine, so nothing comes back.
-    ...(app === undefined ? [] : [[paths.callback, callback] as const]),
-    [paths.token, token],
+    ...(app === undefined
+      ? []
+      : [[paths.callback, whenStoreFails(callback, pageWhenStoreFails)] as const]),
+    [paths.token, whenStoreFails(token, () => tokenError(STORE_DOWN))],
     [paths.register, register],
   ]);
 
@@ -923,6 +943,12 @@ function tokenError({ status, error, description }: TokenError): Response {
 function invalidGrant(description: string): TokenError {
   return { status: 400, error: "invalid_grant", description };
 }
+
+const STORE_DOWN: TokenError = {
+  status: 503,
+  error: "temporarily_unavailable",
+  description: "The server cannot record grants right now. Try again in a moment.",
+};
 
 const UNREACHABLE: TokenError = {
   status: 502,

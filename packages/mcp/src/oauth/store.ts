@@ -15,6 +15,31 @@ export interface GrantStore {
   has(key: string): Promise<boolean>;
 }
 
+/** A grant store that threw or rejected: what needs it is refused, and can be retried. */
+export class StoreUnavailable extends Error {
+  constructor(cause: unknown) {
+    super(`The grant store failed: ${cause instanceof Error ? cause.message : String(cause)}`, {
+      cause,
+    });
+    this.name = "StoreUnavailable";
+  }
+}
+
+/** `store`, with every way it can fail, a throw or a rejection, turned into StoreUnavailable. */
+export function failingClosed(store: GrantStore): GrantStore {
+  const call = async <T>(run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } catch (error) {
+      throw new StoreUnavailable(error);
+    }
+  };
+  return {
+    consume: (key, ttlSeconds) => call(() => store.consume(key, ttlSeconds)),
+    has: (key) => call(() => store.has(key)),
+  };
+}
+
 /** How often the memory store drops expired keys, so it never holds more than a minute of them. */
 const SWEEP_MS = 60_000;
 

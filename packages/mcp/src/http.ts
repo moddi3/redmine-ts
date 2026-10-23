@@ -56,7 +56,10 @@ export interface BearerGrant {
 export interface BearerVerifier {
   /** The issuer of the authorization server, listed in the protected resource metadata. */
   issuer: string;
-  /** The token's grant, or undefined for a token that is forged, expired or not this verifier's. */
+  /**
+   * The token's grant, or undefined for a token that is forged, expired or not this verifier's. It
+   * rejects when it cannot tell, which answers 503.
+   */
   verify(token: string): Promise<BearerGrant | undefined>;
 }
 
@@ -330,10 +333,16 @@ function bearerGate(
         );
         return bearerAuthChallengeResponse(insufficient, challenge);
       } catch (error) {
-        if (!(error instanceof OAuthError)) {
-          onError?.(error instanceof Error ? error : new Error(String(error)));
-        }
-        return bearerAuthChallengeResponse(error, challenge);
+        if (error instanceof OAuthError) return bearerAuthChallengeResponse(error, challenge);
+        // The verifier could not tell, such as when a grant store is down: closed, and retryable.
+        onError?.(error instanceof Error ? error : new Error(String(error)));
+        return Response.json(
+          {
+            error: "temporarily_unavailable",
+            error_description: "Tokens cannot be checked right now. Try again in a moment.",
+          },
+          { status: 503 },
+        );
       }
     },
   };
