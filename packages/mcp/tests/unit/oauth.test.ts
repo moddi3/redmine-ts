@@ -32,6 +32,9 @@ const CLAUDE_REDIRECT = "https://claude.ai/api/mcp/auth_callback";
 
 const secret = () => randomBytes(32).toString("base64");
 
+/** For handlers whose test never meets a client with a metadata document. */
+const noMetadataFetch: typeof fetch = () => Promise.reject(new Error("no metadata fetch expected"));
+
 interface Setup {
   handle: Handler;
   redmine: FakeRedmine;
@@ -650,7 +653,7 @@ describe("built-in authorization server", () => {
     const ok = await register({
       client_name: "Cursor",
       redirect_uris: ["http://localhost:8787/callback"],
-      token_endpoint_auth_method: "client_secret_basic",
+      token_endpoint_auth_method: "none",
     });
     expect(ok.status).toBe(201);
     expect(await ok.json()).toMatchObject({
@@ -672,6 +675,96 @@ describe("built-in authorization server", () => {
       ]);
     }
     expect((await register({})).status).toBe(400);
+  });
+
+  it("registers public clients only, and keeps registrations small", async () => {
+    const { handle } = setup();
+    const register = async (body: unknown) => {
+      const response = await direct(handle)(REGISTER, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, body: (await response.json()) as Record<string, string> };
+    };
+    const uri = (length: number) => `https://app.example.com/${"c".repeat(length - 24)}`;
+    for (const refused of [
+      { redirect_uris: [uri(40)], token_endpoint_auth_method: "client_secret_basic" },
+      { redirect_uris: [uri(40)], token_endpoint_auth_method: "private_key_jwt" },
+      { redirect_uris: Array.from({ length: 6 }, (_, at) => `${uri(40)}${at}`) },
+      { redirect_uris: [uri(257)] },
+      { redirect_uris: [uri(40)], client_name: "n".repeat(101) },
+    ]) {
+      expect(await register(refused)).toMatchObject({
+        status: 400,
+        body: { error: "invalid_client_metadata" },
+      });
+    }
+    const largest = await register({
+      redirect_uris: Array.from({ length: 5 }, (_, at) => `${uri(255)}${at}`),
+      client_name: "n".repeat(100),
+    });
+    expect(largest.status).toBe(201);
+    expect(largest.body.client_id!.length).toBeLessThan(2600);
+  });
+
+  it("refuses a metadata document that asks for client authentication", async () => {
+    const setupped = setup();
+    const page = async (clientId: string) => {
+      const response = await browser(setupped.handle, ORIGIN, setupped.redmine).send(
+        authorizeUrl({
+          response_type: "code",
+          client_id: clientId,
+          redirect_uri: CLAUDE_REDIRECT,
+          code_challenge: pkce().challenge,
+          code_challenge_method: "S256",
+        }),
+      );
+      return { status: response.status, text: await response.text() };
+    };
+    const jwt = "https://jwt.example/meta.json";
+    setupped.documents.set(jwt, {
+      client_id: jwt,
+      redirect_uris: [CLAUDE_REDIRECT],
+      token_endpoint_auth_method: "private_key_jwt",
+      jwks_uri: "https://jwt.example/jwks.json",
+    });
+    expect(await page(jwt)).toMatchObject({
+      status: 400,
+      text: expect.stringContaining("public clients only"),
+    });
+    const none = "https://none.example/meta.json";
+    setupped.documents.set(none, {
+      client_id: none,
+      redirect_uris: [CLAUDE_REDIRECT],
+      token_endpoint_auth_method: "none",
+    });
+    expect((await page(none)).status).toBe(200);
+  });
+
+  it("says only that a metadata document could not be fetched, whatever its server answered", async () => {
+    let status = 404;
+    const { handle, redmine } = setup(
+      {},
+      {
+        fetchClientMetadata: async () =>
+          new Response(null, { status, headers: { location: "https://elsewhere.example/" } }),
+      },
+    );
+    for (status of [404, 401, 500, 302]) {
+      const response = await browser(handle, ORIGIN, redmine).send(
+        authorizeUrl({
+          response_type: "code",
+          client_id: "https://internal.example/meta.json",
+          redirect_uri: CLAUDE_REDIRECT,
+          code_challenge: pkce().challenge,
+          code_challenge_method: "S256",
+        }),
+      );
+      const text = await response.text();
+      expect(text).toContain("its metadata document could not be fetched");
+      expect(text).not.toContain(String(status));
+    }
   });
 
   it("fetches metadata documents only from public https URLs, once per few minutes", async () => {
@@ -810,7 +903,12 @@ describe("built-in authorization server", () => {
       baseUrl: REDMINE_INTERNAL,
       fetch: before.redmine.fetch,
       publicUrl: PUBLIC_URL,
-      oauth: { secret: secret(), previousSecret: old, redmineApp: REDMINE_APP },
+      oauth: {
+        secret: secret(),
+        previousSecret: old,
+        redmineApp: REDMINE_APP,
+        fetchClientMetadata: noMetadataFetch,
+      },
     });
     expect((await callTool(after, { Authorization: `Bearer ${issued.access_token}` })).status).toBe(
       200,
@@ -824,7 +922,12 @@ describe("built-in authorization server", () => {
         createRedmineMcpHandler({
           baseUrl: REDMINE_INTERNAL,
           publicUrl: PUBLIC_URL,
-          oauth: { secret: secret(), redmineApp: REDMINE_APP, ...oauth } as never,
+          oauth: {
+            secret: secret(),
+            redmineApp: REDMINE_APP,
+            fetchClientMetadata: noMetadataFetch,
+            ...oauth,
+          } as never,
           ...options,
         });
     expect(create({ publicUrl: "http://mcp.example.com/mcp" })).toThrow("https");
@@ -832,6 +935,10 @@ describe("built-in authorization server", () => {
     expect(create({}, { secret: "short" })).toThrow("32 characters");
     expect(create({}, { redmineApp: { clientId: "", clientSecret: "" } })).toThrow("clientId");
     expect(create({ publicUrl: undefined })).toThrow("publicUrl");
+    // Clients choose the metadata URLs, so the handler has no unguarded default fetch for them.
+    expect(create({}, { fetchClientMetadata: undefined })).toThrow(
+      "oauth.fetchClientMetadata is required: pass publicFetch from @redmine-ts/mcp/node",
+    );
   });
 });
 
@@ -945,7 +1052,7 @@ describe("API key sign-in, the opt-in fallback", () => {
       baseUrl: REDMINE_INTERNAL,
       fetch: keys.redmine.fetch,
       publicUrl: PUBLIC_URL,
-      oauth: { secret: shared, redmineApp: REDMINE_APP },
+      oauth: { secret: shared, redmineApp: REDMINE_APP, fetchClientMetadata: noMetadataFetch },
     });
     const refreshed = await form(switched, TOKEN, {
       grant_type: "refresh_token",

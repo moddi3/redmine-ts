@@ -61,11 +61,14 @@ interface OAuthSettings {
    */
   allowedClientHosts?: readonly string[];
   /**
-   * Fetches Client ID Metadata Documents, whose URLs clients choose. It should refuse private and
-   * loopback addresses: `publicFetch` from `@redmine-ts/mcp/node` does on Node, and Workers' fetch
-   * does with the `global_fetch_strictly_public` flag. Default: globalThis.fetch.
+   * Fetches the Client ID Metadata Documents clients name by URL. Required, because those URLs are the
+   * caller's choice: the fetch must not reach the server's own network. On Node pass `publicFetch`
+   * from `@redmine-ts/mcp/node`, which refuses private and special-use addresses; the CLI does. On
+   * Workers, which cannot reach private addresses, pass the global fetch with the
+   * `global_fetch_strictly_public` compatibility flag on, so a URL on the Worker's own zone goes
+   * through Cloudflare's front door, and its security settings, instead of straight to the origin.
    */
-  fetchClientMetadata?: typeof fetch;
+  fetchClientMetadata: typeof fetch;
 }
 
 /** What the handler lends the authorization server. */
@@ -199,12 +202,17 @@ export function createAuthorizationServer(
       "oauth needs redmineApp with the clientId and clientSecret Redmine showed, or apiKeyLogin",
     );
   }
+  if (typeof options.fetchClientMetadata !== "function") {
+    throw new TypeError(
+      "oauth.fetchClientMetadata is required: pass publicFetch from @redmine-ts/mcp/node on Node, or on Workers the global fetch with the global_fetch_strictly_public flag",
+    );
+  }
   const redminePublic = withSlash(new URL(options.redminePublicUrl ?? redmineUrl));
   const issuer = paths.identifier;
   const sealer = createSealer(secrets, issuer);
   const clients = createClients({
     sealer,
-    fetch: options.fetchClientMetadata ?? fetch,
+    fetch: options.fetchClientMetadata,
     allowedHosts: options.allowedClientHosts,
   });
   const callbackUrl = paths.origin + paths.callback;

@@ -11,6 +11,7 @@ import {
 import type { OAuthClientProvider } from "@modelcontextprotocol/client";
 import { expect, it } from "vite-plus/test";
 import { createRedmineMcpHandler } from "../../src/index.ts";
+import { publicFetch } from "../../src/node.ts";
 import { describeServers } from "./servers.ts";
 import type { ContractServer } from "./servers.ts";
 
@@ -238,6 +239,7 @@ describeServers("OAuth through Redmine", (server) => {
         secret: randomBytes(32).toString("base64"),
         redmineApp: REDMINE_APP,
         redminePublicUrl: browserUrl(server),
+        fetchClientMetadata: publicFetch,
       },
     });
     await signInAndUse(server, publicUrl, handle);

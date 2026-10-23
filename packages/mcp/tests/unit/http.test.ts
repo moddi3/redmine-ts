@@ -552,7 +552,7 @@ describe("createRedmineMcpHandler with a verifier", () => {
       create({
         verifier,
         publicUrl,
-        oauth: { secret: "s".repeat(32), apiKeyLogin: true },
+        oauth: { secret: "s".repeat(32), apiKeyLogin: true, fetchClientMetadata: fetch },
       }),
     ).toThrow("exclude each other");
   });

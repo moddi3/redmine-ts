@@ -453,7 +453,7 @@ serveStdio(() =>
 
 `access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. To enable `path` uploads and `attachments_save`, pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. The main entry never imports file system code, so a server without `files` cannot touch local files.
 
-`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. With `publicUrl`, it routes the endpoint and the [OAuth paths](#endpoints) itself, so give it every request; `oauth` takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, and `fetchClientMetadata`. To accept tokens from another authorization server instead, pass `verifier: { issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
+`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. With `publicUrl`, it routes the endpoint and the [OAuth paths](#endpoints) itself, so give it every request; `oauth` takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, and the required `fetchClientMetadata`. To accept tokens from another authorization server instead, pass `verifier: { issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
 
 Bun:
 
@@ -488,7 +488,7 @@ export default {
 };
 ```
 
-With OAuth on Workers, create the handler on the first request, where the secrets are bound, and turn on the `global_fetch_strictly_public` compatibility flag, so the metadata documents clients name cannot reach private addresses. On Node, pass `publicFetch` from `@redmine-ts/mcp/node` as `fetchClientMetadata`; the CLI does.
+`oauth.fetchClientMetadata` is required: it fetches the metadata documents clients name by URL, so it must not reach the server's own network. On Node, pass `publicFetch` from `@redmine-ts/mcp/node`, which refuses private and special-use addresses; the CLI does. Workers cannot reach private addresses, so pass the global fetch there, and turn on the `global_fetch_strictly_public` compatibility flag: without it, a metadata URL on the Worker's own zone is fetched straight from the zone's origin, past Cloudflare's security settings such as Access; with it, the request goes through Cloudflare's front door like any other. Create the handler on the first request, where the secrets are bound.
 
 ```ts
 import { createRedmineMcpHandler } from "@redmine-ts/mcp";
@@ -504,6 +504,7 @@ export default {
       oauth: {
         secret: env.AUTH_SECRET,
         redmineApp: { clientId: env.CLIENT_ID, clientSecret: env.CLIENT_SECRET },
+        fetchClientMetadata: (input, init) => fetch(input, init),
       },
     });
     return handler(request);

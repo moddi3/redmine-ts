@@ -29,20 +29,26 @@ const DOCUMENT_CACHE_MS = 5 * 60_000;
 const DOCUMENT_CACHE_SIZE = 256;
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-const name = z.string().trim().min(1).max(200).optional().catch(undefined);
+/** Names are shown on the consent page and sealed into registrations, so they stay short. */
+const NAME_MAX_LENGTH = 100;
+/** Keeps a registered client_id, which seals its redirect URIs, near 2 KB at most. */
+const REGISTERED_REDIRECTS = 5;
+const REDIRECT_MAX_LENGTH = 256;
 
 const Document = z.object({
   client_id: z.string(),
-  client_name: name,
+  client_name: z.string().trim().min(1).max(NAME_MAX_LENGTH).optional().catch(undefined),
   redirect_uris: z.array(z.string()).min(1).max(20),
+  token_endpoint_auth_method: z.string().optional(),
   client_secret: z
     .undefined({ error: "a metadata document must not carry a client_secret" })
     .optional(),
 });
 
 const Registration = z.object({
-  client_name: name,
-  redirect_uris: z.array(z.string()).min(1).max(10),
+  client_name: z.string().trim().min(1).max(NAME_MAX_LENGTH).optional(),
+  redirect_uris: z.array(z.string().max(REDIRECT_MAX_LENGTH)).min(1).max(REGISTERED_REDIRECTS),
+  token_endpoint_auth_method: z.string().optional(),
 });
 
 interface Sealed {
@@ -81,9 +87,10 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
     } catch {
       return "its metadata document could not be fetched";
     }
+    // The status is not repeated: it would tell the caller what answers where the URL points.
     if (response.status !== 200) {
       await response.body?.cancel();
-      return `its metadata document answered ${response.status}`;
+      return "its metadata document could not be fetched";
     }
     const text = await readText(response, DOCUMENT_MAX_BYTES);
     if (text === undefined) return `its metadata document is over ${DOCUMENT_MAX_BYTES} bytes`;
@@ -94,6 +101,10 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
       return "its metadata document is not valid client metadata";
     }
     if (parsed.client_id !== clientId) return "its metadata document names another client_id";
+    // Only public clients: a client that declares another method expects us to authenticate it.
+    if (!publicClient(parsed.token_endpoint_auth_method)) {
+      return "its metadata document asks for client authentication, and this server has public clients only";
+    }
     if (!parsed.redirect_uris.every(isRedirectUri)) {
       return "its metadata document lists a redirect URI that is not https or loopback";
     }
@@ -125,10 +136,18 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
         return {
           ok: false,
           error: "invalid_client_metadata",
-          description: "Send redirect_uris, 1 to 10 of them, and optionally client_name",
+          description: `Send redirect_uris, 1 to ${REGISTERED_REDIRECTS} of them, each at most ${REDIRECT_MAX_LENGTH} characters, and optionally client_name, at most ${NAME_MAX_LENGTH}`,
         };
       }
-      const { client_name, redirect_uris } = parsed.data;
+      const { client_name, redirect_uris, token_endpoint_auth_method } = parsed.data;
+      if (!publicClient(token_endpoint_auth_method)) {
+        return {
+          ok: false,
+          error: "invalid_client_metadata",
+          description:
+            "This server registers public clients only: token_endpoint_auth_method must be none",
+        };
+      }
       if (!redirect_uris.every(isRedirectUri)) {
         return {
           ok: false,
@@ -188,6 +207,11 @@ export function redirectMatches(registered: string, requested: string): boolean 
     b.username === "" &&
     b.password === ""
   );
+}
+
+/** No method, or `none`: the client proves itself with PKCE alone. */
+function publicClient(method: string | undefined): boolean {
+  return method === undefined || method === "none";
 }
 
 /** Whether `requested` is one of the client's redirect URIs. */
