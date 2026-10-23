@@ -1390,7 +1390,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "subject"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outIssueSummary, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outIssueSummary, $schema: DRAFT }, optional: false },
   },
   {
     id: "getIssue",
@@ -1430,7 +1430,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outIssue, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outIssue, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateIssue",
@@ -1721,7 +1721,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["name", "identifier"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outProject, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outProject, $schema: DRAFT }, optional: false },
   },
   {
     id: "getProject",
@@ -1759,7 +1759,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outProject, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outProject, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateProject",
@@ -1946,7 +1946,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "user_id", "role_ids"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outMembership, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outMembership, $schema: DRAFT }, optional: false },
   },
   {
     id: "getMembership",
@@ -1967,7 +1967,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["membership_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outMembership, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outMembership, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateMembership",
@@ -2266,7 +2266,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["login", "firstname", "lastname", "mail"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outUser, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outUser, $schema: DRAFT }, optional: false },
   },
   {
     id: "getUser",
@@ -2295,7 +2295,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["user_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outUser, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outUser, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateUser",
@@ -2417,7 +2417,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outUser, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outUser, $schema: DRAFT }, optional: false },
   },
   {
     id: "getTimeEntries",
@@ -2609,7 +2609,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["hours"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outTimeEntry, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outTimeEntry, $schema: DRAFT }, optional: false },
   },
   {
     id: "getTimeEntry",
@@ -2630,7 +2630,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["time_entry_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outTimeEntry, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outTimeEntry, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateTimeEntry",
@@ -2738,7 +2738,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["news_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outNews, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outNews, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateNews",
@@ -2907,7 +2907,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id", "issue_to_id", "relation_type"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outIssueRelation, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outIssueRelation, $schema: DRAFT }, optional: false },
   },
   {
     id: "getIssueRelation",
@@ -2928,7 +2928,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_relation_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outIssueRelation, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outIssueRelation, $schema: DRAFT }, optional: false },
   },
   {
     id: "deleteIssueRelation",
@@ -3014,7 +3014,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "name"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outVersion, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outVersion, $schema: DRAFT }, optional: false },
   },
   {
     id: "getVersion",
@@ -3035,7 +3035,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["version_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outVersion, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outVersion, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateVersion",
@@ -3152,7 +3152,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "wiki_page_title"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateWikiPage",
@@ -3207,7 +3207,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "wiki_page_title", "text"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT }, optional: true },
   },
   {
     id: "deleteWikiPage",
@@ -3263,7 +3263,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "wiki_page_title", "version_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT }, optional: false },
   },
   {
     id: "getQueries",
@@ -3310,7 +3310,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["attachment_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outAttachment, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outAttachment, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateAttachment",
@@ -3433,7 +3433,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "name"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outIssueCategory, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outIssueCategory, $schema: DRAFT }, optional: false },
   },
   {
     id: "getIssuePriorities",
@@ -3499,7 +3499,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_category_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outIssueCategory, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outIssueCategory, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateIssueCategory",
@@ -3588,7 +3588,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["role_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outRole, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outRole, $schema: DRAFT }, optional: false },
   },
   {
     id: "getGroups",
@@ -3648,7 +3648,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outGroup, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outGroup, $schema: DRAFT }, optional: false },
   },
   {
     id: "getGroup",
@@ -3677,7 +3677,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["group_id"],
       additionalProperties: false,
     },
-    output: { kind: "item", schema: { ...outGroup, $schema: DRAFT } },
+    output: { kind: "item", schema: { ...outGroup, $schema: DRAFT }, optional: false },
   },
   {
     id: "updateGroup",
@@ -4100,6 +4100,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         ],
         $schema: DRAFT,
       },
+      optional: false,
     },
   },
   {

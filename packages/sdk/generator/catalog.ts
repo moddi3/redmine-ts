@@ -196,7 +196,8 @@ export function catalogFile(ops: OpModel[], merged: Merged): string {
     const { kind } = op.descriptor.response;
     if (kind === "empty" || kind === "binary") return { kind };
     if (!op.itemSpec) throw new Error(`${op.descriptor.id}: a ${kind} response without a schema`);
-    return { kind, schema: withKeys(convert(op.itemSpec, "output"), { $schema: DRAFT }) };
+    const schema = withKeys(convert(op.itemSpec, "output"), { $schema: DRAFT });
+    return kind === "item" ? { kind, schema, optional: op.maybeEmpty } : { kind, schema };
   };
 
   const entries = ops

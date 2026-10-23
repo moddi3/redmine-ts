@@ -33,7 +33,9 @@ export interface JsonSchema {
  * types require, so they accept anything a supported server sends.
  */
 export type CatalogOutput =
-  | { readonly kind: "item" | "list"; readonly schema: JsonSchema }
+  /** `optional`: the call can also resolve to undefined, when Redmine answers 204 with no body. */
+  | { readonly kind: "item"; readonly schema: JsonSchema; readonly optional: boolean }
+  | { readonly kind: "list"; readonly schema: JsonSchema }
   | { readonly kind: "empty" | "binary" };
 
 export interface CatalogEntry {

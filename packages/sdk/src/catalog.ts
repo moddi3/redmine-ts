@@ -83,6 +83,7 @@ const extras: readonly CatalogEntry[] = [
     ),
     output: {
       kind: "item",
+      optional: false,
       schema: object(
         {
           token: { type: "string" },
