@@ -29,3 +29,68 @@ export function publicDocument(request: Request, body: unknown): Response {
   const response = Response.json(body, { headers: { "Access-Control-Allow-Origin": "*" } });
   return request.method === "HEAD" ? new Response(null, response) : response;
 }
+
+/** The body as text, or undefined when it is over `maxBytes`, which is then not read further. */
+export async function readText(
+  message: Request | Response,
+  maxBytes: number,
+): Promise<string | undefined> {
+  if (Number(message.headers.get("content-length")) > maxBytes) {
+    await message.body?.cancel();
+    return undefined;
+  }
+  if (message.body === null) return "";
+  const reader = message.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel();
+      return undefined;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+/** A path without its trailing slash, so /mcp/ is /mcp, and the root stays /. */
+export function comparablePath(path: string): string {
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
+export interface PublicPaths {
+  /** The resource identifier, the audience of tokens, and the issuer of the built-in server. */
+  identifier: string;
+  origin: string;
+  endpoint: string;
+  resourceMetadata: string;
+  authorizationServerMetadata: string;
+  authorize: string;
+  callback: string;
+  token: string;
+  register: string;
+}
+
+/**
+ * Every path the handler serves, derived from the public URL of the MCP endpoint, so the handler
+ * never assumes it owns the origin's root: the well-known documents insert the endpoint's path as
+ * RFC 9728 and RFC 8414 ask, and the authorization server's own endpoints live under it.
+ */
+export function publicPaths(publicUrl: URL): PublicPaths {
+  const path = comparablePath(publicUrl.pathname);
+  const base = path === "/" ? "" : path;
+  return {
+    identifier: publicUrl.origin + base,
+    origin: publicUrl.origin,
+    endpoint: base || "/",
+    resourceMetadata: `/.well-known/oauth-protected-resource${base}`,
+    authorizationServerMetadata: `/.well-known/oauth-authorization-server${base}`,
+    authorize: `${base}/oauth/authorize`,
+    callback: `${base}/oauth/callback`,
+    token: `${base}/oauth/token`,
+    register: `${base}/oauth/register`,
+  };
+}

@@ -1,7 +1,9 @@
 // The OAuth scopes mirror the access modes. Each scope includes the ones before it, so a token's
-// highest scope decides its mode, and the server's own mode caps what it grants.
+// highest scope decides its mode, and the server's own mode caps what it grants. Upstream, each scope
+// asks Redmine for the permissions it needs, because Redmine grants only the permissions requested.
 
-import type { Access } from "@redmine-ts/sdk";
+import { VERSIONS } from "@redmine-ts/sdk";
+import type { Access, RedmineVersion } from "@redmine-ts/sdk";
 import { ACCESS_ORDER } from "../tools.ts";
 
 /** Least to most: read, then writes, then deletes. */
@@ -26,4 +28,127 @@ export function scopesFor(access: Access): Scope[] {
 export function accessFor(scopes: readonly string[]): Access | undefined {
   const top = SCOPES.findLast((scope) => scopes.includes(scope));
   return top === undefined ? undefined : MODE[top];
+}
+
+/**
+ * What a client asking for `requested` gets: everything up to the highest scope it names that this
+ * server offers, or all the server offers when it names none of them.
+ */
+export function grantedScopes(requested: readonly string[], access: Access): Scope[] {
+  const offered = scopesFor(access);
+  const top = offered.findLastIndex((scope) => requested.includes(scope));
+  return top === -1 ? offered : offered.slice(0, top + 1);
+}
+
+/**
+ * Redmine's permission names, by the scope that requests them, as Redmine 6.1 and 7.0 define them in
+ * lib/redmine/preparation.rb. Deletes are the delete_ permissions; a few manage_ permissions also
+ * delete, so the access mode, not the Redmine scope, is what refuses a delete. `admin` is never
+ * requested: an OAuth session acts as a non-admin even for an admin.
+ */
+const PERMISSIONS: Readonly<Record<Scope, readonly string[]>> = {
+  "redmine:read": [
+    "view_project",
+    "search_project",
+    "view_members",
+    "view_issues",
+    "view_private_notes",
+    "view_issue_watchers",
+    "view_time_entries",
+    "view_news",
+    "view_documents",
+    "view_files",
+    "view_wiki_pages",
+    "view_wiki_edits",
+    "export_wiki_pages",
+    "view_wiki_page_watchers",
+    "view_changesets",
+    "browse_repository",
+    "view_messages",
+    "view_message_watchers",
+    "view_calendar",
+    "view_gantt",
+  ],
+  "redmine:write": [
+    "add_project",
+    "edit_project",
+    "close_project",
+    "select_project_publicity",
+    "select_project_modules",
+    "manage_members",
+    "manage_versions",
+    "add_subprojects",
+    "manage_public_queries",
+    "save_queries",
+    "use_webhooks",
+    "add_issues",
+    "edit_issues",
+    "edit_own_issues",
+    "copy_issues",
+    "manage_issue_relations",
+    "manage_subtasks",
+    "set_issues_private",
+    "set_own_issues_private",
+    "add_issue_notes",
+    "edit_issue_notes",
+    "edit_own_issue_notes",
+    "set_notes_private",
+    "add_issue_watchers",
+    "import_issues",
+    "manage_categories",
+    "log_time",
+    "edit_time_entries",
+    "edit_own_time_entries",
+    "manage_project_activities",
+    "log_time_for_other_users",
+    "import_time_entries",
+    "manage_news",
+    "comment_news",
+    "add_documents",
+    "edit_documents",
+    "manage_files",
+    "edit_wiki_pages",
+    "rename_wiki_pages",
+    "add_wiki_page_watchers",
+    "protect_wiki_pages",
+    "manage_wiki",
+    "commit_access",
+    "manage_related_issues",
+    "manage_repository",
+    "add_messages",
+    "edit_messages",
+    "edit_own_messages",
+    "add_message_watchers",
+    "manage_boards",
+  ],
+  "redmine:delete": [
+    "delete_project",
+    "delete_issues",
+    "delete_issue_watchers",
+    "delete_documents",
+    "delete_wiki_pages",
+    "delete_wiki_pages_attachments",
+    "delete_wiki_page_watchers",
+    "delete_messages",
+    "delete_own_messages",
+    "delete_message_watchers",
+  ],
+};
+
+/** Permissions a Redmine before 7.0 does not know; asking it for one fails the whole sign-in. */
+const SINCE_7_0 = new Set(["use_webhooks"]);
+
+/**
+ * The Redmine scope string for `scopes`. Without a declared version, it leaves out what 6.1 lacks,
+ * so it works on both.
+ */
+export function redmineScope(
+  scopes: readonly Scope[],
+  version: RedmineVersion | undefined,
+): string {
+  const has7 = version !== undefined && VERSIONS.indexOf(version) >= VERSIONS.indexOf("7.0");
+  return scopes
+    .flatMap((scope) => PERMISSIONS[scope])
+    .filter((permission) => has7 || !SINCE_7_0.has(permission))
+    .join(" ");
 }

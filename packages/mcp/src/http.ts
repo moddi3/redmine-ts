@@ -17,7 +17,10 @@ import type { AuthInfo, OAuthTokenVerifier } from "@modelcontextprotocol/server"
 import { createRedmine } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig } from "@redmine-ts/sdk";
 import { accessFor, scopesFor } from "./oauth/scopes.ts";
-import { CORS_MAX_AGE, publicDocument } from "./oauth/web.ts";
+import { createAuthorizationServer } from "./oauth/server.ts";
+import type { AuthorizationServer, RedmineOAuthOptions } from "./oauth/server.ts";
+import { comparablePath, CORS_MAX_AGE, publicDocument, publicPaths } from "./oauth/web.ts";
+import type { PublicPaths } from "./oauth/web.ts";
 import { createRedmineMcpServer } from "./server.ts";
 import { strictest } from "./tools.ts";
 
@@ -76,12 +79,18 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
    * `https://redmine.example.com/mcp`: the OAuth resource identifier and the audience tokens must
    * name. With it, the handler serves that path and the OAuth paths derived from it, wherever the
    * request comes from, and answers 404 for any other path. Without it, every path is the endpoint.
-   * Required with `verifier`, and then https, except on localhost.
+   * Required with `oauth` and `verifier`, and then https, except on localhost.
    */
   publicUrl?: string;
   /**
-   * Accepts `Authorization: Bearer` tokens next to the X-Redmine-API-Key header, and answers a
-   * request with neither with a 401 that points clients to the protected resource metadata.
+   * The built-in OAuth authorization server, which signs people in through Redmine's own OAuth
+   * (Redmine 6.1+). It serves its endpoints under publicUrl and accepts the tokens it issues.
+   */
+  oauth?: RedmineOAuthOptions;
+  /**
+   * Accepts `Authorization: Bearer` tokens from an authorization server elsewhere, instead of
+   * `oauth`. With either, a request with neither a token nor the X-Redmine-API-Key header gets a 401
+   * that points clients to the protected resource metadata.
    */
   verifier?: BearerVerifier;
 }
@@ -112,15 +121,34 @@ export function isOrigin(value: string): boolean {
 export function createRedmineMcpHandler(
   options: RedmineMcpHandlerOptions,
 ): (request: Request) => Promise<Response> {
-  const { allowedOrigins = [], allowedHosts, onError, publicUrl, verifier, ...config } = options;
+  const { allowedOrigins = [], allowedHosts, onError, publicUrl, oauth, ...rest } = options;
+  const { verifier: external, ...config } = rest;
   // A bad baseUrl, version or limit throws here instead of failing every request.
   createRedmine(config);
   const access = config.access ?? "full";
-  const resource =
-    publicUrl === undefined ? undefined : resourceUrl(publicUrl, verifier !== undefined);
-  if (verifier !== undefined && resource === undefined) {
-    throw new TypeError("verifier needs publicUrl, the URL clients reach the MCP endpoint at");
+  if (oauth !== undefined && external !== undefined) {
+    throw new TypeError("oauth and verifier exclude each other: use one authorization server");
   }
+  const authorizing = oauth !== undefined || external !== undefined;
+  const paths =
+    publicUrl === undefined ? undefined : publicPaths(resourceUrl(publicUrl, authorizing));
+  if (authorizing && paths === undefined) {
+    throw new TypeError(
+      "oauth and verifier need publicUrl, the URL clients reach the MCP endpoint at",
+    );
+  }
+  const authorizationServer: AuthorizationServer | undefined =
+    oauth &&
+    paths &&
+    createAuthorizationServer(oauth, {
+      paths,
+      redmineUrl: withSlash(new URL(config.baseUrl)),
+      fetch: config.fetch ?? fetch,
+      version: config.version,
+      access,
+      onError,
+    });
+  const verifier = external ?? authorizationServer?.verifier;
   const exactOrigins = new Set(allowedOrigins.filter((entry) => ORIGIN_SCHEME.test(entry)));
   for (const entry of exactOrigins) {
     if (!isOrigin(entry)) {
@@ -138,13 +166,9 @@ export function createRedmineMcpHandler(
     { onerror: onError },
   );
   const bearer =
-    resource === undefined || verifier === undefined
+    paths === undefined || verifier === undefined
       ? undefined
-      : bearerGate(verifier, resource, access, onError);
-  const routes = resource && {
-    endpoint: comparablePath(resource.pathname),
-    resourceMetadata: new URL(getOAuthProtectedResourceMetadataUrl(resource)).pathname,
-  };
+      : bearerGate(verifier, paths, access, onError);
 
   async function endpoint(request: Request): Promise<Response> {
     const origin = request.headers.get("origin");
@@ -175,13 +199,17 @@ export function createRedmineMcpHandler(
   return async (request) => {
     const rejected = hosts && hostHeaderValidationResponse(request, hosts);
     if (rejected !== undefined) return rejected;
-    if (routes === undefined) return endpoint(request);
+    if (paths === undefined) return endpoint(request);
+    // Only the path counts: behind a proxy, the URL's origin is the server's, not the public one.
     const path = comparablePath(new URL(request.url).pathname);
-    if (path === routes.endpoint) return endpoint(request);
-    if (bearer !== undefined && path === routes.resourceMetadata) {
+    if (path === paths.endpoint) return endpoint(request);
+    if (bearer !== undefined && path === paths.resourceMetadata) {
       return publicDocument(request, bearer.metadata);
     }
-    return new Response("Not Found", { status: 404 });
+    return (
+      (await authorizationServer?.serve(request, path)) ??
+      new Response("Not Found", { status: 404 })
+    );
   };
 }
 
@@ -209,9 +237,9 @@ function isLocalhost(url: URL): boolean {
   return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
 }
 
-/** A path without its trailing slash, so /mcp/ is /mcp, and the root stays /. */
-function comparablePath(path: string): string {
-  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+function withSlash(url: URL): URL {
+  if (!url.pathname.endsWith("/")) url.pathname += "/";
+  return url;
 }
 
 /**
@@ -220,10 +248,11 @@ function comparablePath(path: string): string {
  */
 function bearerGate(
   verifier: BearerVerifier,
-  resource: URL,
+  paths: PublicPaths,
   access: Access,
   onError: ((error: Error) => void) | undefined,
 ) {
+  const resource = new URL(paths.identifier);
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resource);
   const scopes = scopesFor(access);
   const tokens: OAuthTokenVerifier = {
@@ -251,7 +280,7 @@ function bearerGate(
   const missing = `Bearer resource_metadata="${resourceMetadataUrl}", scope="${scopes.join(" ")}"`;
   return {
     metadata: {
-      resource: resource.href,
+      resource: paths.identifier,
       authorization_servers: [verifier.issuer],
       scopes_supported: scopes,
       bearer_methods_supported: ["header"],
