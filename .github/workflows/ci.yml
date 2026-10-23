@@ -77,7 +77,9 @@ jobs:
       - name: runtime smoke (bun)
         run: bun scripts/runtime-smoke.mjs
       # Another client against the built CLI over HTTP. --strict fails on tool schemas a client
-      # cannot use. The version is pinned; dlx resolves its dependencies without a lockfile.
+      # cannot use and only reports the less portable ones, such as `type` arrays; its JSON output
+      # lists both as schemaFindings, so jq fails the step on either. The version is pinned; dlx
+      # resolves its dependencies without a lockfile.
       - name: MCP Inspector smoke (http)
         shell: bash
         run: |
@@ -91,7 +93,7 @@ jobs:
             vp dlx --silent @modelcontextprotocol/inspector@2.10.1 --cli http://127.0.0.1:3737/mcp \
               --header "X-Redmine-API-Key: $key" "$@"
           }
-          inspector --method tools/list --strict > /dev/null
+          inspector --method tools/list --strict --format json | jq -e '.schemaFindings == null' > /dev/null
           inspector --method tools/call --tool-name users_current | jq -e '.structuredContent.login == "admin"'
       # A test sees only "Redmine answered 500"; the server's log names the exception.
       - if: failure()
