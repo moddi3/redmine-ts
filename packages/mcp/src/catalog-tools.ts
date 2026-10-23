@@ -5,6 +5,7 @@ import { VERSIONS } from "@redmine-ts/sdk";
 import type { Listing } from "@redmine-ts/sdk";
 import { catalog } from "@redmine-ts/sdk/catalog";
 import type { CatalogEntry, JsonSchema } from "@redmine-ts/sdk/catalog";
+import { portable } from "./portable.ts";
 import type { Annotations, Client, Schema, Tier, ToolSpec } from "./tools.ts";
 
 const DRAFT = "https://json-schema.org/draft/2020-12/schema";
@@ -140,7 +141,12 @@ type Method = (input: Record<string, unknown>) => unknown;
 
 export const catalogTools: readonly ToolSpec[] = catalog
   .filter((entry) => !HAND_WRITTEN.has(entry.id))
-  .map(toolFor);
+  .map(toolFor)
+  .map((tool) => ({
+    ...tool,
+    inputSchema: portable(tool.inputSchema),
+    outputSchema: portable(tool.outputSchema),
+  }));
 
 function toolFor(entry: CatalogEntry): ToolSpec {
   const { tier, annotations } = BY_METHOD[entry.method];
