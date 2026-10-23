@@ -194,7 +194,10 @@ describe("createRedmineMcpHandler", () => {
       const sse = await post(handle, { ...key, Origin: app });
       expect(sse.status).toBe(200);
       expect(sse.headers.get("content-type")).toBe("text/event-stream");
-      expect(corsHeaders(sse)).toEqual([["access-control-allow-origin", app]]);
+      expect(corsHeaders(sse)).toEqual([
+        ["access-control-allow-origin", app],
+        ["access-control-expose-headers", "WWW-Authenticate"],
+      ]);
       expect(sse.headers.get("vary")).toBe("Origin");
       expect(await sse.text()).toContain('"tools"');
 

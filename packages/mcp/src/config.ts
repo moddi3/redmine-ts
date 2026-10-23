@@ -11,7 +11,7 @@ import type { Access, RedmineConfig } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { API_KEY_HEADER, isOrigin } from "./http.ts";
 import type { RedmineMcpHandlerOptions } from "./http.ts";
-import { ACCESS_ORDER } from "./tools.ts";
+import { ACCESS_ORDER, strictest } from "./tools.ts";
 
 export type CliCommand =
   | { kind: "serve"; config: RedmineConfig; filesDir?: string }
@@ -198,7 +198,7 @@ export function parseCli(
       baseUrl: REDMINE_URL,
       auth: { apiKey: REDMINE_API_KEY },
       ...(REDMINE_VERSION === undefined ? {} : { version: REDMINE_VERSION }),
-      access: strictest(REDMINE_MCP_ACCESS, flags),
+      access: requestedAccess(REDMINE_MCP_ACCESS, flags),
     },
     ...(REDMINE_MCP_FILES_DIR === undefined ? {} : { filesDir: REDMINE_MCP_FILES_DIR }),
   };
@@ -223,7 +223,7 @@ function httpCommand(flags: Flags, env: Readonly<Record<string, string | undefin
     options: {
       baseUrl: REDMINE_URL,
       ...(REDMINE_VERSION === undefined ? {} : { version: REDMINE_VERSION }),
-      access: strictest(REDMINE_MCP_ACCESS, flags),
+      access: requestedAccess(REDMINE_MCP_ACCESS, flags),
       allowedOrigins,
       // A browser page on another site may reach a loopback port, but its Host still names that site.
       ...(loopback
@@ -236,14 +236,12 @@ function httpCommand(flags: Flags, env: Readonly<Record<string, string | undefin
   };
 }
 
-function strictest(fromEnv: Access | undefined, flags: Flags): Access {
-  const requested: Access[] = [
+function requestedAccess(fromEnv: Access | undefined, flags: Flags): Access {
+  return strictest(
     fromEnv ?? "full",
     ...(flags["no-delete"] ? (["no-delete"] as const) : []),
     ...(flags["read-only"] ? (["read-only"] as const) : []),
-  ];
-  const at = Math.max(...requested.map((mode) => ACCESS_ORDER.indexOf(mode)));
-  return ACCESS_ORDER[at] ?? "read-only";
+  );
 }
 
 function invalid(error: z.ZodError): CliCommand {
