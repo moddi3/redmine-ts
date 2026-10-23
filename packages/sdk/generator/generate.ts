@@ -385,6 +385,13 @@ function resourcesFile(ops: OpModel[], merged: Merged, schemas: SchemaType[]): s
     if (members.length > 0) groups.set(version, members);
   }
 
+  const methods = namespaces.map(
+    (ns) =>
+      `${propertyKey(ns)}: { ${visible
+        .filter((o) => o.namespace === ns)
+        .map((o) => `${propertyKey(o.verb!)}: ${JSON.stringify(o.descriptor.method)}`)
+        .join("; ")} };\n`,
+  );
   const additions = [...groups.keys()].filter((v) => v !== oldest);
   const resources = [
     "BaseResources",
@@ -399,6 +406,9 @@ export interface BaseResources {\n${groups.get(oldest)?.join("") ?? ""}}
 ${additions.map((v) => `export interface Additions${v.replace(".", "")} {\n${groups.get(v)!.join("")}}\n`).join("\n")}
 /** The generated namespaces available on a server declared as V. */
 export type Resources<${additions.length > 0 ? "V" : "_V"} extends RedmineVersion> = ${resources};
+
+/** The HTTP method each generated method sends, in every version. \`access\` narrows the client type by it. */
+export interface HttpMethods {\n${methods.join("")}}
 `;
   return (
     imports(body, [

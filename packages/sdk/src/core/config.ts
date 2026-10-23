@@ -97,6 +97,16 @@ export const ACCESS_METHODS: Readonly<Record<Exclude<Access, "full">, readonly H
   "no-delete": ["GET", "POST", "PUT", "PATCH"],
 };
 
+/**
+ * Type twin of ACCESS_METHODS: the client type keeps the methods that send only these. A lookup, so a wide
+ * `Access` allows every method and keeps the full client type.
+ */
+export interface AllowedMethods {
+  full: HttpMethod;
+  "no-delete": "GET" | "POST" | "PUT" | "PATCH";
+  "read-only": "GET";
+}
+
 export interface RetryPolicy {
   /** Extra attempts after the first. Default 2. */
   attempts: number;
@@ -108,7 +118,10 @@ export interface RetryPolicy {
 
 export const DEFAULT_RETRY: RetryPolicy = { attempts: 2, baseMs: 250, maxMs: 5000 };
 
-export interface RedmineConfig<V extends RedmineVersion = RedmineVersion> {
+export interface RedmineConfig<
+  V extends RedmineVersion = RedmineVersion,
+  A extends Access = Access,
+> {
   /** "https://host/redmine" and "https://host/redmine/" are the same; the subpath is kept. Userinfo is rejected. */
   baseUrl: string | URL;
   auth?: Auth;
@@ -119,9 +132,10 @@ export interface RedmineConfig<V extends RedmineVersion = RedmineVersion> {
   version?: V;
   /**
    * "read-only" sends only GET, "no-delete" refuses DELETE, "full" (the default) sends everything. Applies to
-   * every method, listing, extra and `rm.request`, and is checked before any request.
+   * every method, listing, extra and `rm.request`, and is checked before any request. A literal also narrows
+   * the client type to the methods it allows.
    */
-  access?: Access;
+  access?: A;
   /** For proxies, internal CAs, browsers behind a CORS proxy, and tests. Default globalThis.fetch. */
   fetch?: typeof fetch;
   /** Per attempt. Default 30000. */

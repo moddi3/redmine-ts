@@ -2,16 +2,16 @@
 // The only module that imports both the engine and generated slot data.
 
 import { resolveConfig } from "./core/config.ts";
-import type { CallOptions, RedmineConfig } from "./core/config.ts";
+import type { Access, AllowedMethods, CallOptions, RedmineConfig } from "./core/config.ts";
 import { createEngine } from "./core/engine.ts";
 import type { Engine } from "./core/engine.ts";
 import { RedmineError } from "./core/errors.ts";
 import { createAttachmentFiles } from "./core/files.ts";
 import type { AttachmentFiles } from "./core/files.ts";
-import type { AnyOp } from "./core/op.ts";
+import type { AnyOp, HttpMethod } from "./core/op.ts";
 import { invalidInput, isRecord, own } from "./core/util.ts";
 import { ops } from "./generated/ops.ts";
-import type { Resources } from "./generated/resources.ts";
+import type { HttpMethods, Resources } from "./generated/resources.ts";
 import { SLOTS } from "./generated/slots.ts";
 import { VERSIONS } from "./generated/versions.ts";
 import type { LatestVersion, RedmineVersion } from "./generated/versions.ts";
@@ -35,6 +35,21 @@ export interface Extras {
   attachments: AttachmentFiles;
 }
 
+/**
+ * The HTTP method each extra sends, beside the generated HttpMethods. For one that reads before it
+ * writes, the write, as in the catalog. An extra missing here fails the build.
+ */
+type ExtraHttpMethods = Classified<
+  Extras,
+  {
+    issues: { transition: "PUT" };
+    attachments: { upload: "POST"; download: "GET"; thumbnail: "GET" };
+  }
+>;
+
+/** `M`, checked to give every method of every namespace in `T` an HTTP method. */
+type Classified<T, M extends { [N in keyof T]: { [K in keyof T[N]]: HttpMethod } }> = M;
+
 /** A hand-written method named like a generated one would be a second way to do one task. Fails the build. */
 type Shadowed<G, E> = {
   [R in keyof E & keyof G]: keyof E[R] & keyof G[R];
@@ -48,8 +63,9 @@ export const extrasDoNotShadow: [Shadowed<Resources<LatestVersion>, Extras>] ext
  * relative to baseUrl, without a leading slash, e.g. "agile_boards.json". The response is parsed JSON,
  * or undefined for an empty body. Same auth, retries, timeouts, concurrency and errors as typed calls.
  */
-export interface RawRequest {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export interface RawRequest<M extends HttpMethod = HttpMethod> {
+  /** A literal `access` narrows it: only "GET" on a read-only client, no "DELETE" on a no-delete one. */
+  method: M;
   path: string;
   query?: Readonly<Record<string, string | number | boolean | readonly (string | number)[]>>;
   /** How an array in `query` is written: `k[]=a&k[]=b` (default), `k=a,b`, or `k=a&k=b`. */
@@ -66,35 +82,50 @@ export type ArrayFormat = "brackets" | "comma" | "repeat";
 
 const ARRAY_STYLES = { brackets: "brackets", comma: "csv", repeat: "repeat" } as const;
 
-export interface Core<V extends RedmineVersion> {
+export interface Core<V extends RedmineVersion, A extends Access = "full"> {
   /** A derived client sharing the engine and its concurrency limit, e.g. `rm.with({ as: "jsmith" })`. */
-  with(defaults: CallOptions): Redmine<V>;
-  request(request: RawRequest, options?: CallOptions): Promise<unknown>;
+  with(defaults: CallOptions): Redmine<V, A>;
+  request(request: RawRequest<AllowedMethods[A]>, options?: CallOptions): Promise<unknown>;
   readonly version: V | undefined;
 }
 
 /**
  * Every operation is `rm.<namespace>.<verb>(input, options?)` with one flat snake_case input. Extras
- * merge into the generated namespaces by name (`rm.issues.transition`, `rm.attachments.upload`).
+ * merge into the generated namespaces by name (`rm.issues.transition`, `rm.attachments.upload`). A
+ * literal `access` keeps only the methods that send what it allows.
  */
-export type Redmine<V extends RedmineVersion = LatestVersion> = MergeNamespaces<
-  Resources<V>,
-  Extras
+export type Redmine<
+  V extends RedmineVersion = LatestVersion,
+  A extends Access = "full",
+> = Permitted<
+  MergeNamespaces<Resources<V>, Extras>,
+  MergeNamespaces<HttpMethods, ExtraHttpMethods>,
+  AllowedMethods[A]
 > &
-  Core<V>;
+  Core<V, A>;
+
+/** Namespaces T without the methods whose HTTP method in M is not allowed. Allowing every method keeps T as is. */
+type Permitted<T, M, Allowed extends HttpMethod> = HttpMethod extends Allowed
+  ? T
+  : {
+      [N in keyof T]: {
+        [K in keyof T[N] as M extends Record<N, Record<K, Allowed>> ? K : never]: T[N][K];
+      };
+    };
 
 type MergeNamespaces<G, E> = {
   [K in keyof G | keyof E]: (K extends keyof G ? G[K] : unknown) &
     (K extends keyof E ? E[K] : unknown);
 };
 
-export function createRedmine<const V extends RedmineVersion = LatestVersion>(
-  config: RedmineConfig<V>,
-): Redmine<V> {
+export function createRedmine<
+  const V extends RedmineVersion = LatestVersion,
+  const A extends Access = "full",
+>(config: RedmineConfig<V, A>): Redmine<V, A> {
   const resolved = resolveConfig(config);
   const engine = createEngine(resolved);
 
-  const build = (defaults: CallOptions): Redmine<V> => {
+  const build = (defaults: CallOptions): Redmine<V, A> => {
     const merge = (options?: CallOptions): CallOptions => ({ ...defaults, ...options });
     const namespaces: Record<string, Record<string, unknown>> = {};
     for (const [namespace, verbs] of Object.entries(SLOTS)) {
@@ -108,13 +139,13 @@ export function createRedmine<const V extends RedmineVersion = LatestVersion>(
     for (const [namespace, methods] of Object.entries(extraMethods(engine, merge))) {
       namespaces[namespace] = { ...namespaces[namespace], ...methods };
     }
-    const core: Core<V> = {
+    const core: Core<V, A> = {
       with: (more) => build({ ...defaults, ...more }),
       request: async (raw, options) => engine.call(rawOp(raw), rawInput(raw), merge(options)),
       version: config.version,
     };
-    // The namespaces are assembled from data, so `Redmine<V>` is vouched for by the generator, not provable here.
-    return Object.freeze({ ...namespaces, ...core }) as unknown as Redmine<V>;
+    // The namespaces are assembled from data, so `Redmine<V, A>` is vouched for by the generator, not provable here.
+    return Object.freeze({ ...namespaces, ...core }) as unknown as Redmine<V, A>;
   };
 
   return build({});
