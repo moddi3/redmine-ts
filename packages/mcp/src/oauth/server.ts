@@ -126,6 +126,12 @@ const STATE_MAX_LENGTH = 1024;
 const BROWSER_COOKIE = "__Host-redmine-mcp-oauth";
 const BROWSER_TTL = 3600;
 
+/**
+ * API keys one sign-in may try. Each consent value is used once, so the count holds; across sign-ins
+ * it does not, so this keeps the page from being a fast oracle for leaked keys, not a rate limit.
+ */
+const KEY_ATTEMPTS = 5;
+
 const OTHER_BROWSER =
   "This sign-in did not start in this browser, or the browser dropped its cookie. Start again from your client.";
 
@@ -134,6 +140,10 @@ const S256_CHALLENGE = /^[\w-]{43}$/;
 
 /** The request the person sees on the consent page, carried through the form. */
 interface ConsentPayload {
+  /** Single use: each answer to the page needs a page of its own. */
+  id: string;
+  /** API keys Redmine was asked about from this sign-in so far. */
+  attempts: number;
   /** The browser nonce from the cookie. */
   n: string;
   client: string;
@@ -325,6 +335,8 @@ export function createAuthorizationServer(
     }
     const nonce = (await browserNonce(request)) ?? randomToken();
     const consent: ConsentPayload = {
+      id: randomToken(),
+      attempts: 0,
       n: nonce,
       client: clientId,
       redirect: redirectUri,
@@ -390,6 +402,9 @@ export function createAuthorizationServer(
     if ((await browserNonce(request)) !== consent.n) {
       return errorPage(403, OTHER_BROWSER);
     }
+    if (!(await once.consume(`consent:${consent.id}`, FLOW_TTL))) {
+      return errorPage(400, "This sign-in page was already sent. Start again from your client.");
+    }
     if (form?.get("decision") !== "allow") {
       return back(consent.redirect, { error: "access_denied", state: consent.state }, 303);
     }
@@ -424,10 +439,20 @@ export function createAuthorizationServer(
    * The fallback's consent: the key must work at Redmine before anything is issued, and the code is
    * handed out at once, since there is no Redmine sign-in to wait for.
    */
-  async function checkKey(form: URLSearchParams, consent: ConsentPayload): Promise<Response> {
+  async function checkKey(
+    form: URLSearchParams,
+    consent: ConsentPayload & { exp?: number },
+  ): Promise<Response> {
     const apiKey = form.get("api_key")?.trim() ?? "";
     const check = apiKey === "" ? "missing" : await checkApiKey(apiKey);
     if (check !== "ok") {
+      const attempts = consent.attempts + (check === "missing" ? 0 : 1);
+      if (attempts >= KEY_ATTEMPTS) {
+        return errorPage(
+          400,
+          "Too many keys were tried on this sign-in. Start again from your client.",
+        );
+      }
       const keyError = {
         missing: "Paste your API key.",
         refused: "Redmine does not accept this key.",
@@ -437,7 +462,10 @@ export function createAuthorizationServer(
       if (typeof client === "string") {
         return errorPage(400, `This server refuses the client: ${client}.`);
       }
-      return showConsent(client, consent, form.get("consent")!, { status: 400, keyError });
+      // The page that answered is spent; the next try needs this one, which carries the count.
+      const next: ConsentPayload = { ...consent, id: randomToken(), attempts };
+      const sealed = await sealer.seal("consent", next, consent.exp! - now());
+      return showConsent(client, next, sealed, { status: 400, keyError });
     }
     const ours: CodePayload = {
       id: randomToken(),

@@ -1089,8 +1089,11 @@ describe("API key sign-in, the opt-in fallback", () => {
 
     const wrong = await submit("not-a-key");
     expect(wrong.status).toBe(400);
-    expect(await wrong.text()).toContain("Redmine does not accept this key.");
-    const right = await submit("jsmith-api-key");
+    const retry = await wrong.text();
+    expect(retry).toContain("Redmine does not accept this key.");
+    // The page that was answered is spent; the retry uses the page that came back.
+    expect(await (await submit("jsmith-api-key")).text()).toContain("already sent");
+    const right = await submit("jsmith-api-key", consentValue(retry));
     expect(right.status).toBe(303);
     const location = new URL(right.headers.get("location")!);
     expect(location.origin + location.pathname).toBe(CLAUDE_REDIRECT);
@@ -1102,6 +1105,29 @@ describe("API key sign-in, the opt-in fallback", () => {
       ["/users/current.json", "not-a-key"],
       ["/users/current.json", "jsmith-api-key"],
     ]);
+  });
+
+  it("lets one sign-in try five keys, counted on pages that work once", async () => {
+    const { handle, redmine } = keySetup();
+    const { html, submit } = await consent(handle, redmine);
+    let page = html;
+    // An empty field asks Redmine nothing, so it does not count.
+    let answer = await submit("", consentValue(page));
+    page = await answer.text();
+    expect(page).toContain("Paste your API key.");
+    for (let tried = 1; tried < 5; tried++) {
+      answer = await submit(`wrong-${tried}`, consentValue(page));
+      page = await answer.text();
+      expect(page).toContain("Redmine does not accept this key.");
+    }
+    answer = await submit("wrong-5", consentValue(page));
+    expect(answer.status).toBe(400);
+    expect(await answer.text()).toContain("Too many keys were tried on this sign-in.");
+    // Going back to an earlier page does not reset the count: that page was already answered.
+    expect(await (await submit("jsmith-api-key", consentValue(html))).text()).toContain(
+      "already sent",
+    );
+    expect(redmine.apiCalls.filter((call) => call.path === "/users/current.json")).toHaveLength(5);
   });
 
   it("seals the key into tokens, refuses a replayed code, and ends with a reset key", async () => {
