@@ -1,6 +1,6 @@
 # @redmine-ts/mcp
 
-An MCP server for the Redmine REST API. It exposes one tool per operation of [`@redmine-ts/sdk`](../sdk), 86 in all, and serves them over stdio. Every tool has a JSON Schema for its input and its output, and annotations that tell the client whether it reads, writes, or deletes.
+An MCP server for the Redmine REST API. It exposes one tool per operation of [`@redmine-ts/sdk`](../sdk), 86 in all, and serves them over stdio or Streamable HTTP. Every tool has a JSON Schema for its input and its output, and annotations that tell the client whether it reads, writes, or deletes.
 
 The package is not on npm yet. Until the first release, build it from this repo and run `packages/mcp/dist/cli.mjs` with Node 22 or later:
 
@@ -53,6 +53,60 @@ Cursor, in `.cursor/mcp.json` or `~/.cursor/mcp.json`:
 
 The server name, `redmine` above, is the prefix clients put in front of the tool names, so the tools themselves carry no `redmine_` prefix.
 
+## Serve over HTTP
+
+With `--http`, one server serves Streamable HTTP at `/mcp` for many users. Each request carries its user's API key in the `X-Redmine-API-Key` header, and the server answers it with a fresh MCP server for that key. `REDMINE_URL` is fixed at startup, so a client cannot point the server at another host. The server does not read `REDMINE_API_KEY` in this mode; when it is set, the server says once on stderr that it ignores it.
+
+```sh
+REDMINE_URL=https://tracker.example.com node packages/mcp/dist/cli.mjs --http --no-delete
+# redmine-mcp: serving MCP at http://127.0.0.1:3737/mcp
+```
+
+The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisions without sessions: each request stands alone, and `GET` and `DELETE` on `/mcp` answer 405. The access mode and `REDMINE_VERSION` apply to every request, as they do over stdio. `SIGINT` or `SIGTERM` lets requests in flight finish and then stops the server; a second signal stops it at once.
+
+| Request                                                   | Answer                                                    |
+| --------------------------------------------------------- | --------------------------------------------------------- |
+| No `X-Redmine-API-Key` header, or an empty one            | 401, with a JSON-RPC error that names the header.         |
+| An `Origin` whose hostname `--allow-origin` does not list | 403.                                                      |
+| A `Host` other than localhost, on a loopback address      | 403.                                                      |
+| A path other than `/mcp`                                  | 404.                                                      |
+| A key Redmine rejects                                     | The tool call returns an error result with Redmine's 401. |
+
+Claude Code:
+
+```sh
+claude mcp add --transport http redmine http://127.0.0.1:3737/mcp \
+  --header "X-Redmine-API-Key: your-key"
+```
+
+Cursor, in `.cursor/mcp.json` or `~/.cursor/mcp.json`, with the key read from the environment:
+
+```json
+{
+  "mcpServers": {
+    "redmine": {
+      "url": "http://127.0.0.1:3737/mcp",
+      "headers": { "X-Redmine-API-Key": "${env:REDMINE_API_KEY}" }
+    }
+  }
+}
+```
+
+### Security defaults
+
+- The server listens on `127.0.0.1`. To listen anywhere else, pass the address with `--host`.
+- On a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, or the address itself. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it.
+- A request with an `Origin` header gets 403 unless `--allow-origin` lists its hostname. Browsers send `Origin`; command-line and desktop clients do not, so they pass. The check compares hostnames only, as the MCP SDK does, so `--allow-origin app.example.com` also admits `http://app.example.com:8080`. The server sends no CORS headers, so a web page on another origin cannot call it even when its hostname is listed.
+- The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so for remote use put a proxy that terminates TLS in front of the server and keep the server on loopback. Caddy passes the client's `Host` to the server unless told otherwise:
+
+```caddy
+mcp.example.com {
+	reverse_proxy 127.0.0.1:3737 {
+		header_up Host {upstream_hostport}
+	}
+}
+```
+
 ## Settings
 
 The server reads its settings once at startup. A missing or invalid value stops it with exit code 2 and a message that names the setting. The message never prints the URL or the API key, so a key pasted into the wrong variable does not end up in a log.
@@ -60,15 +114,21 @@ The server reads its settings once at startup. A missing or invalid value stops 
 | Environment variable | Required | Meaning                                                                                    |
 | -------------------- | -------- | ------------------------------------------------------------------------------------------ |
 | `REDMINE_URL`        | Yes      | The base URL, subpath included, such as `https://example.com/redmine`. http or https only. |
-| `REDMINE_API_KEY`    | Yes      | The API key of the Redmine user that every tool acts as.                                   |
+| `REDMINE_API_KEY`    | stdio    | The API key of the Redmine user that every tool acts as. Not read with `--http`.           |
 | `REDMINE_VERSION`    | No       | `6.1` or `7.0`. A patch version such as `7.0.1` is read as `7.0`.                          |
 | `REDMINE_MCP_ACCESS` | No       | `full` (the default), `no-delete`, or `read-only`.                                         |
 
-| Flag          | Meaning                                 |
-| ------------- | --------------------------------------- |
-| `--read-only` | Same as `REDMINE_MCP_ACCESS=read-only`. |
-| `--no-delete` | Same as `REDMINE_MCP_ACCESS=no-delete`. |
-| `--help`      | Prints the settings and exits.          |
+| Flag                        | Meaning                                                                       |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `--read-only`               | Same as `REDMINE_MCP_ACCESS=read-only`.                                       |
+| `--no-delete`               | Same as `REDMINE_MCP_ACCESS=no-delete`.                                       |
+| `--http`                    | Serves Streamable HTTP at `/mcp` instead of stdio.                            |
+| `--port <n>`                | The HTTP port, 3737 by default. `0` picks a free port.                        |
+| `--host <addr>`             | The address to listen on, `127.0.0.1` by default.                             |
+| `--allow-origin <hostname>` | Admits browser requests whose `Origin` has this hostname. Repeat it for more. |
+| `--help`                    | Prints the settings and exits.                                                |
+
+`--port`, `--host`, and `--allow-origin` need `--http`.
 
 ## Access modes
 
@@ -168,6 +228,41 @@ serveStdio(() =>
 ```
 
 `access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client.
+
+`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` and `allowedHosts` take hostnames, as `--allow-origin` does. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
+
+Bun:
+
+```ts
+import { createRedmineMcpHandler } from "@redmine-ts/mcp";
+
+const handler = createRedmineMcpHandler({
+  baseUrl: "https://tracker.example.com",
+  version: "7.0",
+  access: "no-delete",
+  allowedHosts: ["localhost", "127.0.0.1", "[::1]"],
+});
+
+Bun.serve({ hostname: "127.0.0.1", port: 3737, routes: { "/mcp": handler } });
+```
+
+Cloudflare Workers, where TLS and the hostname come from Cloudflare:
+
+```ts
+import { createRedmineMcpHandler } from "@redmine-ts/mcp";
+
+const handler = createRedmineMcpHandler({
+  baseUrl: "https://tracker.example.com",
+  access: "read-only",
+});
+
+export default {
+  fetch: (request: Request) =>
+    new URL(request.url).pathname === "/mcp"
+      ? handler(request)
+      : new Response("Not Found", { status: 404 }),
+};
+```
 
 ## License
 
