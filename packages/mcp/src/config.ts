@@ -9,7 +9,7 @@ import { localhostAllowedHostnames } from "@modelcontextprotocol/server";
 import { parseRedmineVersion, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig } from "@redmine-ts/sdk";
 import { z } from "zod";
-import { API_KEY_HEADER } from "./http.ts";
+import { API_KEY_HEADER, isOrigin } from "./http.ts";
 import type { RedmineMcpHandlerOptions } from "./http.ts";
 import { ACCESS_ORDER } from "./tools.ts";
 
@@ -30,7 +30,7 @@ export type CliCommand =
 const DEFAULT_PORT = 3737;
 
 export const USAGE: string = `Usage: redmine-mcp [--read-only] [--no-delete]
-       redmine-mcp --http [--port <n>] [--host <addr>] [--allow-origin <hostname>]...
+       redmine-mcp --http [--port <n>] [--host <addr>] [--allow-origin <hostname|origin>]...
 
 Serves the Redmine REST API as MCP tools over stdio, or over Streamable HTTP at /mcp.
 
@@ -51,9 +51,11 @@ Flags:
   --http               Serve Streamable HTTP instead of stdio
   --port <n>           HTTP port, default ${DEFAULT_PORT}; 0 picks a free one
   --host <addr>        Address to listen on, default 127.0.0.1
-  --allow-origin <hostname>
-                       Accept browser requests whose Origin has this hostname.
-                       Repeatable. Without it, any request with an Origin gets 403
+  --allow-origin <hostname|origin>
+                       Accept browser requests from this hostname (any scheme and
+                       port) or exact origin, such as https://app.example.com, and
+                       send them CORS headers. Repeatable. Without it, any request
+                       with an Origin gets 403
   --help               Show this help
 
 When several access settings are given, the strictest wins.`;
@@ -121,8 +123,9 @@ const HttpSettings = Env.omit({ REDMINE_API_KEY: true, REDMINE_MCP_FILES_DIR: tr
   "--host": z.string().trim().min(1, { error: "is empty" }).default("127.0.0.1"),
   "--allow-origin": z
     .array(z.string())
-    .refine((hostnames) => hostnames.every(isHostname), {
-      error: "takes a hostname such as app.example.com, without scheme or port",
+    .refine((entries) => entries.every((entry) => isHostname(entry) || isOrigin(entry)), {
+      error:
+        "takes a hostname such as app.example.com or an origin such as https://app.example.com, in lowercase and without a path",
     })
     .default([]),
 });

@@ -158,13 +158,21 @@ describe("parseCli --http", () => {
     expect(parseCli(["--http", "--port", port], url)).toMatchObject({ port: expected });
   });
 
-  it("collects repeated --allow-origin hostnames and applies the strictest access", () => {
-    const argv = ["--http", "--allow-origin", "app.example.com", "--allow-origin", "[::1]"];
+  it("collects repeated --allow-origin hostnames and origins and applies the strictest access", () => {
+    const argv = [
+      "--http",
+      "--allow-origin",
+      "app.example.com",
+      "--allow-origin",
+      "[::1]",
+      "--allow-origin",
+      "https://inspector.example.com:6274",
+    ];
     const command = parseCli([...argv, "--no-delete"], { ...url, REDMINE_VERSION: "6.1" });
     expect(command).toMatchObject({
       kind: "http",
       options: {
-        allowedOrigins: ["app.example.com", "[::1]"],
+        allowedOrigins: ["app.example.com", "[::1]", "https://inspector.example.com:6274"],
         access: "no-delete",
         version: "6.1",
       },
@@ -176,7 +184,10 @@ describe("parseCli --http", () => {
     [["--port=-1"], "--port must be a port"],
     [["--port", "http"], "--port must be a port"],
     [["--host", " "], "--host is empty"],
-    [["--allow-origin", "https://app.example.com"], "--allow-origin takes a hostname"],
+    [["--allow-origin", "https://app.example.com/app"], "--allow-origin takes a hostname"],
+    [["--allow-origin", "https://app.example.com/"], "--allow-origin takes a hostname"],
+    [["--allow-origin", "https://App.Example.com"], "--allow-origin takes a hostname"],
+    [["--allow-origin", "ftp://app.example.com"], "--allow-origin takes a hostname"],
     [["--allow-origin", "app.example.com:8443"], "--allow-origin takes a hostname"],
     [["--allow-origin", "App.Example.com"], "--allow-origin takes a hostname"],
   ])("explains a bad flag %j", (argv, message) => {
