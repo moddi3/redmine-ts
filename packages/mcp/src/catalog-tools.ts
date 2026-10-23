@@ -319,8 +319,8 @@ function describeFilter(filter: JsonSchema): string {
 
 function describeTool(entry: CatalogEntry): string {
   const { output } = entry;
-  const fields = (schema: JsonSchema): string => {
-    const keys = Object.keys(schema.properties ?? {});
+  const fields = (schema: JsonSchema, omit: readonly string[] = []): string => {
+    const keys = Object.keys(schema.properties ?? {}).filter((key) => !omit.includes(key));
     return keys.length > 12
       ? `${keys.slice(0, 12).join(", ")} and ${keys.length - 12} more`
       : keys.join(", ");
@@ -328,7 +328,7 @@ function describeTool(entry: CatalogEntry): string {
   const returns = ((): string => {
     switch (output.kind) {
       case "list":
-        return `Returns one page, {items, total_count, offset, limit, next_offset}. Call again with offset = next_offset until it is null. Items omit ${HEAVY_KEYS.join(", ")} unless detailed is true. Item fields: ${fields(output.schema)}.`;
+        return `Returns one page, {items, total_count, offset, limit, next_offset}. Call again with offset = next_offset until it is null. Items omit ${HEAVY_KEYS.join(", ")} unless detailed is true. Item fields: ${fields(output.schema, HEAVY_KEYS)}.`;
       case "item":
         return `Returns the ${entry.method === "POST" ? "created " : ""}record: ${fields(output.schema)}.${output.optional ? " Returns {ok: true} when Redmine sends no body." : ""}`;
       case "empty":

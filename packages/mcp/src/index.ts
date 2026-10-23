@@ -1,1 +1,1 @@
-export type { Annotations, Tier, ToolSpec } from "./tools.ts";
+export { createRedmineMcpServer } from "./server.ts";
