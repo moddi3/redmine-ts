@@ -188,7 +188,7 @@ function redmineFailure(tool: ToolSpec, error: RedmineError): CallToolResult {
       case "conflict":
         return `Someone changed this record since it was read (${data.status}). Read it again, merge, and retry.`;
       case "unauthorized":
-        return "Redmine rejected the API key (401). Check REDMINE_API_KEY, or the X-Redmine-API-Key header over HTTP.";
+        return "Redmine rejected the credentials (401). Check REDMINE_API_KEY, or the X-Redmine-API-Key header over HTTP; over OAuth, the sign-in was revoked in Redmine, so sign in again.";
       case "forbidden":
         return `Redmine answered 403 for ${tool.name}: the key's user lacks the permission, or the REST API is disabled.`;
       default:
