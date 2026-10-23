@@ -93,5 +93,12 @@ jobs:
           }
           inspector --method tools/list --strict > /dev/null
           inspector --method tools/call --tool-name users_current | jq -e '.structuredContent.login == "admin"'
+      # A test sees only "Redmine answered 500"; the server's log names the exception.
+      - if: failure()
+        name: Redmine server errors
+        shell: bash
+        run: |
+          docker compose -f docker/compose.yaml logs --no-color 2>&1 \
+            | grep -E -A15 'Completed 500' || echo "no 500 in the Redmine logs"
       - if: always()
         run: node scripts/redmine-env.ts down
