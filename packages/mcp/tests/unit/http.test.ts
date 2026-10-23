@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vite-plus/test";
 import { createRedmineMcpHandler } from "../../src/index.ts";
-import type { RedmineMcpHandlerOptions } from "../../src/index.ts";
+import type { BearerGrant, BearerVerifier, RedmineMcpHandlerOptions } from "../../src/index.ts";
 import { texts } from "../connect.ts";
 
 type Handler = (request: Request) => Promise<Response>;
@@ -341,7 +341,242 @@ describe("createRedmineMcpHandler", () => {
     };
     visit(new URL("../../src/index.ts", import.meta.url));
     expect([...seen].map((file) => file.split("/").at(-1))).toEqual(
-      expect.arrayContaining(["http.ts", "server.ts", "tools.ts", "catalog-tools.ts"]),
+      expect.arrayContaining([
+        "http.ts",
+        "server.ts",
+        "tools.ts",
+        "catalog-tools.ts",
+        "seal.ts",
+        "clients.ts",
+        "pages.ts",
+      ]),
     );
+  });
+});
+
+describe("createRedmineMcpHandler with a verifier", () => {
+  const publicUrl = "https://redmine.example.com/redmine/mcp";
+  const now = () => Math.floor(Date.now() / 1000);
+  const grants: Record<string, BearerGrant> = {
+    alice: {
+      credential: { bearer: "redmine-token-of-alice" },
+      scopes: ["redmine:write"],
+      resource: publicUrl,
+      expiresAt: now() + 600,
+      clientId: "client",
+    },
+    expired: {
+      credential: { bearer: "x" },
+      scopes: ["redmine:read"],
+      resource: publicUrl,
+      expiresAt: now() - 1,
+      clientId: "client",
+    },
+    foreign: {
+      credential: { bearer: "x" },
+      scopes: ["redmine:read"],
+      resource: "https://other.example.com/mcp",
+      expiresAt: now() + 600,
+      clientId: "client",
+    },
+    unscoped: {
+      credential: { bearer: "x" },
+      scopes: ["profile"],
+      resource: publicUrl,
+      expiresAt: now() + 600,
+      clientId: "client",
+    },
+  };
+  const verifier: BearerVerifier = {
+    issuer: "https://auth.example.com",
+    verify: async (token) => grants[token],
+  };
+
+  /** A Redmine that names a status after the bearer token it got. */
+  function bearerRedmine() {
+    const seen: (string | null)[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const authorization = new Request(input, init).headers.get("authorization");
+      seen.push(authorization);
+      return Response.json({
+        issue_statuses: [{ id: 1, name: `New for ${authorization}`, is_closed: false }],
+      });
+    };
+    return { fetch, seen };
+  }
+
+  function gated(options: Partial<RedmineMcpHandlerOptions> = {}) {
+    const redmine = bearerRedmine();
+    const handle = createRedmineMcpHandler({
+      baseUrl: "http://redmine.test",
+      fetch: redmine.fetch,
+      publicUrl,
+      verifier,
+      ...options,
+    });
+    const call = (headers: Record<string, string>, method = "tools/list", path = "/redmine/mcp") =>
+      handle(
+        new Request(`http://127.0.0.1:3737${path}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            ...headers,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method,
+            params: method === "tools/call" ? { name: "issue_statuses_list", arguments: {} } : {},
+          }),
+        }),
+      );
+    return { handle, call, seen: redmine.seen };
+  }
+
+  it("serves the protected resource metadata naming the verifier's issuer", async () => {
+    const { handle } = gated({ access: "no-delete" });
+    for (const path of [
+      "/.well-known/oauth-protected-resource/redmine/mcp",
+      "/redmine/mcp/.well-known/oauth-protected-resource",
+    ]) {
+      const response = await handle(new Request(`http://127.0.0.1:3737${path}`));
+      expect(await response.json()).toEqual({
+        resource: publicUrl,
+        authorization_servers: ["https://auth.example.com"],
+        scopes_supported: ["redmine:read", "redmine:write"],
+        bearer_methods_supported: ["header"],
+        resource_name: "Redmine",
+      });
+    }
+    // An external authorization server publishes its own metadata.
+    const server = await handle(
+      new Request("http://127.0.0.1:3737/.well-known/oauth-authorization-server/redmine/mcp"),
+    );
+    expect(server.status).toBe(404);
+  });
+
+  it("challenges a request without credentials, naming no error, as RFC 6750 asks", async () => {
+    const response = await gated().call({});
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      `Bearer resource_metadata="${publicUrl}/.well-known/oauth-protected-resource", scope="redmine:read redmine:write redmine:delete"`,
+    );
+    expect(await response.json()).toMatchObject({
+      error: "invalid_token",
+      error_description: expect.stringContaining("X-Redmine-API-Key"),
+    });
+  });
+
+  it.each([
+    ["an unknown", "nobody"],
+    ["an expired", "expired"],
+    ["another resource's", "foreign"],
+  ])("answers 401 invalid_token for %s token", async (_, token) => {
+    const { call, seen } = gated();
+    const response = await call({ Authorization: `Bearer ${token}` });
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toMatch(
+      /^Bearer error="invalid_token", .*resource_metadata="/,
+    );
+    expect(seen).toEqual([]);
+  });
+
+  it("answers 403 insufficient_scope for a token without a redmine scope", async () => {
+    const response = await gated().call({ Authorization: "Bearer unscoped" });
+    expect(response.status).toBe(403);
+    expect(response.headers.get("www-authenticate")).toContain('error="insufficient_scope"');
+    expect(response.headers.get("www-authenticate")).toContain(
+      'scope="redmine:read redmine:write redmine:delete"',
+    );
+  });
+
+  it("sends the grant's Redmine credential, never the token, in the token's access mode", async () => {
+    const { call, seen } = gated();
+    const listed = await call({ Authorization: "Bearer alice" });
+    // redmine:write is no-delete: 76 tools, the deletes hidden.
+    expect((await listed.text()).match(/"name":"/g)).toHaveLength(76);
+    const called = await call({ Authorization: "Bearer alice" }, "tools/call");
+    expect(await called.text()).toContain("New for Bearer redmine-token-of-alice");
+    expect(seen).toEqual(["Bearer redmine-token-of-alice"]);
+  });
+
+  it("keeps the X-Redmine-API-Key header working, ahead of a bearer token", async () => {
+    const { handle, keys } = handler({ publicUrl, verifier });
+    const routed = await handle(
+      new Request("http://127.0.0.1:3737/redmine/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "X-Redmine-API-Key": "alice-key",
+          Authorization: "Bearer nobody",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "issue_statuses_list", arguments: {} },
+        }),
+      }),
+    );
+    expect(await routed.text()).toContain("New for alice-key");
+    expect(keys).toEqual(["alice-key"]);
+  });
+
+  it("allows Authorization in a preflight and exposes WWW-Authenticate", async () => {
+    const { handle, call } = gated({ allowedOrigins: ["https://app.example.com"] });
+    const preflight = await handle(
+      new Request("http://127.0.0.1:3737/redmine/mcp", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://app.example.com",
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "authorization, content-type",
+        },
+      }),
+    );
+    expect(preflight.headers.get("access-control-allow-headers")).toContain("Authorization");
+    const challenged = await call({ origin: "https://app.example.com" });
+    expect(challenged.status).toBe(401);
+    expect(challenged.headers.get("access-control-expose-headers")).toBe("WWW-Authenticate");
+  });
+
+  it("refuses a verifier without publicUrl, both kinds of server at once, and plain http", () => {
+    const create = (options: Partial<RedmineMcpHandlerOptions>) => () =>
+      createRedmineMcpHandler({ baseUrl: "http://redmine.test", ...options });
+    expect(create({ verifier })).toThrow("publicUrl");
+    expect(create({ verifier, publicUrl: "http://redmine.example.com/mcp" })).toThrow("https");
+    expect(create({ verifier, publicUrl: `${publicUrl}?x=1` })).toThrow("query");
+    expect(
+      create({
+        verifier,
+        publicUrl,
+        oauth: { secret: "s".repeat(32), apiKeyLogin: true },
+      }),
+    ).toThrow("exclude each other");
+  });
+});
+
+describe("createRedmineMcpHandler with a public URL and no OAuth", () => {
+  it("serves the endpoint at its path only and keeps the header mode's 401", async () => {
+    const { handle } = handler({ publicUrl: "http://127.0.0.1:3737/tracker/mcp" });
+    const at = (path: string, headers: Record<string, string> = {}) =>
+      handle(
+        new Request(`http://127.0.0.1:3737${path}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            ...headers,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+        }),
+      );
+    expect((await at("/tracker/mcp", { "X-Redmine-API-Key": "alice-key" })).status).toBe(200);
+    expect((await at("/tracker/mcp/")).status).toBe(401);
+    expect((await at("/tracker/mcp")).headers.has("www-authenticate")).toBe(false);
+    expect((await at("/mcp", { "X-Redmine-API-Key": "alice-key" })).status).toBe(404);
+    expect((await at("/.well-known/oauth-protected-resource/tracker/mcp")).status).toBe(404);
   });
 });

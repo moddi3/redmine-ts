@@ -63,13 +63,13 @@ REDMINE_URL=https://tracker.example.com npx -y @redmine-ts/mcp --http --no-delet
 
 The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisions without sessions: each request stands alone, and `GET` and `DELETE` on `/mcp` answer 405. The access mode and `REDMINE_VERSION` apply to every request, as they do over stdio. `SIGINT` or `SIGTERM` lets requests in flight finish and then stops the server; a second signal stops it at once.
 
-| Request                                              | Answer                                                    |
-| ---------------------------------------------------- | --------------------------------------------------------- |
-| No `X-Redmine-API-Key` header, or an empty one       | 401, with a JSON-RPC error that names the header.         |
-| An `Origin` that `--allow-origin` does not list      | 403.                                                      |
-| A `Host` other than localhost, on a loopback address | 403.                                                      |
-| A path other than `/mcp`                             | 404.                                                      |
-| A key Redmine rejects                                | The tool call returns an error result with Redmine's 401. |
+| Request                                              | Answer                                                                                                   |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| No `X-Redmine-API-Key` header, or an empty one       | 401, with a JSON-RPC error that names the header. With [OAuth](#oauth), a 401 with a `Bearer` challenge. |
+| An `Origin` that `--allow-origin` does not list      | 403.                                                                                                     |
+| A `Host` other than localhost, on a loopback address | 403.                                                                                                     |
+| A path other than `/mcp`                             | 404. With `REDMINE_MCP_PUBLIC_URL`, the server serves that URL's path and the OAuth paths instead.       |
+| A key Redmine rejects                                | The tool call returns an error result with Redmine's 401.                                                |
 
 Claude Code:
 
@@ -116,9 +116,186 @@ redmine-mcp --http --allow-origin https://app.example.com --allow-origin localho
 
 The flag takes a hostname or an origin. `localhost` admits `http://localhost:6274`, `https://localhost`, and any other scheme and port on that hostname, as the MCP SDK's check does. `https://app.example.com` admits exactly that scheme, host, and port, and refuses `http://app.example.com` and `https://app.example.com:8443`. Prefer the origin form: another service on the same host is a different origin. Write the origin as a browser does, in lowercase, with no path and no trailing slash. The server answers with the requesting origin, never `*`, and with `Vary: Origin`. It sends no `Access-Control-Allow-Credentials`, because the key travels in a header and there are no cookies. A request from another origin still gets 403 without CORS headers, and a request without `Origin` is served as before.
 
-The preflight allows `POST`, the only method `/mcp` serves, and the headers the 2026-07-28 transport sends (`Content-Type`, `Accept`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) plus `X-Redmine-API-Key`. The server issues no session id and sets no header a page must read, so it exposes none. The `Host` check on loopback applies to preflights too.
+The preflight allows `POST`, the only method `/mcp` serves, and the headers the 2026-07-28 transport sends (`Content-Type`, `Accept`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) plus `Authorization` and `X-Redmine-API-Key`. Responses expose `WWW-Authenticate`, so a page can follow an OAuth challenge. The server issues no session id. The `Host` check on loopback applies to preflights too. The OAuth metadata, token and registration endpoints answer any origin, as they carry no cookie and no key.
 
 CORS means that a page on an allowed origin holds the user's Redmine API key and acts as that user. Allow only origins whose code you trust, and prefer an origin to a hostname. CORS does not open the port: the server still listens on `127.0.0.1` by default, and the `Host` check still refuses a rebound domain.
+
+## OAuth
+
+claude.ai and ChatGPT connect to remote MCP servers only through OAuth; neither can send an `X-Redmine-API-Key` header. With OAuth on, the server is its own OAuth authorization server for MCP clients, as the 2026-07-28 MCP spec describes, and people sign in at Redmine's own OAuth, which Redmine has offered since 6.1. The header keeps working next to OAuth, for clients that can send it.
+
+```sh
+REDMINE_URL=https://tracker.example.com \
+REDMINE_MCP_PUBLIC_URL=https://mcp.example.com/mcp \
+REDMINE_MCP_AUTH_SECRET=... \
+REDMINE_OAUTH_CLIENT_ID=... REDMINE_OAUTH_CLIENT_SECRET=... \
+  npx -y @redmine-ts/mcp --http --no-delete
+# redmine-mcp: serving MCP at http://127.0.0.1:3737/mcp
+# redmine-mcp: OAuth for https://mcp.example.com/mcp; the Redmine application's redirect URI is https://mcp.example.com/mcp/oauth/redmine/callback
+```
+
+Generate the secret once, with `openssl rand -base64 32`, and keep it: a new one signs every client out. A sign-in goes like this:
+
+1. The MCP client finds the server's metadata from the 401 and identifies itself, with a Client ID Metadata Document or by registering.
+2. The server shows its own consent page: the client's name and host, where it sends the person back, and the access it asks for.
+3. On Allow, the browser goes to Redmine's `/oauth/authorize`. The person signs in to Redmine, with two-factor authentication if Redmine asks for it, and approves Redmine's own consent page.
+4. Redmine sends the browser back to the server, which gives the client a code, and the client exchanges it for the server's own access and refresh tokens.
+5. Each MCP request opens the client's token to the Redmine token sealed inside it, and calls Redmine with that one. The client's token never reaches Redmine.
+
+The server keeps no database. Codes, tokens, states and client registrations are encrypted with keys derived from `REDMINE_MCP_AUTH_SECRET`, and Redmine's single-use codes and rotating refresh tokens carry what state there is. One process or many, Node or Workers, it works the same.
+
+### Set up Redmine
+
+OAuth needs Redmine 6.1 or later with the REST API turned on (Administration, Settings, API). Create one application as an admin:
+
+1. Administration, Applications, New application.
+2. Name: what people see on Redmine's consent page, such as `MCP`.
+3. Redirect URI: the public URL of the MCP endpoint followed by `/oauth/redmine/callback`, such as `https://mcp.example.com/mcp/oauth/redmine/callback`. The server prints it at startup. Redmine allows plain http only for `localhost` and `127.0.0.1`.
+4. Confidential: keep it checked. Redmine creates only confidential applications.
+5. Scopes: tick every permission. The server asks Redmine only for the permissions of the scopes a client was granted (see [Scopes](#scopes-and-access-modes)), and Redmine refuses a request for one the application lacks. Leave Administration unticked; the server never asks for it.
+6. Save, and copy the UID into `REDMINE_OAUTH_CLIENT_ID` and the secret into `REDMINE_OAUTH_CLIENT_SECRET`. Redmine shows the secret once.
+
+### Run the server
+
+| Environment variable               | Meaning                                                                                                                                                                                                                                  |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REDMINE_MCP_PUBLIC_URL`           | The URL people give their client, such as `https://mcp.example.com/mcp` or `https://tracker.example.com/mcp`. With OAuth it must be https, except on `localhost`. The server never guesses it from `Host` or `X-Forwarded-*`.            |
+| `REDMINE_MCP_AUTH_SECRET`          | Turns OAuth on. At least 32 characters, such as the output of `openssl rand -base64 32`. Keep it secret: it protects every token.                                                                                                        |
+| `REDMINE_MCP_AUTH_PREVIOUS_SECRET` | Optional: the secret before the last change. See [Change the secret](#change-the-secret).                                                                                                                                                |
+| `REDMINE_OAUTH_CLIENT_ID`          | The Redmine application's UID.                                                                                                                                                                                                           |
+| `REDMINE_OAUTH_CLIENT_SECRET`      | The Redmine application's secret.                                                                                                                                                                                                        |
+| `REDMINE_PUBLIC_URL`               | Optional: Redmine's URL as browsers reach it, when `REDMINE_URL` is an internal address such as `http://localhost:3000`. Sign-in sends browsers there; token requests and the REST API keep using `REDMINE_URL`. Default: `REDMINE_URL`. |
+
+`--allow-client claude.ai --allow-client vscode.dev` admits only those clients: a client with a metadata document when the document's URL is on a listed host, a registered client when every one of its redirect URIs is. Without the flag, any client may ask; the consent page is what stops one the person does not trust.
+
+The server speaks plain HTTP, so put it behind a proxy that terminates TLS, as in [Same-origin deployment](#same-origin-deployment). On a loopback address it accepts the public URL's host in `Host` as well as `localhost`, so a proxy may pass the client's `Host` through.
+
+### Clients
+
+Give the client the public URL. Every client below finds the rest from the server's 401.
+
+| Client                                      | How it identifies itself                                                                           |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| claude.ai, Claude Desktop and mobile        | Its metadata document at `claude.ai`, with redirect URI `https://claude.ai/api/mcp/auth_callback`. |
+| ChatGPT                                     | Its metadata document at `chatgpt.com`. The server returns `iss`, which ChatGPT needs.             |
+| Claude Code, Codex                          | Their metadata documents, with a loopback redirect URI on a random port, which the server allows.  |
+| VS Code                                     | Its metadata document at `vscode.dev`.                                                             |
+| Cursor and other clients without a document | Dynamic Client Registration. The client ID the server returns is the registration, sealed.         |
+
+Clients that can send headers, such as Claude Code, Codex, Cursor, and VS Code, may keep using `X-Redmine-API-Key` instead. A request with both uses the key.
+
+### Scopes and access modes
+
+The server offers three scopes, each including the ones before it, and each grants one [access mode](#access-modes):
+
+| Scope            | Access mode | Permissions the server asks Redmine for                                                             |
+| ---------------- | ----------- | --------------------------------------------------------------------------------------------------- |
+| `redmine:read`   | `read-only` | The `view_*` permissions, `search_project`, `browse_repository` and `export_wiki_pages`.            |
+| `redmine:write`  | `no-delete` | Those, and every permission that adds or changes something, such as `add_issues` and `edit_issues`. |
+| `redmine:delete` | `full`      | Those, and the `delete_*` permissions.                                                              |
+
+The server's own mode caps what it grants: a `--no-delete` server offers `redmine:read` and `redmine:write` only, and its 401 asks for those. A request uses the stricter of the token's mode and the server's. A client that asks for no scope gets all the server offers; the consent page lists them. OAuth sessions never act as a Redmine admin, even for admins, because the server never asks for the `admin` scope; use the header for admin work.
+
+Redmine checks a token's permissions on most requests, but not on issue edits, notes and deletes: those check only the user's role ([Redmine #44271](https://www.redmine.org/issues/44271)). So the access mode, which the SDK applies before any request, is the guard that holds. The Redmine permissions narrow everything else.
+
+### Sign out and revoke
+
+- An access token lasts at most an hour, and never longer than the Redmine token inside it. A refresh token lasts 30 days, and each refresh brings a new one.
+- People revoke the application in Redmine, under Authorized applications (`/oauth/authorized_applications`). Redmine then refuses its tokens at once: tool calls return Redmine's 401, and the next refresh fails, so the client asks them to sign in again within the hour.
+- An admin who deletes the Redmine application ends every session the same way.
+- Changing `REDMINE_MCP_AUTH_SECRET` without keeping the old one signs every client out.
+
+The server cannot revoke one client on its own: it keeps no list of what it issued.
+
+### Change the secret
+
+Set the new secret in `REDMINE_MCP_AUTH_SECRET` and the old one in `REDMINE_MCP_AUTH_PREVIOUS_SECRET`. The server seals with the new one and opens with both, and every refresh moves a client to the new one. After 30 days, when every refresh token the old secret sealed has expired, remove the previous secret. Clients that registered dynamically, such as Cursor, then register again.
+
+### Trade-offs of keeping no state
+
+- **Refresh replay.** Redmine replaces a refresh token on use, but accepts the old one until the new access token is first used. A stolen refresh token that its owner has not used yet works in that window, and nothing revokes the whole family of tokens it came from.
+- **No per-client revocation** on the server's side; revocation happens in Redmine, or by changing the secret for everyone.
+- **The secret protects everything.** With the secret and a captured token, someone can read the Redmine token inside until it expires, or the API key with [API key sign-in](#api-key-sign-in). Keep the secret out of logs and repositories, and change it if it leaks.
+
+### API key sign-in
+
+For a Redmine without OAuth applications, `--api-key-login` replaces `REDMINE_OAUTH_CLIENT_ID` and `REDMINE_OAUTH_CLIENT_SECRET`: the consent page asks for the person's API key, checks it with `GET /users/current.json`, and seals it into the code and the tokens. A refresh checks the key again, so resetting it in Redmine, under My account, ends the session.
+
+Prefer Redmine sign-in where you can. A page that asks people to paste a master key is what phishing looks like, and it teaches them to do it. The page says which address bar it belongs to and where the key goes, but people rarely check. The key is also stronger than a token: it never expires, and Redmine permissions do not narrow it, so only the access mode limits it.
+
+The code is not single-use across processes. Each process refuses a code it has already seen, and a code expires after 60 seconds and works only with the client's PKCE verifier for this server, but a code copied to another process within that minute would work once more there.
+
+### Endpoints
+
+All paths derive from `REDMINE_MCP_PUBLIC_URL`. For `https://mcp.example.com/mcp`:
+
+| Path                                                                             | What                                                                    |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `/mcp`                                                                           | The MCP endpoint.                                                       |
+| `/mcp/.well-known/oauth-protected-resource`                                      | Protected resource metadata, which the 401 names.                       |
+| `/.well-known/oauth-protected-resource/mcp`                                      | The same document where RFC 9728 places it.                             |
+| `/.well-known/oauth-authorization-server/mcp`                                    | Authorization server metadata (RFC 8414). The issuer is the public URL. |
+| `/.well-known/openid-configuration/mcp`, `/mcp/.well-known/openid-configuration` | The same document, at the other URLs the MCP spec has clients try.      |
+| `/mcp/oauth/authorize`                                                           | The consent page, and the form it posts.                                |
+| `/mcp/oauth/redmine/callback`                                                    | Where Redmine sends the browser back.                                   |
+| `/mcp/oauth/token`                                                               | Tokens: `authorization_code` with PKCE S256, and `refresh_token`.       |
+| `/mcp/oauth/register`                                                            | Dynamic Client Registration.                                            |
+
+The server is not an OpenID provider and issues no ID tokens, so the document at the OpenID Connect URLs lacks `jwks_uri` and the other OpenID fields. Clients try the RFC 8414 URL first; forward it.
+
+### Same-origin deployment
+
+The server can share an origin with Redmine, such as `https://tracker.example.com/mcp` next to Redmine at `https://tracker.example.com`, or `https://example.com/redmine/mcp` next to Redmine at `https://example.com/redmine`. Run it on loopback, set `REDMINE_MCP_PUBLIC_URL` to that URL, `REDMINE_URL` to Redmine's internal address and `REDMINE_PUBLIC_URL` to Redmine's public one, and forward these paths unchanged, here for `/mcp`:
+
+- `/mcp` and everything under `/mcp/`
+- `/.well-known/oauth-protected-resource/mcp`
+- `/.well-known/oauth-authorization-server/mcp`
+- `/.well-known/openid-configuration/mcp`
+
+Nothing else at the origin's root belongs to the server. Forward the request body unbuffered and the response as it streams, since tool results arrive as server-sent events.
+
+The browser sends the server Redmine's cookies too, since they share the origin. The server reads only its own cookie, `__Host-redmine-mcp-oauth`, and never passes cookies on, but the proxy can keep Redmine's session cookie from reaching it at all. nginx:
+
+```nginx
+# Only the MCP server's own cookie; an empty value drops the header.
+map $http_cookie $redmine_mcp_cookie {
+    default "";
+    "~(?:^|;\s*)(?<mcp>__Host-redmine-mcp-oauth=[^;]+)" $mcp;
+}
+
+server {
+    server_name tracker.example.com;
+    # ... Redmine as before ...
+
+    location ~ ^/(mcp|\.well-known/(oauth-protected-resource|oauth-authorization-server|openid-configuration)/mcp)(/|$) {
+        proxy_pass http://127.0.0.1:3737;
+        proxy_http_version 1.1;
+        proxy_set_header Cookie $redmine_mcp_cookie;
+        proxy_request_buffering off;
+        proxy_buffering off;
+    }
+}
+```
+
+Caddy:
+
+```caddy
+tracker.example.com {
+	@mcp path /mcp /mcp/* /.well-known/oauth-protected-resource/mcp /.well-known/oauth-authorization-server/mcp /.well-known/openid-configuration/mcp
+	handle @mcp {
+		reverse_proxy 127.0.0.1:3737 {
+			header_up Cookie "__Host-redmine-mcp-oauth={cookie.__Host-redmine-mcp-oauth}"
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}
+```
+
+For a subpath, replace `/mcp` with the whole path, such as `/redmine/mcp` and `/.well-known/oauth-protected-resource/redmine/mcp`. The OAuth paths never collide with Redmine's own `/oauth/...` routes, because they all live under the MCP endpoint's path.
+
+Pages on the public origin, the consent page and, on a shared origin, Redmine's own, may call `/mcp` without `--allow-origin`; they still need a key or a token. The consent form is refused when a browser says it was posted from any other origin.
 
 ## Settings
 
@@ -132,6 +309,8 @@ The server reads its settings once at startup. A missing or invalid value stops 
 | `REDMINE_MCP_ACCESS`    | No       | `full` (the default), `no-delete`, or `read-only`.                                                                                                                         |
 | `REDMINE_MCP_FILES_DIR` | No       | A directory the server may read uploads from and save attachments to. It must exist. Without it, no tool touches local files. Not read with `--http`. See [Files](#files). |
 
+[OAuth](#oauth) adds `REDMINE_MCP_PUBLIC_URL`, `REDMINE_MCP_AUTH_SECRET`, `REDMINE_MCP_AUTH_PREVIOUS_SECRET`, `REDMINE_OAUTH_CLIENT_ID`, `REDMINE_OAUTH_CLIENT_SECRET` and `REDMINE_PUBLIC_URL`, for `--http` only. `REDMINE_MCP_PUBLIC_URL` alone serves the endpoint at its path, without OAuth. The others need `REDMINE_MCP_AUTH_SECRET`, and the server refuses to start when they do not fit together. Their values are never printed.
+
 | Flag                                | Meaning                                                                                                                                            |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--read-only`                       | Same as `REDMINE_MCP_ACCESS=read-only`.                                                                                                            |
@@ -140,9 +319,11 @@ The server reads its settings once at startup. A missing or invalid value stops 
 | `--port <n>`                        | The HTTP port, 3737 by default. `0` picks a free port.                                                                                             |
 | `--host <addr>`                     | The address to listen on, `127.0.0.1` by default.                                                                                                  |
 | `--allow-origin <hostname\|origin>` | Admits browser requests from a hostname or an exact origin and sends them CORS headers. Repeat it for more. See [CORS](#browser-clients-and-cors). |
+| `--api-key-login`                   | OAuth without a Redmine application: the consent page asks for the API key. See [API key sign-in](#api-key-sign-in).                               |
+| `--allow-client <hostname>`         | Admits only OAuth clients on this host. Repeat it for more. See [Run the server](#run-the-server).                                                 |
 | `--help`                            | Prints the settings and exits.                                                                                                                     |
 
-`--port`, `--host`, and `--allow-origin` need `--http`.
+`--port`, `--host`, `--allow-origin`, `--api-key-login` and `--allow-client` need `--http`.
 
 ## Access modes
 
@@ -250,7 +431,7 @@ A failed Redmine request comes back as a tool result with `isError: true`, never
 - `full` mode lets the agent delete issues, projects, and users. Redmine has no undo. Use `no-delete` unless the agent needs to delete.
 - `raw_request` reaches every REST path, plugins included, with the same key. The access mode applies to it like to every tool, and the SDK refuses a path outside `REDMINE_URL`.
 - Without `REDMINE_MCP_FILES_DIR`, no tool reads or writes local files. With it, tools read and write only inside that directory.
-- The server never logs the API key and sends it only in the `X-Redmine-API-Key` header.
+- The server never logs the API key and sends it only in the `X-Redmine-API-Key` header. Over [OAuth](#oauth), it sends Redmine only Redmine's own token or the key sealed in the client's token, never the client's token.
 
 ## Embed the server
 
@@ -272,7 +453,7 @@ serveStdio(() =>
 
 `access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. To enable `path` uploads and `attachments_save`, pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. The main entry never imports file system code, so a server without `files` cannot touch local files.
 
-`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
+`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. With `publicUrl`, it routes the endpoint and the [OAuth paths](#endpoints) itself, so give it every request; `oauth` takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, and `fetchClientMetadata`. To accept tokens from another authorization server instead, pass `verifier: { issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
 
 Bun:
 
@@ -304,6 +485,29 @@ export default {
     new URL(request.url).pathname === "/mcp"
       ? handler(request)
       : new Response("Not Found", { status: 404 }),
+};
+```
+
+With OAuth on Workers, create the handler on the first request, where the secrets are bound, and turn on the `global_fetch_strictly_public` compatibility flag, so the metadata documents clients name cannot reach private addresses. On Node, pass `publicFetch` from `@redmine-ts/mcp/node` as `fetchClientMetadata`; the CLI does.
+
+```ts
+import { createRedmineMcpHandler } from "@redmine-ts/mcp";
+
+let handler: ((request: Request) => Promise<Response>) | undefined;
+
+export default {
+  fetch(request: Request, env: { AUTH_SECRET: string; CLIENT_ID: string; CLIENT_SECRET: string }) {
+    handler ??= createRedmineMcpHandler({
+      baseUrl: "https://tracker.example.com",
+      publicUrl: "https://mcp.example.com/mcp",
+      access: "no-delete",
+      oauth: {
+        secret: env.AUTH_SECRET,
+        redmineApp: { clientId: env.CLIENT_ID, clientSecret: env.CLIENT_SECRET },
+      },
+    });
+    return handler(request);
+  },
 };
 ```
 
