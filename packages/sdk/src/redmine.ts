@@ -157,6 +157,9 @@ export function createIssueTransition(
     options?: CallOptions,
   ): Promise<unknown> => engine.call(op, input, options);
   return async ({ issue_id, status_id, notes }, options) => {
+    // The read would go out before the update is refused, so refuse the whole transition up front.
+    const refused = engine.refusal(update);
+    if (refused) throw refused;
     const issue = await call(get, { issue_id, include: ["allowed_statuses"] }, options);
     const { current, allowed } = readStatuses(issue, get.id);
     const hasNotes = notes !== undefined && notes !== "";

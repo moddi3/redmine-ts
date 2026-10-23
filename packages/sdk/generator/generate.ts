@@ -1,4 +1,5 @@
 import { format } from "vite-plus/fmt";
+import { catalogFile } from "./catalog.ts";
 import { mergeSpecs, type Drift, type Merged } from "./merge.ts";
 import { analyzeOperations, type OpModel } from "./operations.ts";
 import { overlay as defaultOverlay, type Overlay } from "./overlay.ts";
@@ -54,6 +55,7 @@ export async function generate(
     "src/generated/ops.ts": opsFile(ops, schemas),
     "src/generated/slots.ts": slotsFile(ops),
     "src/generated/resources.ts": resourcesFile(ops, merged, schemas),
+    "src/generated/catalog.ts": catalogFile(ops, merged),
   };
   const files: Record<string, string> = {};
   for (const [path, text] of Object.entries(raw)) {
@@ -226,7 +228,16 @@ function inputTypes(op: OpModel): string {
     out.push(`export interface ${n.where} {\n${fields.join("")}}\n`);
   }
   const fields: Member[] = [...op.fields];
-  if (hasWhere && !op.list) fields.push({ key: "where", type: n.where, required: false, doc: "" });
+  if (hasWhere && !op.list) {
+    fields.push({
+      key: "where",
+      type: n.where,
+      required: false,
+      doc: "",
+      schema: { type: "object" },
+      description: undefined,
+    });
+  }
   const base = op.list ? `ListInput<${hasWhere ? n.where : "never"}>` : null;
   if (fields.length === 0)
     out.push(`export type ${n.input} = ${base ?? "Record<string, never>"};\n`);

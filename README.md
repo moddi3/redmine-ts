@@ -8,8 +8,9 @@ TypeScript tooling for the Redmine REST API.
 | Package                           | Path           | What it is                                                                                |
 | --------------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
 | [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node and Bun, and for browsers through a proxy. |
+| [`@redmine-ts/mcp`](packages/mcp) | `packages/mcp` | MCP server with one typed tool per SDK operation, over stdio. Not published yet.          |
 
-The SDK is the base for an MCP server and an agent toolkit. Neither is in the repo yet. The operation registry already carries what they need: each operation's `since` version, its safety class, and a flat input that can become a tool's JSON input.
+The MCP server builds its tools from the SDK's `@redmine-ts/sdk/catalog` entrypoint, which describes each method's input and output as JSON Schema, with its `since` version and its HTTP method. An agent toolkit with a small set of triage tools is planned on the same base.
 
 ## Built on redmine-openapi
 
@@ -35,7 +36,7 @@ Run these from the repo root:
 | ----------------- | ---------------------------------------------------------------------------------------------------- |
 | `vp check`        | Checks formatting, lints, and typechecks everything, including the SDK's type tests and `examples/`. |
 | `vp run -r test`  | Runs the unit and generator tests of every package. Contract tests skip when no server is up.        |
-| `vp run -r build` | Builds every package. The SDK build runs publint and Are the Types Wrong and fails on any issue.     |
+| `vp run -r build` | Builds every package. Each build runs publint and Are the Types Wrong and fails on any issue.        |
 | `vp run ready`    | Runs the three commands above in order.                                                              |
 
 Run these from `packages/sdk`:
@@ -45,6 +46,8 @@ Run these from `packages/sdk`:
 | `vp run gen`           | Regenerates `src/generated/` from `spec/redmine-openapi/*.yaml` and prints the drift report. |
 | `vp run gen:check`     | Regenerates in memory and fails if the committed `src/generated/` differs.                   |
 | `vp run test:contract` | Runs the contract tests against the Docker servers. Fails if the servers are not up.         |
+
+`packages/mcp` has its own `vp run test:contract`, which runs the MCP tools against the same servers.
 
 Never edit `src/generated/` by hand. Change the generator in `packages/sdk/generator/` and run `vp run gen`.
 

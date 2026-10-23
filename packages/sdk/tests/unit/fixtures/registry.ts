@@ -151,6 +151,16 @@ export const downloadThumbnail = op({
   response: { kind: "binary" },
 });
 
+export const updateAttachment = op({
+  id: "updateAttachment",
+  method: "PATCH",
+  path: "attachments/{attachment_id}.json",
+  pathParams: ["attachment_id"],
+  body: { kind: "json", envelope: "attachment", siblings: [] },
+  response: { kind: "empty" },
+  safety: "write",
+});
+
 export const sendValue = op({
   id: "sendValue",
   method: "POST",
@@ -175,6 +185,7 @@ export const ops: Readonly<Record<string, AnyOp>> = {
   uploadAttachmentFile,
   downloadAttachmentFile,
   downloadThumbnail,
+  updateAttachment,
   sendValue,
 };
 
@@ -183,4 +194,5 @@ export const SLOTS: SlotTable = {
   users: { create: createUser },
   groups: { removeUsers: removeUsersFromGroup },
   timeEntries: { get: getTimeEntry, list: getTimeEntries },
+  attachments: { update: updateAttachment },
 };

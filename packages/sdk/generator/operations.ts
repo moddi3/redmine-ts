@@ -34,6 +34,7 @@ export interface Filter {
   spec: FilterSpec;
   caps: Cap[];
   doc: string;
+  description: string | undefined;
 }
 
 export interface Descriptor {
@@ -64,8 +65,12 @@ export interface OpModel {
   fields: Member[];
   where: Filter[];
   list: boolean;
+  /** The spec's `sort` param of a list, which ListInput.sort replaces in `fields`. */
+  sort: Member | null;
   /** The returned item, or null for empty and binary responses. */
   item: string | null;
+  /** The returned item's schema as the spec writes it (a $ref or inline), or null for empty and binary responses. */
+  itemSpec: Schema | null;
   /** Include values that become required on the item when requested. */
   narrows: string[];
   /** A 204 can answer instead of the body. */
@@ -108,12 +113,14 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
   };
   const params = op.parameters as Param[];
   const fields: Member[] = [];
-  const field = (p: Param, key: string, type: string) =>
+  const field = (p: Param, key: string, type: string, schema: Schema = p.schema) =>
     fields.push({
       key,
       type,
       required: p.required ?? false,
       doc: jsDoc(p.description, sinceTag(p["x-since"])),
+      schema,
+      description: p.description,
     });
 
   const pathParams = params.filter((p) => p.in === "path" && p.name !== "format");
@@ -145,11 +152,15 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
         spec: Object.keys(words).length > 0 ? { ops: codes, words } : { ops: codes },
         caps,
         doc: jsDoc(p.description, sinceTag(p["x-since"])),
+        description: p.description,
       });
     } else if (p.name === "include") {
       includes = (p.schema.items?.enum ?? []).map(String);
       query.include = "csv";
-      field(p, "include", "readonly I[]");
+      field(p, "include", "readonly I[]", {
+        type: "array",
+        items: { type: "string", enum: includes },
+      });
     } else if (p.name.endsWith("[]")) {
       const key = p.name.slice(0, -2);
       query[key] = "brackets";
@@ -164,7 +175,14 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
   const content = op.requestBody?.content ?? {};
   if (content["application/octet-stream"]) {
     body = { kind: "binary", key: "file" };
-    fields.push({ key: "file", type: "BinarySource", required: true, doc: "" });
+    fields.push({
+      key: "file",
+      type: "BinarySource",
+      required: true,
+      doc: "",
+      schema: { type: "string", format: "binary" },
+      description: undefined,
+    });
   } else if (content["application/json"]) {
     const schema = content["application/json"].schema ?? fail("json body without a schema");
     const top = Object.entries(schema.properties ?? {});
@@ -239,7 +257,9 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
     fields: fields.filter((f) => !(list && f.key === "sort")),
     where,
     list,
+    sort: (list && fields.find((f) => f.key === "sort")) || null,
     item,
+    itemSpec: analyzed.raw,
     narrows: includes.filter(
       (inc) => itemSchema?.properties?.[inc] !== undefined && !overlay.sparseIncludes.includes(inc),
     ),
@@ -258,17 +278,17 @@ function analyzeResponse(
   response: ResponseShape;
   item: string | null;
   itemSchema: Schema | null;
+  raw: Schema | null;
   maybeEmpty: boolean;
 } {
   const success = Object.values(m.op.responses).map((r) => deref(doc, r));
   const withBody = success.filter((r) => Object.keys(r.content ?? {}).length > 0);
-  if (withBody.length === 0)
-    return { response: { kind: "empty" }, item: null, itemSchema: null, maybeEmpty: false };
+  const none = { item: null, itemSchema: null, raw: null, maybeEmpty: false };
+  if (withBody.length === 0) return { response: { kind: "empty" }, ...none };
   if (withBody.length > 1) fail("several success bodies");
   const content = withBody[0]!.content!;
   const json = content["application/json"];
-  if (!json?.schema)
-    return { response: { kind: "binary" }, item: null, itemSchema: null, maybeEmpty: false };
+  if (!json?.schema) return { response: { kind: "binary" }, ...none };
   const maybeEmpty = success.length > withBody.length;
 
   const wrapper = json.schema.$ref ? refName(json.schema.$ref) : null;
@@ -285,6 +305,7 @@ function analyzeResponse(
       response: { kind: "list", items: key, paged },
       item: tsType(s.items ?? {}),
       itemSchema: resolve(s.items ?? {}),
+      raw: s.items ?? {},
       maybeEmpty,
     };
   }
@@ -296,6 +317,7 @@ function analyzeResponse(
         response: { kind: "item", unwrap: key },
         item: wrapper ? pascal(wrapper) : tsType(s),
         itemSchema: inner,
+        raw: s,
         maybeEmpty,
       };
     }

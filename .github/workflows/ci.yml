@@ -68,6 +68,8 @@ jobs:
       - run: node scripts/redmine-env.ts up
       - run: vp run --no-cache test:contract
         working-directory: packages/sdk
+      - run: vp run --no-cache test:contract
+        working-directory: packages/mcp
       - run: vp run -r build
       - name: runtime smoke (node)
         run: node scripts/runtime-smoke.mjs

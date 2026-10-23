@@ -2,7 +2,7 @@
 // decision and reads everything about an operation off the Op, so it works with any registry.
 
 import { VERSIONS } from "../generated/versions.ts";
-import { DEFAULT_RETRY, resolveRetry } from "./config.ts";
+import { ACCESS_METHODS, DEFAULT_RETRY, resolveRetry } from "./config.ts";
 import type { CallOptions, ResolvedConfig, RetryPolicy, SdkEvent } from "./config.ts";
 import { RedmineError } from "./errors.ts";
 import { toDownload } from "./files.ts";
@@ -30,6 +30,8 @@ export interface Engine {
     input: Readonly<Record<string, unknown>>,
     options?: CallOptions,
   ): Promise<Response>;
+  /** Why the client refuses `op` without sending anything (its `access` or declared `version`), if it does. */
+  refusal(op: AnyOp): RedmineError | undefined;
 }
 
 interface Delivered {
@@ -59,7 +61,10 @@ export function createEngine(config: ResolvedConfig): Engine {
   }
 
   function refusal(op: AnyOp): RedmineError | undefined {
-    const { version } = config;
+    const { access, version } = config;
+    if (access !== "full" && !ACCESS_METHODS[access].includes(op.method)) {
+      return new RedmineError({ kind: "access_denied", access, method: op.method }, { op: op.id });
+    }
     if (version === undefined || isAvailable(version, op.since, op.until)) return undefined;
     return new RedmineError(
       { kind: "unsupported_version", declared: version, since: op.since, until: op.until },
@@ -314,6 +319,7 @@ export function createEngine(config: ResolvedConfig): Engine {
     call: <O extends AnyOp>(op: O, input: InputOf<O>, options: CallOptions = {}): ReturnOf<O> =>
       dispatch(op, input, options) as ReturnOf<O>,
     send,
+    refusal,
   };
 }
 

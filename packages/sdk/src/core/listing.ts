@@ -31,7 +31,7 @@ export type Cond<V, Caps extends "not" | "range" | "text" | "presence" = never> 
   | ("text" extends Caps ? CondText : never)
   | ("presence" extends Caps ? CondPresence : never);
 
-const CUSTOM_FIELD: FilterSpec = {
+export const CUSTOM_FIELD: FilterSpec = {
   ops: ["=", "!", ">=", "<=", "><", "~", "!~", "^", "$", "*", "!*"],
 };
 

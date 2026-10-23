@@ -1,0 +1,64 @@
+{
+  "name": "@redmine-ts/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP server for the Redmine REST API, with one typed tool per operation",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "redmine"
+  ],
+  "homepage": "https://github.com/moddi3/redmine-ts/tree/main/packages/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/moddi3/redmine-ts/issues"
+  },
+  "license": "MIT",
+  "author": "Vlad Ivanov",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moddi3/redmine-ts.git",
+    "directory": "packages/mcp"
+  },
+  "bin": {
+    "mcp": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "prepublishOnly": "vp run build",
+    "test:contract": "REDMINE_CONTRACT=1 vp test --project contract"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "@redmine-ts/sdk": "workspace:^",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/core": "catalog:",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@types/node": "^26.6.5",
+    "ajv": "catalog:",
+    "ajv-formats": "catalog:",
+    "publint": "catalog:",
+    "typescript": "^7.0.2",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

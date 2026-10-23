@@ -3,7 +3,8 @@
 
 import { VERSIONS, type RedmineVersion } from "../generated/versions.ts";
 import type { RedmineError } from "./errors.ts";
-import { invalidInput } from "./util.ts";
+import type { HttpMethod } from "./op.ts";
+import { invalidInput, own } from "./util.ts";
 
 export type Auth =
   /** Sent only as the X-Redmine-API-Key header. The `?key=` query form is not offered. */
@@ -87,6 +88,15 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** Which HTTP methods the client sends. Anything else is refused with kind "access_denied" before a request. */
+export type Access = "full" | "no-delete" | "read-only";
+
+/** The methods each restricted mode allows. "full" allows every method. */
+export const ACCESS_METHODS: Readonly<Record<Exclude<Access, "full">, readonly HttpMethod[]>> = {
+  "read-only": ["GET"],
+  "no-delete": ["GET", "POST", "PUT", "PATCH"],
+};
+
 export interface RetryPolicy {
   /** Extra attempts after the first. Default 2. */
   attempts: number;
@@ -107,6 +117,11 @@ export interface RedmineConfig<V extends RedmineVersion = RedmineVersion> {
    * refuses operations the version lacks before any request. Omit it to get every operation, unguarded.
    */
   version?: V;
+  /**
+   * "read-only" sends only GET, "no-delete" refuses DELETE, "full" (the default) sends everything. Applies to
+   * every method, listing, extra and `rm.request`, and is checked before any request.
+   */
+  access?: Access;
   /** For proxies, internal CAs, browsers behind a CORS proxy, and tests. Default globalThis.fetch. */
   fetch?: typeof fetch;
   /** Per attempt. Default 30000. */
@@ -140,6 +155,7 @@ export interface ResolvedConfig {
   /** Always ends with "/", http or https only. */
   readonly base: URL;
   readonly version: RedmineVersion | undefined;
+  readonly access: Access;
   readonly fetch: typeof fetch;
   readonly timeoutMs: number;
   readonly maxConcurrent: number;
@@ -150,15 +166,21 @@ export interface ResolvedConfig {
 }
 
 export function resolveConfig(config: RedmineConfig): ResolvedConfig {
-  const { fetch: custom, version } = config;
+  const { fetch: custom, version, access = "full" } = config;
   if (version !== undefined && !VERSIONS.includes(version)) {
     throw invalidInput(
       `unsupported Redmine version "${String(version)}", expected one of ${VERSIONS.join(", ")}`,
     );
   }
+  if (access !== "full" && own(ACCESS_METHODS, access) === undefined) {
+    throw invalidInput(
+      `access must be "full", "no-delete" or "read-only", got "${String(access)}"`,
+    );
+  }
   return {
     base: parseBase(config.baseUrl),
     version,
+    access,
     // Called through a wrapper: a bare `globalThis.fetch` throws "Illegal invocation" when called as a method.
     fetch: custom ?? ((input, init) => globalThis.fetch(input, init)),
     timeoutMs: positive("timeoutMs", config.timeoutMs ?? 30_000),

@@ -8,6 +8,8 @@ export interface Schema {
   format?: string;
   nullable?: boolean;
   enum?: readonly (string | number | boolean)[];
+  minimum?: number;
+  maximum?: number;
   $ref?: string;
   oneOf?: Schema[];
   items?: Schema;

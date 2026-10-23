@@ -56,6 +56,7 @@ describe("options", () => {
     ["zero concurrency", { maxConcurrent: 0 }],
     ["a negative retry count", { retry: { attempts: -1 } }],
     ["an empty api key", { auth: { apiKey: "" } }],
+    ["an unknown access mode", { access: "write-only" as never }],
     ["a basic login with a colon", { auth: { basic: { login: "a:b", password: "x" } } }],
   ])("refuses %s", (_name, options) => {
     expect(refusal({ baseUrl: "https://h.example", ...options }).kind).toBe("invalid_input");
@@ -69,6 +70,7 @@ describe("options", () => {
       maxConcurrent: 4,
       retry: { attempts: 2, baseMs: 250, maxMs: 5000 },
       normalize: true,
+      access: "full",
     });
     expect(resolveConfig({ baseUrl: "https://h.example", retry: false }).retry).toBeNull();
     expect(resolveConfig({ baseUrl: "https://h.example", retry: { attempts: 5 } }).retry).toEqual({
