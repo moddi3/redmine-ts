@@ -62,7 +62,9 @@ In the package settings on npmjs.com, add a trusted publisher of type GitHub Act
 | Workflow filename | `release.yml` |
 | Environment       | leave empty   |
 
-Repeat this for every new package in the repo.
+Repeat this for every new package in the repo. A trusted publisher made with `npm trust github` needs `--allow-publish`, because `--allow-stage-publish` alone only allows `npm stage publish`.
+
+When npm refuses the exchange, pnpm publishes without a token and npm answers with a bare `404 Not Found`. The `publish` job then runs one more step that asks npm directly and prints its reason, or says that npm accepted the workflow and refused the publish itself.
 
 The trusted publisher form lives in a package's settings, so the package must exist on npm first. Publish the first version of each package in one of the two ways below, then add the trusted publisher.
 
