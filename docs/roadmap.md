@@ -4,13 +4,16 @@ This page lists work that is planned but not started, so it is not lost. Each it
 
 Items marked **next** come after the first release. Items marked **later** wait for a need or for an upstream release.
 
-## MCP server package (next)
+## MCP server package (in progress)
 
-A new package in this repo that replaces the owner's current generic Redmine MCP server, which has six tools: `redmine_paths_list`, `redmine_paths_info`, `redmine_request`, `redmine_upload`, `redmine_download`, and `redmine_attachment_image`. The first version keeps those tools and their behavior, so it can replace the current server without changes to the agents that use it.
+`@redmine-ts/mcp` in `packages/mcp` is a new server built on the 2026-07-28 MCP spec and the official TypeScript SDK v2. It is not a clone of the owner's earlier generic Redmine MCP. Agents increasingly use code mode, so the server optimizes for precise, typed tools rather than a small tool count. The owner's decisions: access is full by default, deletes included; `--read-only` and `--no-delete` (or `REDMINE_MCP_ACCESS`) narrow it, and the strictest wins; `raw_request` stays available but obeys the access mode; OAuth waits until after v1.
 
-The second step exposes one typed tool per operation. The SDK's `catalog` entrypoint is done: it gives each client method's input and output as JSON Schema 2020-12, with its method, safety class and versions, and contract tests validate it against real servers. The tool annotations come from the operation's safety class: `GET` gives `readOnlyHint`, `DELETE` gives `destructiveHint`, and `PUT` gives `idempotentHint`. The default policy is read-only. Writes need an allowlist of projects, trackers, and fields. Redmine 6.1 has an open defect where some issue mutations check the user's role and ignore the OAuth token's scopes, so the client-side policy is the reliable limit.
+- **Done (phase 2):** one generated tool per SDK operation (86), named `<namespace>_<verb>`, with the catalog's input and output schemas, explicit annotations (updates count as destructive, as the spec defines it), agent-oriented descriptions, rewritten filter descriptions, paged list results with a concise default, actionable error results, version and access filtering, and stdio.
+- **Next:** hand-written tools (`issue_context`, `reference_data`, `raw_request`, `issues_transition`, attachments), an `issues/{id}` resource, Streamable HTTP with a per-request API key header, then the first release.
+- **Later:** OAuth for ChatGPT and claude.ai connectors, an eval set of golden prompts measuring tool selection on Claude and GPT, prompts, and project, tracker and field allowlists for writes.
+- **Follow-ups found while building:** expose filter value words (such as `open`) in the SDK catalog so the server does not infer them; resolve the SDK for tests with tsdown's dev exports instead of tsconfig paths; shorten the longest tool descriptions.
 
-The SDK stays free of `@modelcontextprotocol/sdk`. Sources: `research.md` (sections "Агенты и MCP" and "OAuth2 не заменяет клиентскую политику"), and "Agent toolkit and MCP (later)" in `docs/architecture.md`.
+The SDK stays free of `@modelcontextprotocol/sdk`. Sources: `research.md` (sections "Агенты и MCP" and "OAuth2 не заменяет клиентскую политику"), `docs/architecture.md`, and the MCP design proposal in this repository's decision log (`.audit/decisions.tsv`, phase `mcp-design`).
 
 ## Curated triage toolset (next)
 
@@ -22,9 +25,9 @@ Agents and scripts that should only read need a guarantee, not a convention. Two
 
 - **SDK, runtime: done.** `createRedmine({ access: "read-only" })` refuses every method but `GET`, and `"no-delete"` refuses `DELETE`, for generated methods, extras, listings and `rm.request`, before anything is sent, with the error kind `access_denied`.
 - **SDK, types: open.** The client type still has the write methods. Narrowing it by `access`, so a write on a read-only client fails to compile, is the remaining half. It guards scripts and dashboards that hold a powerful key at compile time too.
-- **MCP.** Every tool carries annotations derived from the registry: `readOnlyHint` for reads, `destructiveHint` for `DELETE`, `idempotentHint` for `PUT` and `DELETE`, and `openWorldHint`. Clients act on them. ChatGPT developer mode treats a tool without `readOnlyHint` as a write tool, and Codex CLI runs read-only tools concurrently. A read-only mode registers only read tools, and include and exclude patterns narrow the tool list further.
+- **MCP: done in `@redmine-ts/mcp`.** Every tool carries explicit annotations from its HTTP method: reads are `readOnlyHint`, updates and deletes are `destructiveHint`, `PUT` and `DELETE` are `idempotentHint`, and `openWorldHint` is false. Clients act on them: ChatGPT developer mode treats a tool without `readOnlyHint` as a write tool, and Codex CLI runs read-only tools concurrently. `--read-only` lists only read tools and `--no-delete` hides deletes; include and exclude patterns are still open.
 
-Sources: the owner's request, which named a client called devrelay as the model (its link is still to be added here). `research.md` (section "Что есть сейчас") describes onozaty/redmine-mcp-server, which marks tools with `readOnlyHint` and filters them with regex patterns. Section "Агенты и MCP" sets read-only as the default policy.
+Sources: the owner's request, which named a client called devrelay as the model (its link is still to be added here). `research.md` (section "Что есть сейчас") describes onozaty/redmine-mcp-server, which marks tools with `readOnlyHint` and filters them with regex patterns. Section "Агенты и MCP" proposed read-only as the default policy; the owner chose full access by default with opt-in narrowing.
 
 ## `gen` CLI for an instance config (next)
 
