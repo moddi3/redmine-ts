@@ -879,6 +879,7 @@ describe("API key sign-in, the opt-in fallback", () => {
     expect(location.searchParams.get("state")).toBe("k1");
     expect(location.searchParams.get("iss")).toBe(PUBLIC_URL);
     expect(redmine.authorizeRequests).toEqual([]);
+    expect((await direct(handle)(`${PUBLIC_URL}/oauth/redmine/callback`)).status).toBe(404);
     expect(redmine.apiCalls.map((call) => [call.path, call.key])).toEqual([
       ["/users/current.json", "not-a-key"],
       ["/users/current.json", "jsmith-api-key"],

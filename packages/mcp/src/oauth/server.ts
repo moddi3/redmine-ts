@@ -428,7 +428,7 @@ export function createAuthorizationServer(
 
   /** Redmine sends the person back here, signed in or not. */
   async function callback(request: Request): Promise<Response> {
-    if (request.method !== "GET" || app === undefined) return methodNotAllowed("GET");
+    if (request.method !== "GET") return methodNotAllowed("GET");
     const params = new URL(request.url).searchParams;
     const state = await sealer.open<StatePayload>("state", params.get("state") ?? "");
     if (state === undefined) {
@@ -658,7 +658,8 @@ export function createAuthorizationServer(
       (path) => [path, async (request: Request) => publicDocument(request, metadata)] as const,
     ),
     [paths.authorize, authorize],
-    [paths.callback, callback],
+    // API key sign-in never sends anyone to Redmine, so nothing comes back.
+    ...(app === undefined ? [] : [[paths.callback, callback] as const]),
     [paths.token, token],
     [paths.register, register],
   ]);
