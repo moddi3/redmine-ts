@@ -142,7 +142,8 @@ export function createRedmineMcpHandler(
     createAuthorizationServer(oauth, {
       paths,
       redmineUrl: withSlash(new URL(config.baseUrl)),
-      fetch: config.fetch ?? fetch,
+      // As in the SDK: Workers refuse a bare fetch called as a method.
+      fetch: config.fetch ?? ((input, init) => globalThis.fetch(input, init)),
       version: config.version,
       access,
       onError,

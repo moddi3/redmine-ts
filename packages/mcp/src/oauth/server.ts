@@ -187,7 +187,8 @@ export function createAuthorizationServer(
   options: RedmineOAuthOptions,
   context: AuthorizationServerContext,
 ): AuthorizationServer {
-  const { paths, redmineUrl, version, access, onError } = context;
+  // Called unbound, never as context.fetch(): Workers refuse their fetch called as a method.
+  const { paths, redmineUrl, fetch: send, version, access, onError } = context;
   const secrets = [options.secret, ...(options.previousSecret ? [options.previousSecret] : [])];
   if (secrets.some((secret) => secret.length < MIN_SECRET_LENGTH)) {
     throw new TypeError(`oauth.secret must be at least ${MIN_SECRET_LENGTH} characters`);
@@ -411,7 +412,7 @@ export function createAuthorizationServer(
     const rm = createRedmine({
       baseUrl: redmineUrl,
       auth: { apiKey },
-      fetch: context.fetch,
+      fetch: send,
       timeoutMs: REDMINE_TIMEOUT_MS,
       retry: false,
     });
@@ -594,7 +595,7 @@ export function createAuthorizationServer(
   ): Promise<Upstream | TokenError> {
     let response: Response;
     try {
-      response = await context.fetch(new URL("oauth/token", redmineUrl), {
+      response = await send(new URL("oauth/token", redmineUrl), {
         method: "POST",
         headers: {
           "content-type": "application/x-www-form-urlencoded",
