@@ -242,6 +242,8 @@ describe("parseCli --http with OAuth", () => {
           redminePublicUrl: "https://redmine.example.com/redmine",
           allowedClientHosts: ["claude.ai"],
           fetchClientMetadata: publicFetch,
+          // One process, so its memory is a real store: single use and rotation hold.
+          store: { consume: expect.any(Function), has: expect.any(Function) },
         },
       },
     });

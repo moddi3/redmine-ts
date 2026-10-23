@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/client";
 import type { OAuthClientProvider } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { createRedmineMcpHandler } from "../../src/index.ts";
+import { createRedmineMcpHandler, memoryGrantStore } from "../../src/index.ts";
 import type { RedmineMcpHandlerOptions } from "../../src/index.ts";
 import {
   browser,
@@ -868,9 +868,9 @@ describe("built-in authorization server", () => {
           code_challenge_method: "S256",
         }),
       );
-      const text = await response.text();
-      expect(text).toContain("its metadata document could not be fetched");
-      expect(text).not.toContain(String(status));
+      const message = /<p class="error">([^<]*)<\/p>/.exec(await response.text())?.[1];
+      expect(message).toContain("its metadata document could not be fetched");
+      expect(message).not.toContain(String(status));
     }
   });
 
@@ -1171,5 +1171,228 @@ describe("API key sign-in, the opt-in fallback", () => {
       client_id: CLAUDE,
     });
     expect(await refreshed.json()).toMatchObject({ error: "invalid_grant" });
+  });
+});
+
+describe("the grant store", () => {
+  const DAY = 24 * 3600 * 1000;
+
+  async function refresh(handle: Handler, token: string) {
+    const response = await form(handle, TOKEN, {
+      grant_type: "refresh_token",
+      refresh_token: token,
+      client_id: CLAUDE,
+    });
+    return {
+      status: response.status,
+      body: (await response.json()) as Issued & Record<string, string>,
+    };
+  }
+
+  it("rotates refresh tokens: each works once, and a reused one ends the whole sign-in", async () => {
+    const setupped = setup({}, { store: memoryGrantStore() });
+    const first = await tokens(setupped);
+    const second = await refresh(setupped.handle, first.refresh_token);
+    expect(second.status).toBe(200);
+    const bearer = (token: string) =>
+      callTool(setupped.handle, { Authorization: `Bearer ${token}` });
+    expect((await bearer(second.body.access_token)).status).toBe(200);
+
+    // Someone replays the first refresh token: it is refused, and every token of the sign-in ends.
+    expect((await refresh(setupped.handle, first.refresh_token)).body).toMatchObject({
+      error: "invalid_grant",
+      error_description:
+        "The refresh token was already used; every token from this sign-in is ended",
+    });
+    expect((await bearer(second.body.access_token)).status).toBe(401);
+    expect((await bearer(first.access_token)).status).toBe(401);
+    expect((await refresh(setupped.handle, second.body.refresh_token)).body).toMatchObject({
+      error: "invalid_grant",
+      error_description: "This sign-in was ended. Sign in again.",
+    });
+  });
+
+  it("ends what a code issued when the code comes back", async () => {
+    const setupped = setup({}, { store: memoryGrantStore() });
+    const { landed, verifier } = await signIn(setupped);
+    const exchange = () =>
+      form(setupped.handle, TOKEN, {
+        grant_type: "authorization_code",
+        code: landed.searchParams.get("code")!,
+        client_id: CLAUDE,
+        code_verifier: verifier,
+      });
+    const issued = (await (await exchange()).json()) as Issued;
+    expect(await (await exchange()).json()).toMatchObject({
+      error: "invalid_grant",
+      error_description: "The code was already used; every token from this sign-in is ended",
+    });
+    expect(
+      (await callTool(setupped.handle, { Authorization: `Bearer ${issued.access_token}` })).status,
+    ).toBe(401);
+  });
+
+  it("makes an API-key code single-use across instances that share it, and only then", async () => {
+    const shared = secret();
+    const store = memoryGrantStore();
+    const keyOptions = { secret: shared, redmineApp: undefined, apiKeyLogin: true } as never;
+    const first = setup({}, { ...(keyOptions as object), store } as never);
+    const { verifier, challenge } = pkce();
+    const person = browser(first.handle, ORIGIN, first.redmine);
+    const consentPage = await person.send(
+      authorizeUrl({
+        response_type: "code",
+        client_id: CLAUDE,
+        redirect_uri: CLAUDE_REDIRECT,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+      }),
+    );
+    const allowed = await person.send(new URL(AUTHORIZE), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        consent: consentValue(await consentPage.text()),
+        api_key: "jsmith-api-key",
+        decision: "allow",
+      }),
+    });
+    const code = new URL(allowed.headers.get("location")!).searchParams.get("code")!;
+    const instance = (withStore: boolean) =>
+      createRedmineMcpHandler({
+        baseUrl: REDMINE_INTERNAL,
+        fetch: first.redmine.fetch,
+        publicUrl: PUBLIC_URL,
+        oauth: {
+          secret: shared,
+          apiKeyLogin: true,
+          fetchClientMetadata: noMetadataFetch,
+          ...(withStore ? { store } : {}),
+        },
+      });
+    const exchange = (handle: Handler) =>
+      form(handle, TOKEN, {
+        grant_type: "authorization_code",
+        code,
+        client_id: CLAUDE,
+        code_verifier: verifier,
+      });
+    expect((await exchange(first.handle)).status).toBe(200);
+    expect((await exchange(instance(true))).status).toBe(400);
+    // Without the shared store, another process has not seen the code: documented, and PKCE-bound.
+    expect((await exchange(instance(false))).status).toBe(200);
+  });
+
+  it("takes a Redmine state once, also replayed in the same browser", async () => {
+    for (const store of [undefined, memoryGrantStore()]) {
+      const setupped = setup({}, store === undefined ? {} : { store });
+      const person = browser(setupped.handle, ORIGIN, setupped.redmine);
+      const page = await person.send(
+        authorizeUrl({
+          response_type: "code",
+          client_id: CLAUDE,
+          redirect_uri: CLAUDE_REDIRECT,
+          code_challenge: pkce().challenge,
+          code_challenge_method: "S256",
+        }),
+      );
+      const decision = await person.send(new URL(AUTHORIZE), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ consent: consentValue(await page.text()), decision: "allow" }),
+      });
+      const atRedmine = new URL(decision.headers.get("location")!);
+      // Redmine approves a returning user again without asking, with a fresh code each time.
+      const first = await person.follow(setupped.redmine.authorize(atRedmine));
+      expect(first).toBeInstanceOf(URL);
+      const again = await person.follow(setupped.redmine.authorize(atRedmine));
+      expect(again).toBeInstanceOf(Response);
+      expect((again as Response).status).toBe(400);
+      expect(await (again as Response).text()).toContain("already came back from Redmine");
+    }
+  });
+
+  it("spends neither a code nor a refresh token when Redmine does not answer", async () => {
+    for (const store of [undefined, memoryGrantStore()]) {
+      let down = false;
+      const redmine = fakeRedmine();
+      const flaky: typeof fetch = async (input, init) => {
+        if (down && new Request(input, init).url.endsWith("/oauth/token")) {
+          down = false;
+          throw new TypeError("fetch failed");
+        }
+        return redmine.fetch(input, init);
+      };
+      const setupped = setup({ fetch: flaky }, store === undefined ? {} : { store });
+      const { landed, verifier } = await signIn({ ...setupped, redmine });
+      const exchange = () =>
+        form(setupped.handle, TOKEN, {
+          grant_type: "authorization_code",
+          code: landed.searchParams.get("code")!,
+          client_id: CLAUDE,
+          code_verifier: verifier,
+        });
+      down = true;
+      expect((await exchange()).status).toBe(502);
+      const issued = (await (await exchange()).json()) as Issued;
+      expect(issued.access_token).toBeTruthy();
+      down = true;
+      expect((await refresh(setupped.handle, issued.refresh_token)).status).toBe(502);
+      const renewed = await refresh(setupped.handle, issued.refresh_token);
+      expect(renewed.status).toBe(200);
+      expect(
+        (await callTool(setupped.handle, { Authorization: `Bearer ${renewed.body.access_token}` }))
+          .status,
+      ).toBe(200);
+    }
+  });
+
+  it("ends an API-key sign-in 30 days after consent without a store, and renews it with one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (const [store, at31] of [
+      [undefined, 400],
+      [memoryGrantStore(), 200],
+    ] as const) {
+      const start = Date.now();
+      const setupped = setup({}, {
+        redmineApp: undefined,
+        apiKeyLogin: true,
+        ...(store === undefined ? {} : { store }),
+      } as never);
+      const { verifier, challenge } = pkce();
+      const person = browser(setupped.handle, ORIGIN, setupped.redmine);
+      const consentPage = await person.send(
+        authorizeUrl({
+          response_type: "code",
+          client_id: CLAUDE,
+          redirect_uri: CLAUDE_REDIRECT,
+          code_challenge: challenge,
+          code_challenge_method: "S256",
+        }),
+      );
+      const allowed = await person.send(new URL(AUTHORIZE), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          consent: consentValue(await consentPage.text()),
+          api_key: "jsmith-api-key",
+          decision: "allow",
+        }),
+      });
+      const issued = (await (
+        await form(setupped.handle, TOKEN, {
+          grant_type: "authorization_code",
+          code: new URL(allowed.headers.get("location")!).searchParams.get("code")!,
+          client_id: CLAUDE,
+          code_verifier: verifier,
+        })
+      ).json()) as Issued;
+      vi.setSystemTime(start + 20 * DAY);
+      const renewed = await refresh(setupped.handle, issued.refresh_token);
+      expect(renewed.status).toBe(200);
+      vi.setSystemTime(start + 31 * DAY);
+      expect((await refresh(setupped.handle, renewed.body.refresh_token)).status).toBe(at31);
+      vi.setSystemTime(start);
+    }
   });
 });

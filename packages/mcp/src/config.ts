@@ -13,6 +13,7 @@ import { API_KEY_HEADER, isOrigin, publicUrlProblem } from "./http.ts";
 import type { RedmineMcpHandlerOptions } from "./http.ts";
 import { isStrongSecret, MIN_SECRET_LENGTH, SECRET_RULE } from "./oauth/seal.ts";
 import type { RedmineOAuthOptions } from "./oauth/server.ts";
+import { memoryGrantStore } from "./oauth/store.ts";
 import { publicFetch } from "./public-fetch.ts";
 import { ACCESS_ORDER, strictest } from "./tools.ts";
 
@@ -365,6 +366,8 @@ function oauthOptions(settings: z.infer<typeof HttpSettings>): RedmineOAuthOptio
       ? {}
       : { allowedClientHosts: settings["--allow-client"] }),
     fetchClientMetadata: publicFetch,
+    // One process: its memory makes codes, states and refresh tokens single-use for real.
+    store: memoryGrantStore(),
   };
   return settings["--api-key-login"]
     ? { ...shared, apiKeyLogin: true }

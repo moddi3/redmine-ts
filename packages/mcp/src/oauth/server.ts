@@ -1,9 +1,9 @@
 // The built-in authorization server. MCP clients register and get tokens here; people sign in at
 // Redmine's own OAuth (Redmine 6.1+) through one confidential application the admin creates, or, as an
-// opt-in fallback, paste their API key into the consent page. Nothing is stored: codes, tokens, states
-// and registrations are sealed, and Redmine's single-use codes and refresh tokens carry what state
-// there is. The client's token never reaches Redmine; each request opens it to the Redmine credential
-// it seals.
+// opt-in fallback, paste their API key into the consent page. Codes, tokens, states and registrations
+// are sealed; what must be used once, and token families that end, are marked in a grant store, or in
+// a per-process cache without one. The client's token never reaches Redmine; each request opens it to
+// the Redmine credential it seals.
 
 import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineVersion } from "@redmine-ts/sdk";
@@ -15,6 +15,8 @@ import { consentPage, errorPage } from "./pages.ts";
 import { grantedScopes, redmineScope, scopeNames, scopesFor } from "./scopes.ts";
 import type { Scope } from "./scopes.ts";
 import { createSealer, isStrongSecret, now, randomToken, SECRET_RULE, sha256 } from "./seal.ts";
+import { memoryGrantStore } from "./store.ts";
+import type { GrantStore } from "./store.ts";
 import {
   comparablePath,
   methodNotAllowed,
@@ -69,6 +71,15 @@ interface OAuthSettings {
    * through Cloudflare's front door, and its security settings, instead of straight to the origin.
    */
   fetchClientMetadata: typeof fetch;
+  /**
+   * Marks codes, Redmine states and refresh tokens used, and ends token families. With it, a refresh
+   * token works once, and reusing it, or a code, ends every token issued from the same sign-in. Every
+   * instance that serves this publicUrl must share it, atomically: `memoryGrantStore()` for a single
+   * process, as the CLI runs; a Durable Object on Workers, where KV is not consistent enough. Without
+   * it, codes and states are single-use per process only, refresh tokens do not rotate, and an
+   * API-key sign-in ends 30 days after consent.
+   */
+  store?: GrantStore;
 }
 
 /** What the handler lends the authorization server. */
@@ -134,6 +145,8 @@ interface ConsentPayload {
 
 /** What the redirect to Redmine carries and the callback needs. */
 interface StatePayload {
+  /** Single use: replaying the redirect to Redmine must not mint a second code. */
+  id: string;
   n: string;
   /** SHA-256 of the client_id, which binds the code without carrying a long registration. */
   client: string;
@@ -152,8 +165,12 @@ type CodeGrant = { redmineCode: string; verifier: string } | { apiKey: string };
 type RefreshGrant = { redmineRefresh: string } | { apiKey: string };
 
 interface CodePayload {
-  /** A replay id. */
+  /** Single use. */
   id: string;
+  /** The sign-in every token from this code belongs to, which a store can end as one. */
+  family: string;
+  /** Seconds since the epoch when an API-key grant ends, without a store to rotate it. */
+  until?: number;
   grant: CodeGrant;
   client: string;
   redirect: string;
@@ -162,6 +179,7 @@ interface CodePayload {
 }
 
 interface AccessPayload {
+  family: string;
   credential: BearerGrant["credential"];
   scopes: Scope[];
   client: string;
@@ -169,6 +187,10 @@ interface AccessPayload {
 }
 
 interface RefreshPayload {
+  /** Single use, with a store. */
+  id: string;
+  family: string;
+  until?: number;
   grant: RefreshGrant;
   scopes: Scope[];
   client: string;
@@ -219,7 +241,14 @@ export function createAuthorizationServer(
     allowedHosts: options.allowedClientHosts,
   });
   const callbackUrl = paths.origin + paths.callback;
-  const redeemed = replayGuard();
+  // Codes and states are used once: across instances through the store, or in this process.
+  const once = options.store ?? memoryGrantStore();
+  // Rotation and ending families need every instance to agree, so they need a store.
+  const families = options.store;
+  /** Ends every token of a sign-in: a reused code or refresh token means one leaked. */
+  const end = async (family: string) => {
+    await families?.consume(`family:${family}`, REFRESH_TTL);
+  };
   const metadata = {
     issuer,
     authorization_endpoint: paths.origin + paths.authorize,
@@ -367,6 +396,7 @@ export function createAuthorizationServer(
     if (app === undefined) return checkKey(form, consent);
     const verifier = randomToken();
     const state: StatePayload = {
+      id: randomToken(),
       n: consent.n,
       client: await sha256(consent.client),
       redirect: consent.redirect,
@@ -411,6 +441,9 @@ export function createAuthorizationServer(
     }
     const ours: CodePayload = {
       id: randomToken(),
+      family: randomToken(),
+      // Without a store to detect a stolen refresh token, the grant does not renew past 30 days.
+      ...(families === undefined ? { until: now() + REFRESH_TTL } : {}),
       grant: { apiKey },
       client: await sha256(consent.client),
       redirect: consent.redirect,
@@ -457,6 +490,12 @@ export function createAuthorizationServer(
     if ((await browserNonce(request)) !== state.n) {
       return errorPage(403, OTHER_BROWSER);
     }
+    if (!(await once.consume(`state:${state.id}`, FLOW_TTL))) {
+      return errorPage(
+        400,
+        "This sign-in already came back from Redmine. Start again from your client.",
+      );
+    }
     const error = params.get("error");
     const code = params.get("code");
     if (error !== null || code === null) {
@@ -472,6 +511,7 @@ export function createAuthorizationServer(
     }
     const ours: CodePayload = {
       id: randomToken(),
+      family: randomToken(),
       grant: { redmineCode: code, verifier: state.verifier },
       client: state.client,
       redirect: state.redirect,
@@ -535,9 +575,22 @@ export function createAuthorizationServer(
     if (!PKCE_VERIFIER.test(verifier) || (await sha256(verifier)) !== code.challenge) {
       return invalidGrant("code_verifier does not match the code_challenge");
     }
-    if (!redeemed(code.id, code.exp ?? now())) return invalidGrant("The code was already used");
+    // Checked before Redmine and marked after it, so an outage spends nothing and the client may
+    // retry; a second use ends what the first one issued.
+    const used = `code:${code.id}`;
+    if (await once.has(used)) return reused(code.family, "The code was already used");
     const upstream = await redeemUpstream(code.grant);
-    return "error" in upstream ? upstream : issue(upstream, code.scopes, client);
+    if ("error" in upstream) return upstream;
+    if (!(await once.consume(used, CODE_TTL))) {
+      return reused(code.family, "The code was already used");
+    }
+    return issue(upstream, code.scopes, client, code.family, code.until);
+  }
+
+  async function reused(family: string, description: string): Promise<TokenError> {
+    if (families === undefined) return invalidGrant(description);
+    await end(family);
+    return invalidGrant(`${description}; every token from this sign-in is ended`);
   }
 
   /**
@@ -588,30 +641,60 @@ export function createAuthorizationServer(
       requested.length === 0
         ? old.scopes.length - 1
         : old.scopes.findLastIndex((scope) => requested.includes(scope));
+    // With a store, a refresh token works once, checked before Redmine and marked after it, as codes.
+    const used = `refresh:${old.id}`;
+    if (families !== undefined) {
+      if (await families.has(`family:${old.family}`)) {
+        return invalidGrant("This sign-in was ended. Sign in again.");
+      }
+      if (await families.has(used)) return reused(old.family, "The refresh token was already used");
+    }
     const upstream = await refreshUpstream(old.grant);
-    return "error" in upstream ? upstream : issue(upstream, old.scopes.slice(0, top + 1), client);
+    if ("error" in upstream) return upstream;
+    if (families !== undefined && !(await families.consume(used, REFRESH_TTL))) {
+      return reused(old.family, "The refresh token was already used");
+    }
+    return issue(upstream, old.scopes.slice(0, top + 1), client, old.family, old.until);
   }
 
   function keyTokens(apiKey: string): Upstream {
     return { credential: { apiKey }, refresh: { apiKey }, expiresIn: ACCESS_TTL };
   }
 
-  /** Our token pair over Redmine's credential, never outliving Redmine's access token. */
-  async function issue(upstream: Upstream, scopes: Scope[], client: string): Promise<TokenSet> {
+  /**
+   * Our token pair over Redmine's credential, never outliving Redmine's access token, nor the end of
+   * an API-key grant without a store.
+   */
+  async function issue(
+    upstream: Upstream,
+    scopes: Scope[],
+    client: string,
+    family: string,
+    until: number | undefined,
+  ): Promise<TokenSet> {
+    const left = until === undefined ? REFRESH_TTL : until - now();
     const skew = Math.min(EXPIRY_SKEW, Math.floor(upstream.expiresIn / 2));
-    const lifetime = Math.min(ACCESS_TTL, upstream.expiresIn - skew);
+    const lifetime = Math.min(ACCESS_TTL, upstream.expiresIn - skew, left);
     const accessPayload: AccessPayload = {
+      family,
       credential: upstream.credential,
       scopes,
       client,
       audience: issuer,
     };
-    const refreshPayload: RefreshPayload = { grant: upstream.refresh, scopes, client };
+    const refreshPayload: RefreshPayload = {
+      id: randomToken(),
+      family,
+      ...(until === undefined ? {} : { until }),
+      grant: upstream.refresh,
+      scopes,
+      client,
+    };
     return {
       access_token: await sealer.seal("access", accessPayload, lifetime),
       token_type: "Bearer",
       expires_in: lifetime,
-      refresh_token: await sealer.seal("refresh", refreshPayload, REFRESH_TTL),
+      refresh_token: await sealer.seal("refresh", refreshPayload, Math.min(REFRESH_TTL, left)),
       scope: scopes.join(" "),
     };
   }
@@ -697,15 +780,17 @@ export function createAuthorizationServer(
       issuer,
       async verify(value) {
         const payload = await sealer.open<AccessPayload>("access", value);
-        return (
-          payload && {
-            credential: payload.credential,
-            scopes: payload.scopes,
-            resource: payload.audience,
-            expiresAt: payload.exp!,
-            clientId: payload.client,
-          }
-        );
+        if (payload === undefined) return undefined;
+        if (families !== undefined && (await families.has(`family:${payload.family}`))) {
+          return undefined;
+        }
+        return {
+          credential: payload.credential,
+          scopes: payload.scopes,
+          resource: payload.audience,
+          expiresAt: payload.exp!,
+          clientId: payload.client,
+        };
       },
     },
     serve: (request, path) => routes.get(path)?.(request),
@@ -750,18 +835,6 @@ const UNREACHABLE: TokenError = {
 
 /** Turning apiKeyLogin off ends the key-based grants, and the other way round. */
 const METHOD_CHANGED = invalidGrant("This server signs people in another way now. Sign in again.");
-
-/** Codes redeemed by this process, until they expire. */
-function replayGuard(): (id: string, exp: number) => boolean {
-  const seen = new Map<string, number>();
-  return (id, exp) => {
-    const at = now();
-    for (const [key, until] of seen) if (until < at) seen.delete(key);
-    if (seen.has(id)) return false;
-    seen.set(id, exp);
-    return true;
-  };
-}
 
 async function readForm(request: Request): Promise<URLSearchParams | undefined> {
   const type = request.headers.get("content-type") ?? "";
