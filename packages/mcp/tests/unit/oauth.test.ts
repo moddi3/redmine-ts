@@ -1148,7 +1148,7 @@ describe("API key sign-in, the opt-in fallback", () => {
     expect(issued.access_token).not.toContain("jsmith-api-key");
     expect(await (await exchange()).json()).toMatchObject({
       error: "invalid_grant",
-      error_description: "The code was already used",
+      error_description: "The code was already used a moment ago",
     });
 
     const called = await callTool(handle, { Authorization: `Bearer ${issued.access_token}` });
@@ -1224,7 +1224,17 @@ describe("the grant store", () => {
       callTool(setupped.handle, { Authorization: `Bearer ${token}` });
     expect((await bearer(second.body.access_token)).status).toBe(200);
 
-    // Someone replays the first refresh token: it is refused, and every token of the sign-in ends.
+    // Within 30 seconds a second use is the client racing itself: refused, and the sign-in stays.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 5_000);
+    expect((await refresh(setupped.handle, first.refresh_token)).body).toMatchObject({
+      error: "invalid_grant",
+      error_description: "The refresh token was already used a moment ago",
+    });
+    expect((await bearer(second.body.access_token)).status).toBe(200);
+
+    // Later, someone replays it: refused, and every token of the sign-in ends.
+    vi.setSystemTime(Date.now() + 26_000);
     expect((await refresh(setupped.handle, first.refresh_token)).body).toMatchObject({
       error: "invalid_grant",
       error_description:
@@ -1238,6 +1248,117 @@ describe("the grant store", () => {
     });
   });
 
+  /** An API-key sign-in up to the code. */
+  async function keyCode(setupped: Setup) {
+    const { verifier, challenge } = pkce();
+    const person = browser(setupped.handle, ORIGIN, setupped.redmine);
+    const page = await person.send(
+      authorizeUrl({
+        response_type: "code",
+        client_id: CLAUDE,
+        redirect_uri: CLAUDE_REDIRECT,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+      }),
+    );
+    const allowed = await person.send(new URL(AUTHORIZE), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        consent: consentValue(await page.text()),
+        api_key: "jsmith-api-key",
+        decision: "allow",
+      }),
+    });
+    return { code: new URL(allowed.headers.get("location")!).searchParams.get("code")!, verifier };
+  }
+
+  async function exchange(handle: Handler, code: string, verifier: string) {
+    const response = await form(handle, TOKEN, {
+      grant_type: "authorization_code",
+      code,
+      client_id: CLAUDE,
+      code_verifier: verifier,
+    });
+    return {
+      status: response.status,
+      body: (await response.json()) as Issued & Record<string, string>,
+    };
+  }
+
+  /** The two sign-in methods with a store; Redmine keeps a used refresh token, as Doorkeeper does. */
+  const methods = [
+    ["API key", { redmineApp: undefined, apiKeyLogin: true }],
+    ["Redmine", {}],
+  ] as const;
+
+  function racing(method: (typeof methods)[number][1]): Setup {
+    const doorkeeper = fakeRedmine({ doorkeeper: true });
+    const setupped = setup({ fetch: doorkeeper.fetch }, {
+      ...method,
+      store: memoryGrantStore(),
+    } as never);
+    return { ...setupped, redmine: doorkeeper };
+  }
+
+  async function signedIn(setupped: Setup, method: (typeof methods)[number][1]) {
+    if (!("apiKeyLogin" in method)) return tokens(setupped);
+    const { code, verifier } = await keyCode(setupped);
+    return (await exchange(setupped.handle, code, verifier)).body;
+  }
+
+  it.each(methods)(
+    "answers a refresh racing itself without ending the sign-in (%s)",
+    async (_, method) => {
+      const setupped = racing(method);
+      const issued = await signedIn(setupped, method);
+      // Two processes of one client saw the access token expire and refresh at once.
+      const both = await Promise.all([
+        refresh(setupped.handle, issued.refresh_token),
+        refresh(setupped.handle, issued.refresh_token),
+      ]);
+      expect(both.map(({ status }) => status).sort((a, b) => a - b)).toEqual([200, 400]);
+      const winner = both.find(({ status }) => status === 200)!;
+      const loser = both.find(({ status }) => status === 400)!;
+      expect(loser.body).toMatchObject({
+        error: "invalid_grant",
+        error_description: "The refresh token was already used a moment ago",
+      });
+      expect(
+        (await callTool(setupped.handle, { Authorization: `Bearer ${winner.body.access_token}` }))
+          .status,
+      ).toBe(200);
+      expect((await refresh(setupped.handle, winner.body.refresh_token)).status).toBe(200);
+    },
+  );
+
+  it.each(methods)(
+    "answers a code exchange racing itself without ending the sign-in (%s)",
+    async (_, method) => {
+      const setupped = racing(method);
+      const flow =
+        "apiKeyLogin" in method
+          ? await keyCode(setupped)
+          : await signIn(setupped).then(({ landed, verifier }) => ({
+              code: landed.searchParams.get("code")!,
+              verifier,
+            }));
+      const both = await Promise.all([
+        exchange(setupped.handle, flow.code, flow.verifier),
+        exchange(setupped.handle, flow.code, flow.verifier),
+      ]);
+      expect(both.map(({ status }) => status).sort((a, b) => a - b)).toEqual([200, 400]);
+      const winner = both.find(({ status }) => status === 200)!;
+      expect(both.find(({ status }) => status === 400)!.body.error_description).not.toContain(
+        "ended",
+      );
+      expect(
+        (await callTool(setupped.handle, { Authorization: `Bearer ${winner.body.access_token}` }))
+          .status,
+      ).toBe(200);
+    },
+  );
+
   it("ends what a code issued when the code comes back", async () => {
     const setupped = setup({}, { store: memoryGrantStore() });
     const { landed, verifier } = await signIn(setupped);
@@ -1249,6 +1370,8 @@ describe("the grant store", () => {
         code_verifier: verifier,
       });
     const issued = (await (await exchange()).json()) as Issued;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
     expect(await (await exchange()).json()).toMatchObject({
       error: "invalid_grant",
       error_description: "The code was already used; every token from this sign-in is ended",

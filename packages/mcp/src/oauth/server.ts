@@ -111,6 +111,12 @@ const ACCESS_TTL = 3600;
 /** Refreshing renews it, so only a client idle this long signs in again. */
 const REFRESH_TTL = 30 * 24 * 3600;
 /**
+ * A code or refresh token that comes back this soon after its first use is the same client racing
+ * itself, such as two processes refreshing at once or a retry after a timeout. It is refused, and the
+ * sign-in stays; later, a second use means one leaked, and the sign-in ends.
+ */
+const REUSE_WINDOW = 30;
+/**
  * Margin between our token's end and Redmine's, for clocks and slow requests. A Redmine token shorter
  * than twice this keeps half its life as the margin, so ours is never issued expired.
  */
@@ -604,15 +610,36 @@ export function createAuthorizationServer(
       return invalidGrant("code_verifier does not match the code_challenge");
     }
     // Checked before Redmine and marked after it, so an outage spends nothing and the client may
-    // retry; a second use ends what the first one issued.
+    // retry; a second use ends what the first one issued, unless it races the first.
     const used = `code:${code.id}`;
-    if (await once.has(used)) return reused(code.family, "The code was already used");
+    const again = "The code was already used";
+    if (await once.has(used)) return usedAgain(once, code.id, code.family, again);
     const upstream = await redeemUpstream(code.grant);
     if ("error" in upstream) return upstream;
-    if (!(await once.consume(used, CODE_TTL))) {
-      return reused(code.family, "The code was already used");
+    if (!(await spend(once, used, code.id, CODE_TTL))) {
+      return usedAgain(once, code.id, code.family, again);
     }
     return issue(upstream, code.scopes, client, code.family, code.until);
+  }
+
+  /**
+   * Marks `id` used once Redmine has answered. The reuse marker goes first, so a request that loses the
+   * race for the same id always finds it.
+   */
+  async function spend(store: GrantStore, key: string, id: string, ttl: number): Promise<boolean> {
+    await store.consume(`recent:${id}`, REUSE_WINDOW);
+    return store.consume(key, ttl);
+  }
+
+  /** A second use of `id`: within the reuse window a race, refused; after it a leak. */
+  async function usedAgain(
+    store: GrantStore,
+    id: string,
+    family: string,
+    description: string,
+  ): Promise<TokenError> {
+    if (await store.has(`recent:${id}`)) return invalidGrant(`${description} a moment ago`);
+    return reused(family, description);
   }
 
   async function reused(family: string, description: string): Promise<TokenError> {
@@ -671,16 +698,17 @@ export function createAuthorizationServer(
         : old.scopes.findLastIndex((scope) => requested.includes(scope));
     // With a store, a refresh token works once, checked before Redmine and marked after it, as codes.
     const used = `refresh:${old.id}`;
+    const again = "The refresh token was already used";
     if (families !== undefined) {
       if (await families.has(`family:${old.family}`)) {
         return invalidGrant("This sign-in was ended. Sign in again.");
       }
-      if (await families.has(used)) return reused(old.family, "The refresh token was already used");
+      if (await families.has(used)) return usedAgain(families, old.id, old.family, again);
     }
     const upstream = await refreshUpstream(old.grant);
     if ("error" in upstream) return upstream;
-    if (families !== undefined && !(await families.consume(used, REFRESH_TTL))) {
-      return reused(old.family, "The refresh token was already used");
+    if (families !== undefined && !(await spend(families, used, old.id, REFRESH_TTL))) {
+      return usedAgain(families, old.id, old.family, again);
     }
     return issue(upstream, old.scopes.slice(0, top + 1), client, old.family, old.until);
   }

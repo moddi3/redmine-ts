@@ -205,7 +205,7 @@ Redmine checks a token's permissions on most requests, but not on issue edits, n
 - An access token lasts at most an hour, and never longer than the Redmine token inside it. A refresh token lasts 30 days, and each refresh brings a new one. Without a grant store, an API-key sign-in ends 30 days after consent, refreshed or not.
 - People revoke the application in Redmine, under Authorized applications (`/oauth/authorized_applications`). Redmine then refuses its tokens at once: tool calls return an error result that carries Redmine's 401, and the next refresh fails, so the client asks them to sign in again within the hour.
 - An admin who deletes the Redmine application ends every session the same way.
-- With a grant store, a refresh token or a code that comes back a second time ends every token of that sign-in.
+- With a grant store, a refresh token or a code that comes back more than 30 seconds after its first use ends every token of that sign-in.
 - Changing `REDMINE_MCP_AUTH_SECRET` without keeping the old one signs every client out.
 - Turning `--api-key-login` off refuses the key-based codes and refresh tokens at once; their access tokens keep working until they expire, within the hour. To end them sooner, change the secret.
 
@@ -225,6 +225,7 @@ With a store:
 
 - Codes of both sign-in methods, Redmine states and consent pages work once across every instance.
 - Refresh tokens rotate: each works once. A refresh token or a code that comes back a second time means one leaked, so the server ends every token of that sign-in, and refuses its access tokens from then on.
+- Except within 30 seconds of the first use: then the second use is the same client racing itself, such as two processes refreshing at once, or retrying after a timeout. It is refused, and the sign-in stays. The window is the price of not signing people out for that; someone who steals a refresh token and uses it within those 30 seconds is refused too, but does not end the sign-in.
 - A code or refresh token is checked before the server asks Redmine and marked after Redmine answers, so a Redmine outage spends nothing and the client can retry.
 
 The CLI is one process, so it keeps the store in its memory. An embedded server passes `oauth.store`: `memoryGrantStore()` for a single process, or an adapter for something shared. On Workers that is a Durable Object, one per key, which runs its storage calls one at a time; Workers KV is eventually consistent, so two isolates could both consume one key.

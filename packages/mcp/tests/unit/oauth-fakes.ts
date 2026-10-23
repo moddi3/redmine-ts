@@ -10,14 +10,18 @@ interface Grant {
   scope: string;
   challenge: string;
   redirectUri: string;
+  /** The refresh token this access token replaced, which Doorkeeper revokes on its first use. */
+  previous?: string;
 }
 
 /**
  * Redmine's OAuth as Doorkeeper runs it: single-use codes bound to PKCE and the redirect URI,
  * rotating refresh tokens, and the REST API answering Bearer tokens and API keys. Its authorize page
- * approves at once for `user`, as a signed-in person who clicks Authorize would.
+ * approves at once for `user`, as a signed-in person who clicks Authorize would. A refresh token dies
+ * on use, unless `doorkeeper`, which keeps it valid until the new access token is first used, as
+ * Doorkeeper's previous_refresh_token does.
  */
-export function fakeRedmine({ user = "jsmith", expiresIn = 7200 } = {}) {
+export function fakeRedmine({ user = "jsmith", expiresIn = 7200, doorkeeper = false } = {}) {
   const codes = new Map<string, Grant>();
   const tokens = new Map<string, Grant>();
   const refreshTokens = new Map<string, Grant>();
@@ -47,10 +51,10 @@ export function fakeRedmine({ user = "jsmith", expiresIn = 7200 } = {}) {
     return new Response(null, { status: 302, headers: { location: redirect.href } });
   }
 
-  function issue(grant: Grant): Response {
+  function issue(grant: Grant, previous?: string): Response {
     const access = random();
     const refresh = random();
-    tokens.set(access, grant);
+    tokens.set(access, { ...grant, ...(previous === undefined ? {} : { previous }) });
     refreshTokens.set(refresh, grant);
     return Response.json({
       access_token: access,
@@ -92,20 +96,26 @@ export function fakeRedmine({ user = "jsmith", expiresIn = 7200 } = {}) {
         return issue(grant);
       }
       if (form.get("grant_type") === "refresh_token") {
-        const grant = refreshTokens.get(form.get("refresh_token") ?? "");
-        refreshTokens.delete(form.get("refresh_token") ?? "");
+        const used = form.get("refresh_token") ?? "";
+        const grant = refreshTokens.get(used);
+        if (!doorkeeper) refreshTokens.delete(used);
         return grant === undefined
           ? Response.json({ error: "invalid_grant" }, { status: 400 })
-          : issue(grant);
+          : issue(grant, doorkeeper ? used : undefined);
       }
       return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
     }
     const authorization = request.headers.get("authorization");
     const key = request.headers.get("x-redmine-api-key");
     apiCalls.push({ path, authorization, key });
-    const who = authorization?.startsWith("Bearer ")
-      ? tokens.get(authorization.slice(7))?.user
-      : keys.get(key ?? "");
+    const grant = authorization?.startsWith("Bearer ")
+      ? tokens.get(authorization.slice(7))
+      : undefined;
+    if (grant?.previous !== undefined) {
+      refreshTokens.delete(grant.previous);
+      delete grant.previous;
+    }
+    const who = authorization?.startsWith("Bearer ") ? grant?.user : keys.get(key ?? "");
     if (who === undefined) return new Response(null, { status: 401 });
     if (path === "/users/current.json") {
       return Response.json({ user: { id: 2, login: who, firstname: "John", lastname: "Smith" } });
