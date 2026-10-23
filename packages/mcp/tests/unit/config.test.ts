@@ -69,3 +69,92 @@ describe("parseCli", () => {
     expect(parseCli(["--help"], {})).toEqual({ kind: "help" });
   });
 });
+
+describe("parseCli --http", () => {
+  const url = { REDMINE_URL: "https://tracker.example.com/redmine" };
+  const LOCAL = ["localhost", "127.0.0.1", "[::1]"];
+
+  it("serves loopback on 3737 with Host checks and no Origin allowed, without REDMINE_API_KEY", () => {
+    expect(parseCli(["--http"], url)).toEqual({
+      kind: "http",
+      host: "127.0.0.1",
+      port: 3737,
+      options: {
+        baseUrl: "https://tracker.example.com/redmine",
+        access: "full",
+        allowedOrigins: [],
+        allowedHosts: [...LOCAL, "127.0.0.1"],
+      },
+      apiKeyIgnored: false,
+    });
+  });
+
+  it("reports REDMINE_API_KEY as ignored and keeps it out of the command", () => {
+    const command = parseCli(["--http"], env);
+    expect(command).toMatchObject({ kind: "http", apiKeyIgnored: true });
+    expect(JSON.stringify(command)).not.toContain(KEY);
+    expect(parseCli(["--http"], { ...url, REDMINE_API_KEY: " " })).toMatchObject({
+      apiKeyIgnored: false,
+    });
+  });
+
+  it.each([
+    [["--host", "0.0.0.0"], "0.0.0.0", undefined],
+    [["--host", "::1"], "::1", [...LOCAL, "[::1]"]],
+    [["--host", "127.0.0.2"], "127.0.0.2", [...LOCAL, "127.0.0.2"]],
+    [["--host", "localhost"], "localhost", [...LOCAL, "localhost"]],
+  ] as const)("checks Host for %j only on loopback", (argv, host, allowedHosts) => {
+    const command = parseCli(["--http", ...argv], url);
+    expect(command).toMatchObject({ kind: "http", host });
+    expect(command.kind === "http" && command.options.allowedHosts).toEqual(allowedHosts);
+  });
+
+  it.each([
+    ["0", 0],
+    ["8080", 8080],
+    ["65535", 65535],
+  ])("takes --port %s", (port, expected) => {
+    expect(parseCli(["--http", "--port", port], url)).toMatchObject({ port: expected });
+  });
+
+  it("collects repeated --allow-origin hostnames and applies the strictest access", () => {
+    const argv = ["--http", "--allow-origin", "app.example.com", "--allow-origin", "[::1]"];
+    const command = parseCli([...argv, "--no-delete"], { ...url, REDMINE_VERSION: "6.1" });
+    expect(command).toMatchObject({
+      kind: "http",
+      options: {
+        allowedOrigins: ["app.example.com", "[::1]"],
+        access: "no-delete",
+        version: "6.1",
+      },
+    });
+  });
+
+  it.each([
+    [["--port", "65536"], "--port must be a port from 0 to 65535"],
+    [["--port=-1"], "--port must be a port"],
+    [["--port", "http"], "--port must be a port"],
+    [["--host", " "], "--host is empty"],
+    [["--allow-origin", "https://app.example.com"], "--allow-origin takes a hostname"],
+    [["--allow-origin", "app.example.com:8443"], "--allow-origin takes a hostname"],
+    [["--allow-origin", "App.Example.com"], "--allow-origin takes a hostname"],
+  ])("explains a bad flag %j", (argv, message) => {
+    const command = parseCli(["--http", ...argv], url);
+    expect(command.kind === "error" && command.message).toContain(message);
+  });
+
+  it("still needs REDMINE_URL, and refuses HTTP flags without --http", () => {
+    expect(parseCli(["--http"], {})).toMatchObject({
+      kind: "error",
+      message: expect.stringContaining("REDMINE_URL"),
+    });
+    expect(parseCli(["--host", "::"], env)).toEqual({
+      kind: "error",
+      message: "--host needs --http",
+    });
+    expect(parseCli(["--port", "80", "--allow-origin", "a.example"], env)).toEqual({
+      kind: "error",
+      message: "--port, --allow-origin need --http",
+    });
+  });
+});
