@@ -10,6 +10,9 @@ describe("publicFetch", () => {
     "https://[::1]/client.json",
     "https://[::ffff:127.0.0.1]/client.json",
     "https://[fd00::1]/client.json",
+    "https://[fec0::1]/client.json",
+    "https://[64:ff9b:1::7f00:1]/client.json",
+    "https://192.88.99.1/client.json",
   ])("refuses %s before connecting", async (url) => {
     await expect(publicFetch(url)).rejects.toThrow(TypeError);
   });

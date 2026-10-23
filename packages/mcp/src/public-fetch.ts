@@ -8,7 +8,7 @@ import { request } from "node:https";
 import { BlockList, isIP } from "node:net";
 import { Readable } from "node:stream";
 
-/** Loopback, private, link-local, shared, documentation, multicast and reserved ranges. */
+/** Loopback, private, link-local, shared, documentation, 6to4 relay, multicast and reserved ranges. */
 const NON_PUBLIC = new BlockList();
 for (const [network, prefix] of [
   ["0.0.0.0", 8],
@@ -19,6 +19,7 @@ for (const [network, prefix] of [
   ["172.16.0.0", 12],
   ["192.0.0.0", 24],
   ["192.0.2.0", 24],
+  ["192.88.99.0", 24],
   ["192.168.0.0", 16],
   ["198.18.0.0", 15],
   ["198.51.100.0", 24],
@@ -27,17 +28,20 @@ for (const [network, prefix] of [
 ] as const) {
   NON_PUBLIC.addSubnet(network, prefix, "ipv4");
 }
-// BlockList checks IPv4-mapped addresses against the IPv4 ranges. NAT64, 6to4 and Teredo addresses
-// embed an IPv4 address it does not check, so they are refused whole.
+// BlockList checks IPv4-mapped addresses against the IPv4 ranges. NAT64 (well-known and local-use),
+// 6to4 and Teredo addresses embed an IPv4 address it does not check, so they are refused whole, as are
+// the deprecated site-local addresses some networks still route.
 for (const [network, prefix] of [
   ["::", 127],
   ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
   ["100::", 64],
   ["2001::", 32],
   ["2001:db8::", 32],
   ["2002::", 16],
   ["fc00::", 7],
   ["fe80::", 10],
+  ["fec0::", 10],
   ["ff00::", 8],
 ] as const) {
   NON_PUBLIC.addSubnet(network, prefix, "ipv6");
@@ -46,6 +50,9 @@ for (const [network, prefix] of [
 function isPublic(address: string): boolean {
   return !NON_PUBLIC.check(address, isIP(address) === 6 ? "ipv6" : "ipv4");
 }
+
+/** Statuses whose responses carry no body; Response refuses a body for them. */
+const NULL_BODY = new Set([204, 205, 304]);
 
 type LookupCallback = (
   error: NodeJS.ErrnoException | null,
@@ -89,20 +96,25 @@ export const publicFetch: typeof fetch = (input, init) => {
         lookup: publicLookup,
         signal: outgoing.signal,
       },
+      // This runs outside the promise's executor, so anything it throws must become the rejection:
+      // an uncaught throw here would end the process.
       (incoming) => {
-        const status = incoming.statusCode ?? 502;
-        const headers = new Headers();
-        for (let at = 0; at < incoming.rawHeaders.length; at += 2) {
-          headers.append(incoming.rawHeaders[at]!, incoming.rawHeaders[at + 1]!);
+        try {
+          const status = incoming.statusCode ?? 0;
+          const headers = new Headers();
+          for (let at = 0; at < incoming.rawHeaders.length; at += 2) {
+            headers.append(incoming.rawHeaders[at]!, incoming.rawHeaders[at + 1]!);
+          }
+          const empty = NULL_BODY.has(status);
+          const body = empty ? null : (Readable.toWeb(incoming) as ReadableStream);
+          // Throws for a status outside 200 to 599, such as an informational one.
+          const response = new Response(body, { status, headers });
+          if (empty) incoming.resume();
+          resolve(response);
+        } catch (error) {
+          incoming.destroy();
+          reject(error);
         }
-        const empty = status === 204 || status === 304;
-        if (empty) incoming.resume();
-        resolve(
-          new Response(empty ? null : (Readable.toWeb(incoming) as ReadableStream), {
-            status,
-            headers,
-          }),
-        );
       },
     );
     sent.on("error", reject);
