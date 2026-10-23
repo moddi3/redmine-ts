@@ -28,6 +28,7 @@
   "sideEffects": false,
   "exports": {
     ".": "./dist/index.mjs",
+    "./catalog": "./dist/catalog.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -46,6 +47,8 @@
   "devDependencies": {
     "@arethetypeswrong/core": "catalog:",
     "@types/node": "^26.6.5",
+    "ajv": "catalog:",
+    "ajv-formats": "catalog:",
     "publint": "catalog:",
     "typescript": "^7.0.2",
     "vite-plus": "catalog:",

@@ -67,6 +67,9 @@ export interface Member {
   type: string;
   required: boolean;
   doc: string;
+  /** The spec schema behind `type`, for the catalog's JSON Schemas. */
+  schema: Schema;
+  description: string | undefined;
 }
 
 export function members(s: Schema): Member[] {
@@ -75,6 +78,8 @@ export function members(s: Schema): Member[] {
     type: tsType(p),
     required: s.required?.includes(key) ?? false,
     doc: jsDoc(p.description, sinceTag(p["x-since"])),
+    schema: p,
+    description: p.description,
   }));
 }
 
