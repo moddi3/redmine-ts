@@ -22,6 +22,14 @@ Items marked **next** come after the first release. Items marked **later** wait 
 
 The SDK stays free of `@modelcontextprotocol/sdk`. Sources: `research.md` (sections "Агенты и MCP" and "OAuth2 не заменяет клиентскую политику"), `docs/architecture.md`, and the MCP design proposal in this repository's decision log (`.audit/decisions.tsv`, phase `mcp-design`).
 
+## Redmine plugin: MCP at the tracker's own address (later)
+
+An organization may want MCP at `https://redmine.company.com/mcp` instead of on a second host. A reverse-proxy rule in front of the standalone server already gives them that address, so the first step is a deployment recipe (nginx, Caddy, Apache, a Docker Compose sidecar, and Redmine under a subpath), not a plugin. For the recipe, the OAuth work mounts every endpoint under the MCP endpoint's path, takes a public URL apart from `REDMINE_URL`, serves its metadata at each discovery path a client may try, and never reads Redmine's `_redmine_session` cookie. The standalone server stays the supported product, because hosted Redmine services install third-party plugins only on top plans or on request.
+
+A plugin would have to beat that recipe, and the obvious designs do not yet. Five dedicated Ruby plugins and an AI suite already serve MCP from inside Redmine, and the closest, `joaoperfig/redmine_mcp_plugin`, has OAuth, dynamic registration and 16 hand-written tools, so a native Ruby tool layer would copy our tools into a crowded niche. A plugin that makes Redmine the authorization server would rebuild in Ruby, on the Doorkeeper 5.8 that Redmine 6.1 and 7.0 pin, the metadata, `resource` audiences, `iss` and Client ID Metadata Documents that Doorkeeper 6 adds. It would not fix Redmine's #44271 either: issue edits ignore token scopes inside Redmine's `Issue` model, so the access modes stay the write guard.
+
+Revisit when Redmine adopts Doorkeeper 6, when Redmine core builds its own MCP server (feature #42689 is open), or when a real deployment can install a plugin but cannot add a proxy rule. The plugin would then be a thin Rack proxy with in-process authentication in front of the standalone server, with Redmine as the authorization server, not a second tool layer. Source: the owner's request, and `.audit/research/plugin-brief.md`.
+
 ## Curated triage toolset (next)
 
 About a hundred generated tools are too much context for an agent. A small set covers triage: `issue_context`, `search_issues`, `find_similar`, `propose_update` (a dry run that shows the diff and checks the status transition), `apply_update`, `add_note`, `link_issues`, and `log_time`. Inputs and outputs use names instead of ids, because models handle "In Progress" reliably and `status_id: 7` poorly. Name-to-id resolution lives in the toolkit over cached lookups, not in the SDK. Source: `research.md` (section "Агенты и MCP"), and "Tradeoffs accepted" in `docs/architecture.md`.
