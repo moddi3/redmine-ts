@@ -1,6 +1,7 @@
 export { createRedmine } from "./redmine.ts";
 export type { ArrayFormat, Core, Extras, RawRequest, Redmine } from "./redmine.ts";
 export type {
+  Access,
   Auth,
   BearerSource,
   CallOptions,

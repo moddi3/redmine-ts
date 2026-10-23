@@ -86,6 +86,122 @@ describe("namespaces", () => {
   });
 });
 
+describe("access", () => {
+  type Access = "full" | "no-delete" | "read-only";
+  const allowed: Record<Access, string[]> = {
+    full: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    "no-delete": ["GET", "POST", "PUT", "PATCH"],
+    "read-only": ["GET"],
+  };
+  const tiers = Object.keys(allowed) as Access[];
+  // oxlint-disable-next-line no-explicit-any -- see client()
+  const calls: Record<string, (rm: any) => Promise<unknown>> = {
+    GET: (rm) => rm.issues.get({ issue_id: 1 }),
+    POST: (rm) => rm.users.create({ login: "x" }),
+    PUT: (rm) => rm.issues.update({ issue_id: 1, notes: "n" }),
+    PATCH: (rm) => rm.attachments.update({ attachment_id: 1, description: "d" }),
+    DELETE: (rm) => rm.issues.remove({ issue_id: 1 }),
+  };
+  const answer = (request: { method: string }): Response =>
+    request.method === "GET" ? json({ issue }) : empty();
+  const settle = (promise: Promise<unknown>): Promise<unknown> =>
+    promise.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+  describe.each(tiers)("%s", (access) => {
+    test.each(Object.keys(calls))("a generated %s method", async (method) => {
+      const { rm, requests } = client(answer, { access });
+      const outcome = await settle(calls[method]!(rm));
+
+      if (allowed[access].includes(method)) {
+        expect(outcome).toBeUndefined();
+        expect(requests.map((r) => r.method)).toEqual([method]);
+      } else {
+        expect(outcome).toMatchObject({ data: { kind: "access_denied", access, method } });
+        expect(requests).toHaveLength(0);
+      }
+    });
+
+    test.each(Object.keys(calls))("rm.request with %s", async (method) => {
+      const { rm, requests } = client(answer, { access });
+      const outcome = await settle(rm.request({ method, path: "plugin/things.json" }));
+
+      if (allowed[access].includes(method)) {
+        expect(outcome).toBeUndefined();
+        expect(requests.map((r) => r.method)).toEqual([method]);
+      } else {
+        expect(outcome).toMatchObject({
+          op: "request",
+          data: { kind: "access_denied", access, method },
+        });
+        expect(requests).toHaveLength(0);
+      }
+    });
+
+    test("a listing reads", async () => {
+      const { rm, requests } = client(
+        () => json({ issues: [issue], total_count: 1, offset: 0, limit: 100 }),
+        { access },
+      );
+
+      expect(await rm.issues.list().all()).toEqual([issue]);
+      expect(requests).toHaveLength(1);
+    });
+
+    test("issues.transition, a read plus an update, sends nothing unless updates are allowed", async () => {
+      const { rm, requests } = client(
+        (request) =>
+          request.method === "GET"
+            ? json({ issue: { id: 1, status: { id: 1 }, allowed_statuses: [{ id: 2 }] } })
+            : empty(),
+        { access },
+      );
+      const outcome = await settle(rm.issues.transition({ issue_id: 1, status_id: 2 }));
+
+      if (allowed[access].includes("PUT")) {
+        expect(outcome).toBeUndefined();
+        expect(requests.map((r) => r.method)).toEqual(["GET", "PUT"]);
+      } else {
+        expect(outcome).toMatchObject({ data: { kind: "access_denied", access, method: "PUT" } });
+        expect(requests).toHaveLength(0);
+      }
+    });
+
+    test("attachments upload posts only when POST is allowed, and download always reads", async () => {
+      const { rm, requests } = client(
+        (request) =>
+          request.method === "POST"
+            ? json({ upload: { id: 5, token: "t" } }, 201)
+            : new Response(new Uint8Array([1])),
+        { access },
+      );
+      const upload = await settle(
+        rm.attachments.upload({ file: new Uint8Array([1]), filename: "a.bin" }),
+      );
+      await rm.attachments.download({ id: 5, filename: "a.bin" });
+
+      if (allowed[access].includes("POST")) {
+        expect(upload).toBeUndefined();
+        expect(requests.map((r) => r.method)).toEqual(["POST", "GET"]);
+      } else {
+        expect(upload).toMatchObject({ data: { kind: "access_denied", access, method: "POST" } });
+        expect(requests.map((r) => r.method)).toEqual(["GET"]);
+      }
+    });
+  });
+
+  test("a derived client keeps the access of its parent", async () => {
+    const { rm, requests } = client(answer, { access: "read-only" });
+    const error = await failure(rm.with({ timeoutMs: 1000 }).issues.remove({ issue_id: 1 }));
+
+    expect(error.data).toEqual({ kind: "access_denied", access: "read-only", method: "DELETE" });
+    expect(error.message).toContain("nothing was sent");
+    expect(requests).toHaveLength(0);
+  });
+});
+
 describe("rm.with", () => {
   test("a derived client carries its defaults and the original does not", async () => {
     const { rm, requests } = client(keyOf("admin", () => empty()));
