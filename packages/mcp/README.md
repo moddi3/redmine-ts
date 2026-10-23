@@ -61,13 +61,13 @@ REDMINE_URL=https://tracker.example.com npx -y @redmine-ts/mcp --http --no-delet
 
 The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisions without sessions: each request stands alone, and `GET` and `DELETE` on `/mcp` answer 405. The access mode and `REDMINE_VERSION` apply to every request, as they do over stdio. `SIGINT` or `SIGTERM` lets requests in flight finish and then stops the server; a second signal stops it at once.
 
-| Request                                                   | Answer                                                    |
-| --------------------------------------------------------- | --------------------------------------------------------- |
-| No `X-Redmine-API-Key` header, or an empty one            | 401, with a JSON-RPC error that names the header.         |
-| An `Origin` whose hostname `--allow-origin` does not list | 403.                                                      |
-| A `Host` other than localhost, on a loopback address      | 403.                                                      |
-| A path other than `/mcp`                                  | 404.                                                      |
-| A key Redmine rejects                                     | The tool call returns an error result with Redmine's 401. |
+| Request                                              | Answer                                                    |
+| ---------------------------------------------------- | --------------------------------------------------------- |
+| No `X-Redmine-API-Key` header, or an empty one       | 401, with a JSON-RPC error that names the header.         |
+| An `Origin` that `--allow-origin` does not list      | 403.                                                      |
+| A `Host` other than localhost, on a loopback address | 403.                                                      |
+| A path other than `/mcp`                             | 404.                                                      |
+| A key Redmine rejects                                | The tool call returns an error result with Redmine's 401. |
 
 Claude Code:
 
@@ -93,7 +93,7 @@ Cursor, in `.cursor/mcp.json` or `~/.cursor/mcp.json`, with the key read from th
 
 - The server listens on `127.0.0.1`. To listen anywhere else, pass the address with `--host`.
 - On a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, or the address itself. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it.
-- A request with an `Origin` header gets 403 unless `--allow-origin` lists its hostname. Browsers send `Origin`; command-line and desktop clients do not, so they pass. The check compares hostnames only, as the MCP SDK does, so `--allow-origin app.example.com` also admits `http://app.example.com:8080`. The server sends no CORS headers, so a web page on another origin cannot call it even when its hostname is listed.
+- A request with an `Origin` header gets 403 unless `--allow-origin` lists it. Browsers send `Origin`; command-line and desktop clients do not, so they pass. See [Browser clients and CORS](#browser-clients-and-cors).
 - The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so for remote use put a proxy that terminates TLS in front of the server and keep the server on loopback. Caddy passes the client's `Host` to the server unless told otherwise:
 
 ```caddy
@@ -103,6 +103,20 @@ mcp.example.com {
 	}
 }
 ```
+
+### Browser clients and CORS
+
+A page in a browser can call the server only when the server answers its CORS preflight. `--allow-origin` enables that: a request from a listed origin gets 204 for its `OPTIONS` preflight and CORS headers on every response, so a web inspector or a web app can call `/mcp` directly.
+
+```sh
+redmine-mcp --http --allow-origin https://app.example.com --allow-origin localhost
+```
+
+The flag takes a hostname or an origin. `localhost` admits `http://localhost:6274`, `https://localhost`, and any other scheme and port on that hostname, as the MCP SDK's check does. `https://app.example.com` admits exactly that scheme, host, and port, and refuses `http://app.example.com` and `https://app.example.com:8443`. Prefer the origin form: another service on the same host is a different origin. Write the origin as a browser does, in lowercase, with no path and no trailing slash. The server answers with the requesting origin, never `*`, and with `Vary: Origin`. It sends no `Access-Control-Allow-Credentials`, because the key travels in a header and there are no cookies. A request from another origin still gets 403 without CORS headers, and a request without `Origin` is served as before.
+
+The preflight allows `POST`, the only method `/mcp` serves, and the headers the 2026-07-28 transport sends (`Content-Type`, `Accept`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) plus `X-Redmine-API-Key`. The server issues no session id and sets no header a page must read, so it exposes none. The `Host` check on loopback applies to preflights too.
+
+CORS means that a page on an allowed origin holds the user's Redmine API key and acts as that user. Allow only origins whose code you trust, and prefer an origin to a hostname. CORS does not open the port: the server still listens on `127.0.0.1` by default, and the `Host` check still refuses a rebound domain.
 
 ## Settings
 
@@ -116,15 +130,15 @@ The server reads its settings once at startup. A missing or invalid value stops 
 | `REDMINE_MCP_ACCESS`    | No       | `full` (the default), `no-delete`, or `read-only`.                                                                                                                         |
 | `REDMINE_MCP_FILES_DIR` | No       | A directory the server may read uploads from and save attachments to. It must exist. Without it, no tool touches local files. Not read with `--http`. See [Files](#files). |
 
-| Flag                        | Meaning                                                                       |
-| --------------------------- | ----------------------------------------------------------------------------- |
-| `--read-only`               | Same as `REDMINE_MCP_ACCESS=read-only`.                                       |
-| `--no-delete`               | Same as `REDMINE_MCP_ACCESS=no-delete`.                                       |
-| `--http`                    | Serves Streamable HTTP at `/mcp` instead of stdio.                            |
-| `--port <n>`                | The HTTP port, 3737 by default. `0` picks a free port.                        |
-| `--host <addr>`             | The address to listen on, `127.0.0.1` by default.                             |
-| `--allow-origin <hostname>` | Admits browser requests whose `Origin` has this hostname. Repeat it for more. |
-| `--help`                    | Prints the settings and exits.                                                |
+| Flag                                | Meaning                                                                                                                                            |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--read-only`                       | Same as `REDMINE_MCP_ACCESS=read-only`.                                                                                                            |
+| `--no-delete`                       | Same as `REDMINE_MCP_ACCESS=no-delete`.                                                                                                            |
+| `--http`                            | Serves Streamable HTTP at `/mcp` instead of stdio.                                                                                                 |
+| `--port <n>`                        | The HTTP port, 3737 by default. `0` picks a free port.                                                                                             |
+| `--host <addr>`                     | The address to listen on, `127.0.0.1` by default.                                                                                                  |
+| `--allow-origin <hostname\|origin>` | Admits browser requests from a hostname or an exact origin and sends them CORS headers. Repeat it for more. See [CORS](#browser-clients-and-cors). |
+| `--help`                            | Prints the settings and exits.                                                                                                                     |
 
 `--port`, `--host`, and `--allow-origin` need `--http`.
 
@@ -256,7 +270,7 @@ serveStdio(() =>
 
 `access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. To enable `path` uploads and `attachments_save`, pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. The main entry never imports file system code, so a server without `files` cannot touch local files.
 
-`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` and `allowedHosts` take hostnames, as `--allow-origin` does. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
+`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
 
 Bun:
 

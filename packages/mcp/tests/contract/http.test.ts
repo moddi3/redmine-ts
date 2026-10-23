@@ -142,6 +142,41 @@ describeServers("Streamable HTTP", (server) => {
     expect(full.stderr()).not.toContain(server.adminKey);
   });
 
+  it("answers a browser's preflight and sends CORS headers on the CLI's allowed origin", async () => {
+    const allowed = "https://app.example.com";
+    const running = await start(server, "--allow-origin", allowed);
+    try {
+      const preflight = await fetch(running.url, {
+        method: "OPTIONS",
+        headers: { Origin: allowed, "Access-Control-Request-Method": "POST" },
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get("access-control-allow-origin")).toBe(allowed);
+      expect(preflight.headers.get("access-control-allow-headers")).toContain("X-Redmine-API-Key");
+      const call = await fetch(running.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          origin: allowed,
+          "x-redmine-api-key": server.adminKey,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      });
+      expect(call.status).toBe(200);
+      expect(call.headers.get("access-control-allow-origin")).toBe(allowed);
+      await call.body?.cancel();
+      const other = await fetch(running.url, {
+        method: "OPTIONS",
+        headers: { Origin: "http://app.example.com", "Access-Control-Request-Method": "POST" },
+      });
+      expect(other.status).toBe(403);
+    } finally {
+      running.child.kill();
+      await once(running.child, "exit");
+    }
+  });
+
   it("exits with 0 on SIGTERM", async () => {
     const running = await start(server);
     running.child.kill("SIGTERM");
