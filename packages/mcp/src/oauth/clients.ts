@@ -94,9 +94,9 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
       return "its metadata document is not valid client metadata";
     }
     if (parsed.client_id !== clientId) return "its metadata document names another client_id";
-    const invalid = parsed.redirect_uris.find((uri) => !isRedirectUri(uri));
-    if (invalid !== undefined)
+    if (!parsed.redirect_uris.every(isRedirectUri)) {
       return "its metadata document lists a redirect URI that is not https or loopback";
+    }
     const client: Client = {
       id: clientId,
       name: parsed.client_name,

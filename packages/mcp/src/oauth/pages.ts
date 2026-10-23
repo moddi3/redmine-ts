@@ -58,9 +58,21 @@ export interface ConsentView {
   consent: string;
   /** Origins a submitted form may be redirected to: Redmine, and the client's redirect URI. */
   formTargets: readonly string[];
+  /** The fallback that asks for the person's API key instead of sending them to Redmine. */
+  apiKey?: {
+    /** This server's host, which the address bar must show. */
+    serverHost: string;
+    /** Where Redmine shows the key. */
+    accountUrl: string;
+    /** Why the last key was refused. */
+    error?: string;
+  };
 }
 
-export function consentPage(view: ConsentView, headers?: Record<string, string>): Response {
+export function consentPage(
+  view: ConsentView,
+  init: { status?: number; headers?: Record<string, string> } = {},
+): Response {
   const { client, redirectUri, scopes, redmineHost } = view;
   const name = client.name ?? "An MCP client";
   const redirect = new URL(redirectUri);
@@ -93,12 +105,37 @@ export function consentPage(view: ConsentView, headers?: Record<string, string>)
     }
     <form method="post" action="${view.action}">
       <input type="hidden" name="consent" value="${view.consent}" />
+      ${view.apiKey === undefined ? html`` : keyField(view.apiKey, redmineHost)}
       <div class="actions">
         <button name="decision" value="allow">Allow</button
-        ><button name="decision" value="deny">Deny</button>
+        ><button name="decision" value="deny" formnovalidate>Deny</button>
       </div>
     </form>`;
-  return page("Allow access to Redmine", body, view.formTargets, { headers });
+  return page("Allow access to Redmine", body, view.formTargets, init);
+}
+
+/**
+ * A web page that asks for a master key is what phishing looks like, so the page says how to tell it
+ * is this one, and where the key goes.
+ */
+function keyField(field: NonNullable<ConsentView["apiKey"]>, redmineHost: string): Html {
+  return html`${field.error === undefined ? html`` : html`<p class="error">${field.error}</p>`}
+    <p class="note">
+      Paste your key only if you opened this page from your own MCP client and the address bar shows
+      <strong>${field.serverHost}</strong>. The server seals the key into the tokens it gives the
+      client and sends it only to <strong>${redmineHost}</strong>. Resetting the key in Redmine ends
+      this access.
+    </p>
+    <label for="api_key">Your Redmine API key</label>
+    <input
+      id="api_key"
+      name="api_key"
+      type="password"
+      autocomplete="off"
+      spellcheck="false"
+      required
+    />
+    <p>Redmine shows it under <a href="${field.accountUrl}">My account</a>, API access key.</p>`;
 }
 
 export function errorPage(status: number, message: string): Response {

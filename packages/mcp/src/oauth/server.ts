@@ -1,13 +1,16 @@
 // The built-in authorization server. MCP clients register and get tokens here; people sign in at
-// Redmine's own OAuth (Redmine 6.1+) through one confidential application the admin creates. Nothing
-// is stored: codes, tokens, states and registrations are sealed, and Redmine's single-use codes and
-// refresh tokens carry what state there is. The client's token never reaches Redmine; each request
-// opens it to the Redmine token it seals.
+// Redmine's own OAuth (Redmine 6.1+) through one confidential application the admin creates, or, as an
+// opt-in fallback, paste their API key into the consent page. Nothing is stored: codes, tokens, states
+// and registrations are sealed, and Redmine's single-use codes and refresh tokens carry what state
+// there is. The client's token never reaches Redmine; each request opens it to the Redmine credential
+// it seals.
 
+import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineVersion } from "@redmine-ts/sdk";
 import { z } from "zod";
 import type { BearerGrant, BearerVerifier } from "../http.ts";
 import { allowsRedirect, createClients } from "./clients.ts";
+import type { Client } from "./clients.ts";
 import { consentPage, errorPage } from "./pages.ts";
 import { grantedScopes, redmineScope, scopesFor } from "./scopes.ts";
 import type { Scope } from "./scopes.ts";
@@ -21,7 +24,25 @@ import {
 } from "./web.ts";
 import type { PublicPaths } from "./web.ts";
 
-export interface RedmineOAuthOptions {
+export type RedmineOAuthOptions = OAuthSettings &
+  (
+    | {
+        /** The confidential Redmine OAuth application people sign in through, created by an admin. */
+        redmineApp: { clientId: string; clientSecret: string };
+        apiKeyLogin?: never;
+      }
+    | {
+        /**
+         * Instead of a Redmine application: the consent page asks for the person's API key, checks
+         * it, and seals it into the tokens. For Redmine without OAuth applications; it teaches people
+         * to paste a master key into a web page, so prefer redmineApp.
+         */
+        apiKeyLogin: true;
+        redmineApp?: never;
+      }
+  );
+
+interface OAuthSettings {
   /**
    * The secret everything the server hands out is sealed with, at least 32 characters, such as the
    * output of `openssl rand -base64 32`. Changing it signs every client out.
@@ -29,8 +50,6 @@ export interface RedmineOAuthOptions {
   secret: string;
   /** The secret before the last change, still accepted to open what it sealed. */
   previousSecret?: string;
-  /** The confidential Redmine OAuth application people sign in through, created by an admin. */
-  redmineApp: { clientId: string; clientSecret: string };
   /**
    * Redmine's URL as browsers reach it, when the server reaches Redmine at another, internal one.
    * Sign-in redirects there; token requests and the REST API keep using baseUrl. Default: baseUrl.
@@ -66,11 +85,14 @@ export interface AuthorizationServer {
   serve(request: Request, path: string): Promise<Response> | undefined;
 }
 
-/** Authorization codes are redeemed at once; a minute covers the redirect and the exchange. */
+/**
+ * Authorization codes are redeemed at once; a minute covers the redirect and the exchange. It is also
+ * how long an API-key code could be replayed by a process that has not seen it redeemed.
+ */
 const CODE_TTL = 60;
 /** Sign-in pages and states. OAuth 2.1 recommends at most 10 minutes. */
 const FLOW_TTL = 600;
-/** Never longer than Redmine's own token, which lasts 2 hours. */
+/** Never longer than Redmine's own token, which lasts 2 hours. An API key does not expire. */
 const ACCESS_TTL = 3600;
 /** Refreshing renews it, so only a client idle this long signs in again. */
 const REFRESH_TTL = 30 * 24 * 3600;
@@ -117,11 +139,16 @@ interface StatePayload {
   verifier: string;
 }
 
+/** What a code stands for at Redmine: its code and our PKCE verifier for it, or a checked API key. */
+type CodeGrant = { redmineCode: string; verifier: string } | { apiKey: string };
+
+/** What a refresh token stands for at Redmine. */
+type RefreshGrant = { redmineRefresh: string } | { apiKey: string };
+
 interface CodePayload {
   /** A replay id. */
   id: string;
-  redmineCode: string;
-  verifier: string;
+  grant: CodeGrant;
   client: string;
   redirect: string;
   challenge: string;
@@ -136,9 +163,16 @@ interface AccessPayload {
 }
 
 interface RefreshPayload {
-  redmineRefresh: string;
+  grant: RefreshGrant;
   scopes: Scope[];
   client: string;
+}
+
+/** Redmine's side of a token pair. */
+interface Upstream {
+  credential: BearerGrant["credential"];
+  refresh: RefreshGrant;
+  expiresIn: number;
 }
 
 const RedmineTokens = z.object({
@@ -158,8 +192,11 @@ export function createAuthorizationServer(
   if (secrets.some((secret) => secret.length < MIN_SECRET_LENGTH)) {
     throw new TypeError(`oauth.secret must be at least ${MIN_SECRET_LENGTH} characters`);
   }
-  if (!options.redmineApp.clientId || !options.redmineApp.clientSecret) {
-    throw new TypeError("oauth.redmineApp needs the clientId and clientSecret Redmine showed");
+  const app = options.redmineApp;
+  if (app === undefined ? options.apiKeyLogin !== true : !app.clientId || !app.clientSecret) {
+    throw new TypeError(
+      "oauth needs redmineApp with the clientId and clientSecret Redmine showed, or apiKeyLogin",
+    );
   }
   const redminePublic = withSlash(new URL(options.redminePublicUrl ?? redmineUrl));
   const issuer = paths.identifier;
@@ -239,28 +276,47 @@ export function createAuthorizationServer(
     if (resource !== null && !sameResource(resource, issuer)) {
       return fail("invalid_target", `This server issues tokens only for ${issuer}`);
     }
-    const scopes = grantedScopes(params.get("scope")?.split(" ") ?? [], access);
     const nonce = (await browserNonce(request)) ?? randomToken();
     const consent: ConsentPayload = {
       n: nonce,
       client: clientId,
       redirect: redirectUri,
       challenge,
-      scopes,
+      scopes: grantedScopes(params.get("scope")?.split(" ") ?? [], access),
       state,
     };
+    return showConsent(client, consent, await sealer.seal("consent", consent, FLOW_TTL), {
+      headers: { "Set-Cookie": await browserCookie(nonce) },
+    });
+  }
+
+  function showConsent(
+    client: Client,
+    consent: ConsentPayload,
+    sealed: string,
+    { keyError, ...init }: { status?: number; headers?: Record<string, string>; keyError?: string },
+  ): Response {
     return consentPage(
       {
         client,
-        redirectUri,
-        scopes,
+        redirectUri: consent.redirect,
+        scopes: consent.scopes,
         redmineHost: redminePublic.host,
         action: paths.authorize,
-        consent: await sealer.seal("consent", consent, FLOW_TTL),
+        consent: sealed,
         // Chrome checks form-action on the redirect that follows the decision, to Redmine or back.
-        formTargets: [redminePublic.origin, new URL(redirectUri).origin],
+        formTargets: [redminePublic.origin, new URL(consent.redirect).origin],
+        ...(app === undefined
+          ? {
+              apiKey: {
+                serverHost: new URL(paths.origin).host,
+                accountUrl: new URL("my/account", redminePublic).href,
+                ...(keyError === undefined ? {} : { error: keyError }),
+              },
+            }
+          : {}),
       },
-      { "Set-Cookie": await browserCookie(nonce) },
+      init,
     );
   }
 
@@ -285,6 +341,7 @@ export function createAuthorizationServer(
     if (form?.get("decision") !== "allow") {
       return back(consent.redirect, { error: "access_denied", state: consent.state }, 303);
     }
+    if (app === undefined) return checkKey(form, consent);
     const verifier = randomToken();
     const state: StatePayload = {
       n: consent.n,
@@ -299,7 +356,7 @@ export function createAuthorizationServer(
       new URL("oauth/authorize", redminePublic).href,
       {
         response_type: "code",
-        client_id: options.redmineApp.clientId,
+        client_id: app.clientId,
         redirect_uri: callbackUrl,
         scope: redmineScope(consent.scopes, version),
         state: await sealer.seal("state", state, FLOW_TTL),
@@ -310,9 +367,62 @@ export function createAuthorizationServer(
     );
   }
 
+  /**
+   * The fallback's consent: the key must work at Redmine before anything is issued, and the code is
+   * handed out at once, since there is no Redmine sign-in to wait for.
+   */
+  async function checkKey(form: URLSearchParams, consent: ConsentPayload): Promise<Response> {
+    const apiKey = form.get("api_key")?.trim() ?? "";
+    const check = apiKey === "" ? "missing" : await checkApiKey(apiKey);
+    if (check !== "ok") {
+      const keyError = {
+        missing: "Paste your API key.",
+        refused: "Redmine does not accept this key.",
+        unreachable: "Redmine did not answer. Try again in a moment.",
+      }[check];
+      const client = await clients.resolve(consent.client);
+      if (typeof client === "string") {
+        return errorPage(400, `This server refuses the client: ${client}.`);
+      }
+      return showConsent(client, consent, form.get("consent")!, { status: 400, keyError });
+    }
+    const ours: CodePayload = {
+      id: randomToken(),
+      grant: { apiKey },
+      client: await sha256(consent.client),
+      redirect: consent.redirect,
+      challenge: consent.challenge,
+      scopes: consent.scopes,
+    };
+    return back(
+      consent.redirect,
+      { code: await sealer.seal("code", ours, CODE_TTL), state: consent.state },
+      303,
+    );
+  }
+
+  /** Whether Redmine accepts `apiKey`, refuses it with 401, or did not answer. */
+  async function checkApiKey(apiKey: string): Promise<"ok" | "refused" | "unreachable"> {
+    const rm = createRedmine({
+      baseUrl: redmineUrl,
+      auth: { apiKey },
+      fetch: context.fetch,
+      timeoutMs: REDMINE_TIMEOUT_MS,
+      retry: false,
+    });
+    try {
+      await rm.users.current();
+      return "ok";
+    } catch (error) {
+      if (RedmineError.is(error, "unauthorized")) return "refused";
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+      return "unreachable";
+    }
+  }
+
   /** Redmine sends the person back here, signed in or not. */
   async function callback(request: Request): Promise<Response> {
-    if (request.method !== "GET") return methodNotAllowed("GET");
+    if (request.method !== "GET" || app === undefined) return methodNotAllowed("GET");
     const params = new URL(request.url).searchParams;
     const state = await sealer.open<StatePayload>("state", params.get("state") ?? "");
     if (state === undefined) {
@@ -339,8 +449,7 @@ export function createAuthorizationServer(
     }
     const ours: CodePayload = {
       id: randomToken(),
-      redmineCode: code,
-      verifier: state.verifier,
+      grant: { redmineCode: code, verifier: state.verifier },
       client: state.client,
       redirect: state.redirect,
       challenge: state.challenge,
@@ -402,50 +511,68 @@ export function createAuthorizationServer(
       return invalidGrant("code_verifier does not match the code_challenge");
     }
     if (!redeemed(code.id, code.exp ?? now())) return invalidGrant("The code was already used");
-    const upstream = await redmineToken({
-      grant_type: "authorization_code",
-      code: code.redmineCode,
-      redirect_uri: callbackUrl,
-      code_verifier: code.verifier,
-    });
+    const upstream = await redeemUpstream(code.grant);
     return "error" in upstream ? upstream : issue(upstream, code.scopes, client);
+  }
+
+  /**
+   * Redmine's side of a code. Redmine's code is spent only here, which makes it single-use; a key was
+   * checked a moment ago, at consent. A grant of the sign-in method the server no longer uses fails.
+   */
+  async function redeemUpstream(grant: CodeGrant): Promise<Upstream | TokenError> {
+    if ("apiKey" in grant) return app === undefined ? keyTokens(grant.apiKey) : METHOD_CHANGED;
+    if (app === undefined) return METHOD_CHANGED;
+    return redmineToken(app, {
+      grant_type: "authorization_code",
+      code: grant.redmineCode,
+      redirect_uri: callbackUrl,
+      code_verifier: grant.verifier,
+    });
+  }
+
+  /** Redmine's side of a refresh. A reset key fails here, which sends the client to sign in again. */
+  async function refreshUpstream(grant: RefreshGrant): Promise<Upstream | TokenError> {
+    if ("apiKey" in grant) {
+      if (app !== undefined) return METHOD_CHANGED;
+      const check = await checkApiKey(grant.apiKey);
+      if (check === "ok") return keyTokens(grant.apiKey);
+      return check === "refused"
+        ? invalidGrant("Redmine no longer accepts the API key")
+        : UNREACHABLE;
+    }
+    if (app === undefined) return METHOD_CHANGED;
+    return redmineToken(app, { grant_type: "refresh_token", refresh_token: grant.redmineRefresh });
   }
 
   async function refresh(form: URLSearchParams, client: string) {
     const old = await sealer.open<RefreshPayload>("refresh", form.get("refresh_token") ?? "");
     if (old === undefined) return invalidGrant("The refresh token is invalid or has expired");
-    if (old.client !== client)
+    if (old.client !== client) {
       return invalidGrant("The refresh token was issued to another client");
+    }
     const requested = form.get("scope");
     const top = requested === null ? old.scopes.length - 1 : lastIndexIn(old.scopes, requested);
     if (top === -1) {
       return { status: 400, error: "invalid_scope", description: "scope exceeds the grant" };
     }
-    const upstream = await redmineToken({
-      grant_type: "refresh_token",
-      refresh_token: old.redmineRefresh,
-    });
+    const upstream = await refreshUpstream(old.grant);
     return "error" in upstream ? upstream : issue(upstream, old.scopes.slice(0, top + 1), client);
   }
 
-  /** Our token pair over Redmine's, never outliving Redmine's access token. */
-  async function issue(
-    upstream: z.infer<typeof RedmineTokens>,
-    scopes: Scope[],
-    client: string,
-  ): Promise<TokenSet> {
-    const lifetime = Math.min(ACCESS_TTL, (upstream.expires_in ?? ACCESS_TTL) - EXPIRY_SKEW);
+  function keyTokens(apiKey: string): Upstream {
+    return { credential: { apiKey }, refresh: { apiKey }, expiresIn: ACCESS_TTL };
+  }
+
+  /** Our token pair over Redmine's credential, never outliving Redmine's access token. */
+  async function issue(upstream: Upstream, scopes: Scope[], client: string): Promise<TokenSet> {
+    const lifetime = Math.min(ACCESS_TTL, upstream.expiresIn - EXPIRY_SKEW);
     const accessPayload: AccessPayload = {
-      credential: { bearer: upstream.access_token },
+      credential: upstream.credential,
       scopes,
       client,
       audience: issuer,
     };
-    const refreshPayload: RefreshPayload = {
-      redmineRefresh: upstream.refresh_token,
-      scopes,
-      client,
-    };
+    const refreshPayload: RefreshPayload = { grant: upstream.refresh, scopes, client };
     return {
       access_token: await sealer.seal("access", accessPayload, lifetime),
       token_type: "Bearer",
@@ -457,8 +584,9 @@ export function createAuthorizationServer(
 
   /** A grant at Redmine's token endpoint, authenticated as the confidential application. */
   async function redmineToken(
+    app: { clientId: string; clientSecret: string },
     params: Record<string, string>,
-  ): Promise<z.infer<typeof RedmineTokens> | TokenError> {
+  ): Promise<Upstream | TokenError> {
     let response: Response;
     try {
       response = await context.fetch(new URL("oauth/token", redmineUrl), {
@@ -469,18 +597,24 @@ export function createAuthorizationServer(
         },
         body: new URLSearchParams({
           ...params,
-          client_id: options.redmineApp.clientId,
-          client_secret: options.redmineApp.clientSecret,
+          client_id: app.clientId,
+          client_secret: app.clientSecret,
         }),
         signal: AbortSignal.timeout(REDMINE_TIMEOUT_MS),
       });
     } catch (error) {
       onError?.(new Error(`Redmine's token endpoint did not answer: ${String(error)}`));
-      return { status: 502, error: "server_error", description: "Redmine did not answer" };
+      return UNREACHABLE;
     }
     const body: unknown = await response.json().catch(() => undefined);
     const tokens = RedmineTokens.safeParse(body);
-    if (response.ok && tokens.success) return tokens.data;
+    if (response.ok && tokens.success) {
+      return {
+        credential: { bearer: tokens.data.access_token },
+        refresh: { redmineRefresh: tokens.data.refresh_token },
+        expiresIn: tokens.data.expires_in ?? ACCESS_TTL,
+      };
+    }
     const error = (body as { error?: unknown } | undefined)?.error;
     if (error === "invalid_grant") {
       return invalidGrant("Redmine refused the grant: it was used, revoked or has expired");
@@ -570,6 +704,15 @@ function tokenError({ status, error, description }: TokenError): Response {
 function invalidGrant(description: string): TokenError {
   return { status: 400, error: "invalid_grant", description };
 }
+
+const UNREACHABLE: TokenError = {
+  status: 502,
+  error: "server_error",
+  description: "Redmine did not answer",
+};
+
+/** Turning apiKeyLogin off ends the key-based grants, and the other way round. */
+const METHOD_CHANGED = invalidGrant("This server signs people in another way now. Sign in again.");
 
 /** The index of the highest of `granted` that `requested` names, or -1. */
 function lastIndexIn(granted: readonly Scope[], requested: string): number {
