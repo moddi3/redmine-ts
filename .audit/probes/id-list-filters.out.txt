@@ -1,0 +1,143 @@
+| version | operation | filter | operator | needs | `a\|b` | `a,b` |
+| --- | --- | --- | --- | --- | --- | --- |
+| 6.1 | getIssues | issue_id | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | project_id | = | neither | HTTP 404 | HTTP 404 |
+| 6.1 | getIssues | project_id | ! | neither | HTTP 404 | HTTP 404 |
+| 6.1 | getIssues | tracker_id | = | `|` | both | wrong {} |
+| 6.1 | getIssues | tracker_id | ! | `|` | both | wrong 23 ids |
+| 6.1 | getIssues | status_id | = | `|` | both | wrong {} |
+| 6.1 | getIssues | status_id | ! | `|` | both | wrong 23 ids |
+| 6.1 | getIssues | priority_id | = | `|` | both | wrong {} |
+| 6.1 | getIssues | priority_id | ! | `|` | both | wrong 23 ids |
+| 6.1 | getIssues | assigned_to_id | = | `|` | both | wrong {} |
+| 6.1 | getIssues | assigned_to_id | ! | `|` | both | wrong 23 ids |
+| 6.1 | getIssues | author_id | = | `|` | both | wrong {} |
+| 6.1 | getIssues | author_id | ! | `|` | both | wrong 23 ids |
+| 6.1 | getIssues | fixed_version_id | = | `|` | both | wrong {} |
+| 6.1 | getIssues | fixed_version_id | ! | `|` | both | wrong 23 ids |
+| 6.1 | getIssues | category_id | = | fixture does not separate: 23 and 23 of 23 | - | - |
+| 6.1 | getIssuesByProject | category_id | = | `|` | both | wrong {} |
+| 6.1 | getIssuesByProject | category_id | ! | `|` | both | wrong 22 ids |
+| 6.1 | getIssues | parent_id | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | child_id | = | `,` | wrong {2706} | both |
+| 6.1 | getIssues | done_ratio | = | `,` | wrong {2706,2708} | both |
+| 6.1 | getIssues | watcher_id | = | `|` | both | wrong {} |
+| 6.1 | getIssues | watcher_id | ! | `|` | both | wrong 23 ids |
+| 6.1 | getIssues | cf_1 | = | `|` | both | wrong {} |
+| 6.1 | getIssues | cf_1 | ! | `|` | both | wrong 23 ids |
+| 6.1 | getIssues | relates | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | relates | ! | `,` | wrong 22 ids | both |
+| 6.1 | getIssues | duplicates | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | duplicates | ! | `,` | wrong 22 ids | both |
+| 6.1 | getIssues | duplicated | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | duplicated | ! | `,` | wrong 22 ids | both |
+| 6.1 | getIssues | blocks | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | blocks | ! | `,` | wrong 22 ids | both |
+| 6.1 | getIssues | blocked | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | blocked | ! | `,` | wrong 22 ids | both |
+| 6.1 | getIssues | precedes | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | precedes | ! | `,` | wrong 22 ids | both |
+| 6.1 | getIssues | follows | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | follows | ! | `,` | wrong 22 ids | both |
+| 6.1 | getIssues | copied_to | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | copied_to | ! | `,` | wrong 22 ids | both |
+| 6.1 | getIssues | copied_from | = | `,` | wrong {2708} | both |
+| 6.1 | getIssues | copied_from | ! | `,` | wrong 22 ids | both |
+| 6.1 | getTimeEntries | issue_id | = | neither | wrong {133} | wrong {133} |
+| 6.1 | getTimeEntries | issue.parent_id | = | `,` | wrong {133} | both |
+| 6.1 | getTimeEntries | issue.fixed_version_id | = | `|` | both | wrong {133} |
+| 6.1 | getTimeEntries | issue.fixed_version_id | ! | `|` | both | wrong {134,135} |
+| 6.1 | getTimeEntries | issue.category_id | = | fixture does not separate: 3 and 3 of 3 | - | - |
+| 6.1 | getTimeEntriesByProject | issue.category_id | = | `|` | both | wrong {} |
+| 6.1 | getTimeEntriesByProject | issue.category_id | ! | `|` | both | wrong {133,134} |
+| 6.1 | getTimeEntries | issue.tracker_id | = | `|` | both | wrong {} |
+| 6.1 | getTimeEntries | issue.tracker_id | ! | `|` | both | wrong {133,134,135} |
+| 6.1 | getTimeEntries | user_id | = | `|` | both | wrong {} |
+| 6.1 | getTimeEntries | user_id | ! | `|` | both | wrong {133,134,135} |
+| 6.1 | getTimeEntries | project_id | = | neither | HTTP 404 | HTTP 404 |
+| 6.1 | getTimeEntries | project_id | ! | neither | HTTP 404 | HTTP 404 |
+| 6.1 | getTimeEntries | activity_id | = | `|` | both | wrong {133,135} |
+| 6.1 | getTimeEntries | activity_id | ! | `|` | both | wrong {134} |
+| 6.1 | getProjects | id | = | `|` | both | wrong {} |
+| 6.1 | getProjects | id | ! | `|` | both | wrong {433,434,435,436} |
+| 6.1 | getProjects | parent_id | = | `|` | both | wrong {} |
+| 6.1 | getProjects | parent_id | ! | `|` | both | wrong {433,434,435,436} |
+| 6.1 | getProjects | status | = | `|` | both | wrong {} |
+| 6.1 | getProjects | status | ! | `|` | both | wrong {433,434,435,436} |
+| 6.1 | getUsers | status | = | `|` | both | wrong {} |
+| 6.1 | getUsers | status | ! | `|` | both | wrong {130,131} |
+| 6.1 | getUsers | login | = | `|` | both | wrong {} |
+| 6.1 | getUsers | login | ! | `|` | both | wrong {130,131} |
+| 7.0 | getIssues | issue_id | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | project_id | = | neither | HTTP 404 | HTTP 404 |
+| 7.0 | getIssues | project_id | ! | neither | HTTP 404 | HTTP 404 |
+| 7.0 | getIssues | tracker_id | = | `|` | both | wrong {} |
+| 7.0 | getIssues | tracker_id | ! | `|` | both | wrong 23 ids |
+| 7.0 | getIssues | status_id | = | `|` | both | wrong {} |
+| 7.0 | getIssues | status_id | ! | `|` | both | wrong 23 ids |
+| 7.0 | getIssues | priority_id | = | `|` | both | wrong {} |
+| 7.0 | getIssues | priority_id | ! | `|` | both | wrong 23 ids |
+| 7.0 | getIssues | assigned_to_id | = | `|` | both | wrong {} |
+| 7.0 | getIssues | assigned_to_id | ! | `|` | both | wrong 23 ids |
+| 7.0 | getIssues | author_id | = | `|` | both | wrong {} |
+| 7.0 | getIssues | author_id | ! | `|` | both | wrong 23 ids |
+| 7.0 | getIssues | fixed_version_id | = | `|` | both | wrong {} |
+| 7.0 | getIssues | fixed_version_id | ! | `|` | both | wrong 23 ids |
+| 7.0 | getIssues | category_id | = | fixture does not separate: 23 and 23 of 23 | - | - |
+| 7.0 | getIssuesByProject | category_id | = | `|` | both | wrong {} |
+| 7.0 | getIssuesByProject | category_id | ! | `|` | both | wrong 22 ids |
+| 7.0 | getIssues | parent_id | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | child_id | = | `,` | wrong {2706} | both |
+| 7.0 | getIssues | done_ratio | = | `,` | wrong {2706,2708} | both |
+| 7.0 | getIssues | watcher_id | = | `|` | both | wrong {} |
+| 7.0 | getIssues | watcher_id | ! | `|` | both | wrong 23 ids |
+| 7.0 | getIssues | cf_1 | = | `|` | both | wrong {} |
+| 7.0 | getIssues | cf_1 | ! | `|` | both | wrong 23 ids |
+| 7.0 | getIssues | relates | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | relates | ! | `,` | wrong 22 ids | both |
+| 7.0 | getIssues | duplicates | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | duplicates | ! | `,` | wrong 22 ids | both |
+| 7.0 | getIssues | duplicated | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | duplicated | ! | `,` | wrong 22 ids | both |
+| 7.0 | getIssues | blocks | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | blocks | ! | `,` | wrong 22 ids | both |
+| 7.0 | getIssues | blocked | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | blocked | ! | `,` | wrong 22 ids | both |
+| 7.0 | getIssues | precedes | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | precedes | ! | `,` | wrong 22 ids | both |
+| 7.0 | getIssues | follows | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | follows | ! | `,` | wrong 22 ids | both |
+| 7.0 | getIssues | copied_to | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | copied_to | ! | `,` | wrong 22 ids | both |
+| 7.0 | getIssues | copied_from | = | `,` | wrong {2708} | both |
+| 7.0 | getIssues | copied_from | ! | `,` | wrong 22 ids | both |
+| 7.0 | getTimeEntries | issue_id | = | neither | wrong {133} | wrong {133} |
+| 7.0 | getTimeEntries | issue.parent_id | = | `,` | wrong {133} | both |
+| 7.0 | getTimeEntries | issue.fixed_version_id | = | `|` | both | wrong {133} |
+| 7.0 | getTimeEntries | issue.fixed_version_id | ! | `|` | both | wrong {134,135} |
+| 7.0 | getTimeEntries | issue.category_id | = | fixture does not separate: 3 and 3 of 3 | - | - |
+| 7.0 | getTimeEntriesByProject | issue.category_id | = | `|` | both | wrong {} |
+| 7.0 | getTimeEntriesByProject | issue.category_id | ! | `|` | both | wrong {133,134} |
+| 7.0 | getTimeEntries | issue.tracker_id | = | `|` | both | wrong {} |
+| 7.0 | getTimeEntries | issue.tracker_id | ! | `|` | both | wrong {133,134,135} |
+| 7.0 | getTimeEntries | user_id | = | `|` | both | wrong {} |
+| 7.0 | getTimeEntries | user_id | ! | `|` | both | wrong {133,134,135} |
+| 7.0 | getTimeEntries | project_id | = | neither | HTTP 404 | HTTP 404 |
+| 7.0 | getTimeEntries | project_id | ! | neither | HTTP 404 | HTTP 404 |
+| 7.0 | getTimeEntries | activity_id | = | `|` | both | wrong {133,135} |
+| 7.0 | getTimeEntries | activity_id | ! | `|` | both | wrong {134} |
+| 7.0 | getProjects | id | = | `|` | both | wrong {} |
+| 7.0 | getProjects | id | ! | `|` | both | wrong {429,430,431,432} |
+| 7.0 | getProjects | parent_id | = | `|` | both | wrong {} |
+| 7.0 | getProjects | parent_id | ! | `|` | both | wrong {429,430,431,432} |
+| 7.0 | getProjects | status | = | `|` | both | wrong {} |
+| 7.0 | getProjects | status | ! | `|` | both | wrong {429,430,431,432} |
+| 7.0 | getUsers | status | = | `|` | both | wrong {} |
+| 7.0 | getUsers | status | ! | `|` | both | wrong {162,163} |
+| 7.0 | getUsers | login | = | `|` | both | wrong {} |
+| 7.0 | getUsers | login | ! | `|` | both | wrong {162,163} |
+
+Documented filters without a fixture, by name (the scoped variants share their query class): dates, hours
+and text take one value or one string, and the rest read every value in Redmine's source
+(app/models/{issue,time_entry,user}_query.rb, query.rb):
+subproject_id, author.group, author.role, member_of_group, assigned_to_role, fixed_version.due_date, fixed_version.status, subject, description, notes, created_on, updated_on, closed_on, start_date, due_date, estimated_hours, spent_time, is_private, attachment, attachment_description, updated_by, last_updated_by, project.status, any_searchable, spent_on, issue.status_id, issue.subject, user.group, user.role, comments, hours, name, is_public, auth_source_id, twofa_scheme, firstname, lastname, mail, last_login_on, admin

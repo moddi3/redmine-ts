@@ -44,6 +44,8 @@ for await (const open of rm.issues.list({
 
 Every operation is `rm.<namespace>.<verb>(input, options?)`. `input` is one flat object with snake_case keys, named as in the Redmine API. It holds path parameters, query parameters, and body fields side by side. The client puts each key where Redmine expects it and adds the JSON envelope. For example, `rm.issues.update({ issue_id: 42, notes: "Fixed" })` sends `PUT issues/42.json` with the body `{ "issue": { "notes": "Fixed" } }`.
 
+To clear a field on update, set it to `null`, for example `rm.issues.update({ issue_id: 42, assigned_to_id: null })`. Redmine ignores a `null` `assigned_to_id` but clears it for `""`, so the client sends `""` for that one field. Every other nullable field clears with `null` as is.
+
 The package exports a type for every input and every schema. Input types are named after the spec's operation id: `GetIssuesInput`, `GetIssuesWhere`, `GetIssueInclude`, `CreateIssueInput`, and so on. Schema types use the schema name: `Issue`, `Project`, `TimeEntry`.
 
 ### Filter lists with `where`
@@ -66,6 +68,8 @@ const untriaged: GetIssuesWhere = {
 ```
 
 The operators are `not`, `gte`, `lte`, `between`, `contains`, `not_contains`, `starts_with`, `ends_with`, `any`, and `none`. Each field accepts only the operators the spec documents for it, so `status_id: { contains: "x" }` does not compile. Redmine ignores an unknown filter and returns every row. To prevent that, the client throws `invalid_input` before any request when a key is unknown or an operator is undocumented. `{ raw }` sends its string as is, for relative dates and operators the object form does not cover.
+
+An array goes on the wire as `a|b`, which Redmine splits for most filters. A few id filters read only the first value and split it on commas: `issue_id`, `parent_id`, `child_id`, `done_ratio`, the relation filters (`relates`, `blocks`, and the rest), and `issue.parent_id` on time entries. For those the client sends `a,b`, so `where: { issue_id: [4, 9] }` returns both issues. The input is the same array either way.
 
 Redmine's issue list returns only open issues when `status_id` is absent. Pass `status_id: "any"` to include closed ones.
 

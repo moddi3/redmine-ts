@@ -76,6 +76,44 @@ describe("building requests", () => {
     expect(requests[0]?.json()).toEqual({ issue: { subject: "x", notes: "n" } });
   });
 
+  test.each([
+    [
+      "null on a clear field becomes an empty string",
+      { assigned_to_id: null },
+      { assigned_to_id: "" },
+    ],
+    ["a value on a clear field is untouched", { assigned_to_id: 5 }, { assigned_to_id: 5 }],
+    ["an omitted clear field stays omitted", { subject: "x" }, { subject: "x" }],
+    ["an undefined clear field stays omitted", { assigned_to_id: undefined }, {}],
+    [
+      "null on any other field stays null",
+      { due_date: null, description: null },
+      { due_date: null, description: null },
+    ],
+    [
+      "null inside a custom field value stays null",
+      { custom_fields: [{ id: 1, value: null }] },
+      { custom_fields: [{ id: 1, value: null }] },
+    ],
+    [
+      "only the clear field changes",
+      { assigned_to_id: null, category_id: null, notes: "n" },
+      { assigned_to_id: "", category_id: null, notes: "n" },
+    ],
+  ])("%s in a PUT body", async (_name, input, sent) => {
+    const { call, requests } = testEngine(() => empty());
+    await call(ops.updateIssue, { issue_id: 7, ...input });
+
+    expect(requests[0]?.json()).toEqual({ issue: sent });
+  });
+
+  test("an operation with no clear fields sends null as null", async () => {
+    const { call, requests } = testEngine(() => json({ user: { id: 9 } }, 201));
+    await call(ops.createUser, { login: "jsmith", auth_source_id: null });
+
+    expect(requests[0]?.json()).toEqual({ user: { login: "jsmith", auth_source_id: null } });
+  });
+
   test("siblings stay outside the envelope and the created item is unwrapped", async () => {
     const { call, requests } = testEngine(() => json({ user: { id: 9, login: "jsmith" } }, 201));
     const user = await call(ops.createUser, {

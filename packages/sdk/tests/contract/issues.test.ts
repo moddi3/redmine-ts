@@ -96,6 +96,90 @@ describeServers("issues", (server) => {
     expect(issue.custom_fields?.find((f) => f.id === Tags)?.value).toEqual(["b"]);
   });
 
+  it("null clears every nullable field of an update, including the assignee Redmine ignores as null", async () => {
+    const project = await freshProject(admin, cleanup, "clear");
+    const jsmith = await clientFor(server, "user").users.current();
+    const developer = (await admin.roles.list().all()).find((r) => r.name === "Developer");
+    if (!developer) throw new Error("the seeded server has no Developer role");
+    await admin.memberships.create({
+      project_id: project.id,
+      user_id: jsmith.id,
+      role_ids: [developer.id],
+    });
+    const version = await admin.versions.create({ project_id: project.id, name: unique("v") });
+    const category = await admin.issueCategories.create({
+      project_id: project.id,
+      name: unique("c"),
+    });
+    const parent = await admin.issues.create({ project_id: project.id, subject: "parent" });
+    const filled = {
+      description: "text",
+      start_date: "2026-10-01",
+      due_date: "2026-10-30",
+      estimated_hours: 5,
+      assigned_to_id: jsmith.id,
+      category_id: category.id,
+      fixed_version_id: version.id,
+      parent_issue_id: parent.id,
+    };
+    const created = await admin.issues.create({
+      project_id: project.id,
+      subject: "clearing",
+      ...filled,
+      custom_fields: [{ id: Severity, value: "S1" }],
+    });
+    const read = () => admin.issues.get({ issue_id: created.id });
+
+    const before = await read();
+    expect(before).toMatchObject({
+      assigned_to: { id: jsmith.id },
+      category: { id: category.id },
+      fixed_version: { id: version.id },
+      parent: { id: parent.id },
+      start_date: "2026-10-01",
+      due_date: "2026-10-30",
+      estimated_hours: 5,
+    });
+
+    await admin.issues.update({
+      issue_id: created.id,
+      description: null,
+      start_date: null,
+      due_date: null,
+      estimated_hours: null,
+      assigned_to_id: null,
+      category_id: null,
+      fixed_version_id: null,
+      parent_issue_id: null,
+      custom_fields: [{ id: Severity, value: null }],
+    });
+
+    const after = await read();
+    expect(after.assigned_to).toBeUndefined();
+    expect(after.category).toBeUndefined();
+    expect(after.fixed_version).toBeUndefined();
+    expect(after.parent).toBeUndefined();
+    expect(after.start_date ?? null).toBeNull();
+    expect(after.due_date ?? null).toBeNull();
+    expect(after.estimated_hours ?? null).toBeNull();
+    expect(after.description || null).toBeNull();
+    expect(after.custom_fields?.find((f) => f.id === Severity)?.value || null).toBeNull();
+  });
+
+  it("the assignee can be set again after a null cleared it, and null on an unassigned issue is a no-op", async () => {
+    const jsmith = await clientFor(server, "user").users.current();
+    const created = await newIssue({ assigned_to_id: jsmith.id });
+
+    await admin.issues.update({ issue_id: created.id, assigned_to_id: null });
+    expect((await admin.issues.get({ issue_id: created.id })).assigned_to).toBeUndefined();
+
+    await admin.issues.update({ issue_id: created.id, assigned_to_id: null });
+    expect((await admin.issues.get({ issue_id: created.id })).assigned_to).toBeUndefined();
+
+    await admin.issues.update({ issue_id: created.id, assigned_to_id: jsmith.id });
+    expect((await admin.issues.get({ issue_id: created.id })).assigned_to?.id).toBe(jsmith.id);
+  });
+
   it("deletes an issue and a get afterwards is not_found", async () => {
     const created = await admin.issues.create({
       project_id: server.projectIdentifier,

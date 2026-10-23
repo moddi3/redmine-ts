@@ -1,0 +1,57 @@
+| version | resource | field | before | null | empty string |
+| --- | --- | --- | --- | --- | --- |
+| 6.1 | issue | assigned_to_id | 5 | ignored | cleared |
+| 6.1 | issue | category_id | 22 | cleared | cleared |
+| 6.1 | issue | fixed_version_id | 29 | cleared | cleared |
+| 6.1 | issue | parent_issue_id | 2229 | cleared | cleared |
+| 6.1 | issue | start_date | "2026-10-01" | cleared | cleared |
+| 6.1 | issue | due_date | "2026-10-30" | cleared | cleared |
+| 6.1 | issue | estimated_hours | 5 | cleared | cleared |
+| 6.1 | issue | done_ratio | 50 | cleared | cleared |
+| 6.1 | issue | description | "some text" | cleared | cleared |
+| 6.1 | issue | custom field, single list (custom_fields [{id, value}]) | "S1" | cleared | cleared |
+| 6.1 | issue | custom field, single list (custom_field_values {id: value}) | "S1" | cleared | cleared |
+| 6.1 | issue | custom field, multi list (custom_fields [{id, value}]) | ["a","b"] | cleared | cleared |
+| 6.1 | issue | custom field, multi list (custom_field_values {id: value}) | ["a","b"] | cleared | cleared |
+| 6.1 | issue | custom field, multi list (value: []) | ["a","b"] | - | cleared |
+| 6.1 | project | parent_id | 351 | cleared | cleared |
+| 6.1 | project | description | "text" | cleared | cleared |
+| 6.1 | project | homepage | "http://example.com" | cleared | cleared |
+| 6.1 | project | default_assigned_to_id | 5 | cleared | cleared |
+| 6.1 | project | default_version_id | 30 | cleared | cleared |
+| 6.1 | project | default_issue_query_id | 1 | cleared | cleared |
+| 6.1 | issue (create) | assigned_to_id omitted, project has a default assignee | - | assigned to 5 | - |
+| 6.1 | issue (create) | assigned_to_id null, project has a default assignee | - | assigned to 5 | - |
+| 6.1 | issue (create) | assigned_to_id empty, project has a default assignee | - | assigned to 5 | - |
+| 6.1 | version | due_date | "2026-12-31" | cleared | cleared |
+| 6.1 | version | wiki_page_title | "ProbePage" | cleared | cleared |
+| 6.1 | journal | notes | "a note" | cleared | cleared |
+| 7.0 | issue | assigned_to_id | 5 | ignored | cleared |
+| 7.0 | issue | category_id | 22 | cleared | cleared |
+| 7.0 | issue | fixed_version_id | 29 | cleared | cleared |
+| 7.0 | issue | parent_issue_id | 2232 | cleared | cleared |
+| 7.0 | issue | start_date | "2026-10-01" | cleared | cleared |
+| 7.0 | issue | due_date | "2026-10-30" | cleared | cleared |
+| 7.0 | issue | estimated_hours | 5 | cleared | cleared |
+| 7.0 | issue | done_ratio | 50 | cleared | cleared |
+| 7.0 | issue | description | "some text" | cleared | cleared |
+| 7.0 | issue | custom field, single list (custom_fields [{id, value}]) | "S1" | cleared | cleared |
+| 7.0 | issue | custom field, single list (custom_field_values {id: value}) | "S1" | cleared | cleared |
+| 7.0 | issue | custom field, multi list (custom_fields [{id, value}]) | ["a","b"] | cleared | cleared |
+| 7.0 | issue | custom field, multi list (custom_field_values {id: value}) | ["a","b"] | cleared | cleared |
+| 7.0 | issue | custom field, multi list (value: []) | ["a","b"] | - | cleared |
+| 7.0 | project | parent_id | 351 | cleared | cleared |
+| 7.0 | project | description | "text" | cleared | cleared |
+| 7.0 | project | homepage | "http://example.com" | cleared | cleared |
+| 7.0 | project | default_assigned_to_id | 5 | cleared | cleared |
+| 7.0 | project | default_version_id | 30 | cleared | cleared |
+| 7.0 | project | default_issue_query_id | 1 | cleared | cleared |
+| 7.0 | issue (create) | assigned_to_id omitted, project has a default assignee | - | assigned to 5 | - |
+| 7.0 | issue (create) | assigned_to_id null, project has a default assignee | - | assigned to 5 | - |
+| 7.0 | issue (create) | assigned_to_id empty, project has a default assignee | - | assigned to 5 | - |
+| 7.0 | version | due_date | "2026-12-31" | cleared | cleared |
+| 7.0 | version | wiki_page_title | "ProbePage" | cleared | cleared |
+| 7.0 | journal | notes | "a note" | cleared | cleared |
+
+Not probeable here: users.update and my_account.update auth_source_id (no authentication source is seeded
+and REST cannot create one). Time entries, memberships, wiki pages and news have no nullable input.

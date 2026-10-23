@@ -180,6 +180,60 @@ describe("operation descriptors", () => {
     expect(Object.keys(ops.getIssues.query)).not.toContain("offset");
   });
 
+  test("comma lists are exactly the filters the overlay names, on every operation of the query", () => {
+    const joined = Object.values(ops).flatMap((op) =>
+      Object.entries(op.filters)
+        .filter(([, spec]) => "join" in spec)
+        .map(([name, spec]) => `${op.id}.${name}=${spec.join}`),
+    );
+    const issueFilters = [
+      "issue_id",
+      "parent_id",
+      "child_id",
+      "done_ratio",
+      "relates",
+      "duplicates",
+      "duplicated",
+      "blocks",
+      "blocked",
+      "precedes",
+      "follows",
+      "copied_to",
+      "copied_from",
+    ];
+    expect(joined.toSorted()).toEqual(
+      [
+        ...["getIssues", "getIssuesByProject"].flatMap((id) =>
+          issueFilters.map((f) => `${id}.${f}=,`),
+        ),
+        "getTimeEntries.issue.parent_id=,",
+        "getTimeEntriesByProject.issue.parent_id=,",
+      ].toSorted(),
+    );
+    // Filters that read every value keep the default, including same-named ones on other operations.
+    expect(ops.getProjects.filters.parent_id).not.toHaveProperty("join");
+    expect(ops.getTimeEntries.filters.issue_id).not.toHaveProperty("join");
+    expect(ops.getIssues.filters.assigned_to_id).not.toHaveProperty("join");
+  });
+
+  test("only updateIssue clears a field by sending an empty string for null", () => {
+    const clearing = Object.values(ops).filter((op) => op.body?.kind === "json" && op.body.clear);
+    expect(clearing.map((op) => op.id)).toEqual(["updateIssue"]);
+    expect(ops.updateIssue.body).toEqual({
+      kind: "json",
+      envelope: "issue",
+      siblings: [],
+      clear: ["assigned_to_id"],
+    });
+  });
+
+  test("the overlay refuses a clear field that is not nullable and a comma list without =", async () => {
+    const bad = { ...overlay, clearAsEmpty: { updateIssue: ["subject"] } };
+    await expect(generate(specs, bad)).rejects.toThrow(/updateIssue: subject is not a nullable/);
+    const worse = { ...overlay, commaLists: [{ ops: ["getIssues"], filters: ["subject"] }] };
+    await expect(generate(specs, worse)).rejects.toThrow(/no filter subject documents =/);
+  });
+
   test("time entry from/to are plain query params, not filters", () => {
     expect(ops.getTimeEntries.query).toMatchObject({ from: "scalar", to: "scalar" });
     expect(ops.getTimeEntries.filters).not.toHaveProperty("from");

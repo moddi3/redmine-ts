@@ -17,6 +17,19 @@ export interface Overlay {
   extras: readonly string[];
   /** List operations that support keyset walks, and their id filter. */
   keyset: Readonly<Record<string, string>>;
+  /**
+   * Filters whose `=` and `!` read only the first value and split it on commas, where Redmine's short syntax
+   * splits on "|". A list sent as `a|b` matches `a` alone. Grouped by query class: Redmine builds every
+   * operation of a group from the same query, so each filter is named once. Observed on Redmine 6.1 and 7.0:
+   * .audit/probes/id-list-filters.out.txt.
+   */
+  commaLists: readonly { ops: readonly string[]; filters: readonly string[] }[];
+  /**
+   * operationId -> nullable body fields that Redmine ignores as `null` and clears as `""`. The client sends `""`
+   * for a `null` there. Issue#safe_attributes= skips a falsy `assigned_to_id`, and every other nullable field
+   * of an update clears with `null`: .audit/probes/clear-fields.out.txt.
+   */
+  clearAsEmpty: Readonly<Record<string, readonly string[]>>;
   /** Filter name -> words compiled to operator codes. Words whose code a filter lacks are dropped. */
   filterWords: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /**
@@ -56,6 +69,28 @@ export const overlay: Overlay = {
   },
   extras: ["uploadAttachmentFile", "downloadAttachmentFile", "downloadThumbnail"],
   keyset: { getIssues: "issue_id" },
+  clearAsEmpty: { updateIssue: ["assigned_to_id"] },
+  commaLists: [
+    {
+      ops: ["getIssues", "getIssuesByProject"],
+      filters: [
+        "issue_id",
+        "parent_id",
+        "child_id",
+        "done_ratio",
+        "relates",
+        "duplicates",
+        "duplicated",
+        "blocks",
+        "blocked",
+        "precedes",
+        "follows",
+        "copied_to",
+        "copied_from",
+      ],
+    },
+    { ops: ["getTimeEntries", "getTimeEntriesByProject"], filters: ["issue.parent_id"] },
+  ],
   filterWords: { status_id: { open: "o", closed: "c", any: "*" } },
   sparseIncludes: [
     "children",
