@@ -55,6 +55,6 @@ export function connectTo(
 ) {
   return connect(
     { baseUrl: server.baseUrl, auth: { apiKey }, version: server.version, access },
-    filesDir === undefined ? {} : { filesDir },
+    { filesDir },
   );
 }

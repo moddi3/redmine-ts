@@ -78,7 +78,10 @@ describeServers("Streamable HTTP", (server) => {
       expect(client.getNegotiatedProtocolVersion()).toBe(
         era === "modern" ? "2026-07-28" : "2025-11-25",
       );
-      expect((await client.listTools()).tools).toHaveLength(server.version === "6.1" ? 85 : 86);
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(server.version === "6.1" ? 91 : 92);
+      const upload = tools.find((tool) => tool.name === "attachments_upload");
+      expect(upload?.inputSchema.properties).not.toHaveProperty("path");
     },
   );
 

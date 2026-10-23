@@ -6,6 +6,7 @@ import { parseCli, USAGE } from "./config.ts";
 import { createRedmineMcpHandler } from "./http.ts";
 import { toNodeListener } from "./node-http.ts";
 import { createRedmineMcpServer } from "./server.ts";
+import { localFiles } from "./workflow/files-dir.ts";
 
 const command = parseCli(process.argv.slice(2), process.env);
 switch (command.kind) {
@@ -49,7 +50,8 @@ switch (command.kind) {
   }
   case "serve": {
     const { config, filesDir } = command;
-    serveStdio(() => createRedmineMcpServer(config, { filesDir }), {
+    const files = filesDir === undefined ? undefined : localFiles(filesDir);
+    serveStdio(() => createRedmineMcpServer(config, { files }), {
       onerror: (error) => console.error(`redmine-mcp: ${error.message}`),
     });
   }

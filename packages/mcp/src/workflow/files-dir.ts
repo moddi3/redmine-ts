@@ -1,13 +1,42 @@
 // The one local directory tools may touch, configured with REDMINE_MCP_FILES_DIR. A path must resolve
-// inside it after symlinks are followed, and a saved file never replaces one that exists.
+// inside it after symlinks are followed, and a saved file never replaces one that exists. Node only:
+// the web-standard server reaches this through the LocalFiles it is given, never by import.
 
 import type { FileHandle } from "node:fs/promises";
-import { open, realpath, stat } from "node:fs/promises";
+import { open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import type { LocalFiles } from "../tools.ts";
 import { invalidInput } from "./define.ts";
 
+/** The files directory `dir` for createRedmineMcpServer's `files` option. */
+export function localFiles(dir: string): LocalFiles {
+  return {
+    async open(path) {
+      const target = await fileInside(dir, path);
+      const { size } = await stat(target);
+      return { size, bytes: async () => new Uint8Array(await readFile(target)) };
+    },
+    async save(filename, fallback, body) {
+      const { path, file } = await createUnique(dir, filename, fallback);
+      let bytes = 0;
+      try {
+        for await (const chunk of body) {
+          await file.write(chunk);
+          bytes += chunk.byteLength;
+        }
+      } catch (error) {
+        await file.close();
+        await rm(path, { force: true });
+        throw error;
+      }
+      await file.close();
+      return { path, bytes };
+    },
+  };
+}
+
 /** The real path of a regular file inside `dir`, refused before anything is read or sent otherwise. */
-export async function fileInside(dir: string, path: string): Promise<string> {
+async function fileInside(dir: string, path: string): Promise<string> {
   const root = await realpath(dir);
   let target: string;
   try {
@@ -29,7 +58,7 @@ export async function fileInside(dir: string, path: string): Promise<string> {
  * A new file in `dir` named after `filename`, with " (1)", " (2)" and so on before the extension when
  * the name is taken. Opened with O_EXCL, so it never follows or replaces an existing file or symlink.
  */
-export async function createUnique(
+async function createUnique(
   dir: string,
   filename: string,
   fallback: string,

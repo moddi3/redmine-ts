@@ -241,7 +241,7 @@ A failed Redmine request comes back as a tool result with `isError: true`, never
 
 ## Embed the server
 
-`createRedmineMcpServer` takes the same config as `createRedmine` from `@redmine-ts/sdk`, and optionally `{ filesDir }`, and returns an MCP `Server`. Connect it to any transport:
+`createRedmineMcpServer` takes the same config as `createRedmine` from `@redmine-ts/sdk`, and optionally `{ files }`, and returns an MCP `Server`. Connect it to any transport:
 
 ```ts
 import { createRedmineMcpServer } from "@redmine-ts/mcp";
@@ -257,7 +257,7 @@ serveStdio(() =>
 );
 ```
 
-`access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. Pass `createRedmineMcpServer(config, { filesDir: "/srv/redmine-files" })` to enable `path` uploads and `attachments_save`.
+`access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. To enable `path` uploads and `attachments_save`, pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. The main entry never imports file system code, so a server without `files` cannot touch local files.
 
 `createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` and `allowedHosts` take hostnames, as `--allow-origin` does. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
 

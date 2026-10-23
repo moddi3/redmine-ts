@@ -16,7 +16,7 @@ import pkg from "../package.json" with { type: "json" };
 import { catalogTools, DEFAULT_LIMIT, HEAVY_KEYS, MAX_LIMIT } from "./catalog-tools.ts";
 import { ISSUE_TEMPLATE, readIssue } from "./resources.ts";
 import { isListed } from "./tools.ts";
-import type { Client, Schema, ToolContext, ToolResult, ToolSpec } from "./tools.ts";
+import type { Client, LocalFiles, Schema, ToolContext, ToolResult, ToolSpec } from "./tools.ts";
 import { hasUserText, UNTRUSTED } from "./user-text.ts";
 import { ToolError } from "./workflow/define.ts";
 import { workflowTools } from "./workflow/index.ts";
@@ -24,10 +24,11 @@ import { createLookups } from "./workflow/lookups.ts";
 
 export interface RedmineMcpOptions {
   /**
-   * A local directory the server may read uploads from and save attachments to. Without it, no tool
-   * touches the local file system, and attachments_save is not offered.
+   * A local directory the server may read uploads from and save attachments to, from `localFiles` in
+   * `@redmine-ts/mcp/node`. Without it, no tool touches the local file system, and attachments_save is
+   * not offered.
    */
-  filesDir?: string;
+  files?: LocalFiles;
 }
 
 /** Compiled once per schema for the process, because HTTP serving builds a server per request. */
@@ -57,8 +58,8 @@ export function createRedmineMcpServer(
 ): Server {
   const access = config.access ?? "full";
   const rm = createRedmine(config);
-  const context: ToolContext = { lookups: createLookups(rm), filesDir: options.filesDir };
-  const tools = [...workflowTools(access, options.filesDir !== undefined), ...catalogTools];
+  const context: ToolContext = { lookups: createLookups(rm), files: options.files };
+  const tools = [...workflowTools(access, options.files !== undefined), ...catalogTools];
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const listed = tools.filter((tool) => isListed(tool, access, config.version)).map(definition);
 

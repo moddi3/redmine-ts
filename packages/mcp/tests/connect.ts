@@ -1,12 +1,21 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type { RedmineConfig } from "@redmine-ts/sdk";
 import { createRedmineMcpServer } from "../src/index.ts";
-import type { RedmineMcpOptions } from "../src/index.ts";
+import { localFiles } from "../src/node.ts";
+
+/** Server settings beyond the client config: `filesDir` becomes the server's files directory. */
+export interface ServerSettings {
+  filesDir?: string;
+}
 
 /** A real MCP client talking to the server over the SDK's in-memory transport pair. */
-export async function connect(config: RedmineConfig, options?: RedmineMcpOptions): Promise<Client> {
+export async function connect(
+  config: RedmineConfig,
+  { filesDir }: ServerSettings = {},
+): Promise<Client> {
   const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-  const server = createRedmineMcpServer(config, options);
+  const files = filesDir === undefined ? undefined : localFiles(filesDir);
+  const server = createRedmineMcpServer(config, { files });
   await server.connect(serverEnd);
   const client = new Client({ name: "redmine-mcp-tests", version: "0.0.0" });
   await client.connect(clientEnd);

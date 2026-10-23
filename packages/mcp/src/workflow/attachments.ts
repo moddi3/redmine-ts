@@ -1,14 +1,11 @@
 // Files over MCP: uploads take text, base64 or a path in the files directory; downloads return images
 // and text inline when they are small, and otherwise the metadata, or a saved file in the directory.
 
-import { Buffer } from "node:buffer";
-import { readFile, rm as remove, stat } from "node:fs/promises";
 import type { Attachment } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
-import type { Annotations, ToolSpec } from "../tools.ts";
+import type { Annotations, LocalFiles, ToolSpec } from "../tools.ts";
 import { defineTool, invalidInput } from "./define.ts";
-import { createUnique, fileInside } from "./files-dir.ts";
 
 /** Redmine's default attachment size limit. A larger upload is refused before it is sent. */
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -84,10 +81,10 @@ export function uploadTool(files: boolean): ToolSpec {
     }),
     output: UploadRef,
     ...BY_METHOD.POST,
-    run: async (rm, input, { filesDir }) => {
+    run: async (rm, input, { files }) => {
       const { filename, content_type, description } = input;
       // The schema offers path, as a string, only with a files directory.
-      const bytes = await content(input as Sources, filesDir);
+      const bytes = await content(input as Sources, files);
       const ref = await rm.attachments.upload({
         file: bytes,
         filename,
@@ -101,13 +98,13 @@ export function uploadTool(files: boolean): ToolSpec {
 
 type Sources = { content_text?: string; content_base64?: string; path?: string };
 
-async function content(input: Sources, filesDir: string | undefined): Promise<Uint8Array> {
+async function content(input: Sources, files: LocalFiles | undefined): Promise<Uint8Array> {
   const given = (["content_text", "content_base64", "path"] as const).filter(
     (key) => input[key] !== undefined,
   );
   if (given.length !== 1) {
     throw invalidInput(
-      `give exactly one of content_text, content_base64${filesDir === undefined ? "" : " or path"}, got ${given.length === 0 ? "none" : given.join(" and ")}`,
+      `give exactly one of content_text, content_base64${files === undefined ? "" : " or path"}, got ${given.length === 0 ? "none" : given.join(" and ")}`,
     );
   }
   let bytes: Uint8Array;
@@ -118,11 +115,11 @@ async function content(input: Sources, filesDir: string | undefined): Promise<Ui
     if (base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
       throw invalidInput("content_base64 is not valid base64");
     }
-    bytes = Buffer.from(base64, "base64");
+    bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
   } else {
-    const path = await fileInside(filesDir!, input.path!);
-    tooLarge((await stat(path)).size);
-    bytes = await readFile(path);
+    const file = await files!.open(input.path!);
+    tooLarge(file.size);
+    bytes = await file.bytes();
   }
   tooLarge(bytes.byteLength);
   return bytes;
@@ -210,7 +207,7 @@ export function downloadTool(files: boolean): ToolSpec {
           content: "image" as const,
           note: "The image is the next content block.",
         },
-        extra: [{ type: "image" as const, data: Buffer.from(bytes).toString("base64"), mimeType }],
+        extra: [{ type: "image" as const, data: base64Of(bytes), mimeType }],
       };
     },
   });
@@ -236,23 +233,15 @@ export const saveTool: ToolSpec = defineTool({
   output: z.object({ path: z.string(), bytes: z.int(), attachment: Metadata }),
   tier: "read",
   annotations: SAVE,
-  run: async (rm, { id }, { filesDir }) => {
+  run: async (rm, { id }, { files }) => {
     const attachment = await rm.attachments.get({ attachment_id: id });
     const download = await rm.attachments.download(attachment);
     // Listed only with a files directory.
-    const { path, file } = await createUnique(filesDir!, attachment.filename, `attachment-${id}`);
-    let bytes = 0;
-    try {
-      for await (const chunk of download.body) {
-        await file.write(chunk);
-        bytes += chunk.byteLength;
-      }
-    } catch (error) {
-      await file.close();
-      await remove(path, { force: true });
-      throw error;
-    }
-    await file.close();
+    const { path, bytes } = await files!.save(
+      attachment.filename,
+      `attachment-${id}`,
+      download.body,
+    );
     return { structured: { path, bytes, attachment: metadataOf(attachment) } };
   },
 });
@@ -291,6 +280,15 @@ function mediaType(contentType: string | null): string | undefined {
 function extension(filename: string): string {
   const dot = filename.lastIndexOf(".");
   return dot < 0 ? "" : filename.slice(dot + 1).toLowerCase();
+}
+
+/** btoa takes one character per byte; chunks keep the spread under the argument limit. */
+function base64Of(bytes: Uint8Array): string {
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  }
+  return btoa(binary);
 }
 
 function humanSize(size: number): string {

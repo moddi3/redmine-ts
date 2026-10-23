@@ -3,8 +3,8 @@ import addFormatsModule from "ajv-formats";
 import type { Client } from "@modelcontextprotocol/client";
 import type { RedmineConfig } from "@redmine-ts/sdk";
 import { expect } from "vite-plus/test";
-import type { RedmineMcpOptions } from "../../src/index.ts";
 import { connect, texts } from "../connect.ts";
+import type { ServerSettings } from "../connect.ts";
 
 // ajv-formats is CommonJS with its plugin on `default`.
 const addFormats = addFormatsModule as unknown as typeof addFormatsModule.default;
@@ -28,7 +28,7 @@ export const json = (body: unknown, status = 200): Response =>
 export async function serve(
   routes: Readonly<Record<string, Route>>,
   config: Partial<RedmineConfig> = {},
-  options?: RedmineMcpOptions,
+  settings?: ServerSettings,
 ): Promise<{ client: Client; seen: Seen[] }> {
   const seen: Seen[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
@@ -50,7 +50,7 @@ export async function serve(
   };
   const client = await connect(
     { baseUrl: "http://redmine.test", auth: { apiKey: "test-key" }, fetch, ...config },
-    options,
+    settings,
   );
   return { client, seen };
 }

@@ -149,8 +149,10 @@ describe("createRedmineMcpHandler", () => {
         era === "modern" ? "2026-07-28" : "2025-11-25",
       );
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(39);
+      expect(tools).toHaveLength(43);
       expect(tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
+      // An HTTP server has no files directory, so nothing it lists can touch local files.
+      expect(tools.map((tool) => tool.name)).not.toContain("attachments_save");
       const forced = await client.callTool({ name: "issues_delete", arguments: { issue_id: 1 } });
       expect(texts(forced)[0]).toContain('"read-only"');
       expect(keys).toEqual([]);
