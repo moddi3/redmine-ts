@@ -63,17 +63,19 @@ REDMINE_URL=https://tracker.example.com npx -y @redmine-ts/mcp --http --no-delet
 
 The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisions without sessions: each request stands alone, and `GET` and `DELETE` on `/mcp` answer 405. The access mode and `REDMINE_VERSION` apply to every request, as they do over stdio. `SIGINT` or `SIGTERM` lets requests in flight finish and then stops the server; a second signal stops it at once.
 
-| Request                                         | Answer                                                                                                   |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| No `X-Redmine-API-Key` header, or an empty one  | 401, with a JSON-RPC error that names the header. With [OAuth](#oauth), a 401 with a `Bearer` challenge. |
-| An `Origin` that `--allow-origin` does not list | 403.                                                                                                     |
-| A `Host` that is not one of the server's names  | 403, on a loopback address or with `--allow-host`. See [Security defaults](#security-defaults).          |
-| A path other than `/mcp`                        | 404. With `REDMINE_MCP_PUBLIC_URL`, the server serves that URL's path and the OAuth paths instead.       |
-| A key Redmine rejects                           | The tool call returns an error result with Redmine's 401.                                                |
-| An OAuth token Redmine no longer accepts        | 401 `invalid_token` with the `Bearer` challenge, so the client refreshes or signs in again.              |
-| A call the OAuth token's scope does not allow   | 403 `insufficient_scope`, naming the scopes the call needs, if the server's own mode allows the call.    |
+| Request                                                                                           | Answer                                                                                                   |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| No `X-Redmine-API-Key` header, or an empty one                                                    | 401, with a JSON-RPC error that names the header. With [OAuth](#oauth), a 401 with a `Bearer` challenge. |
+| An `Origin` that `--allow-origin` does not list                                                   | 403.                                                                                                     |
+| A `Host` that is not one of the server's names                                                    | 403, on a loopback address or with `--allow-host`. See [Security defaults](#security-defaults).          |
+| A path other than `/mcp`                                                                          | 404. With `REDMINE_MCP_PUBLIC_URL`, the server serves that URL's path and the OAuth paths instead.       |
+| A key Redmine rejects, with a body over 64 KiB or one still arriving after a second               | 401 with id `null`, after one `GET /users/current.json`. The server reads no more of the body.           |
+| A key Redmine rejects, with a smaller body that arrives at once                                   | The tool call returns an error result with Redmine's 401.                                                |
+| A key with a body over 64 KiB or one still arriving after a second, while Redmine does not answer | 503 with id `null`. See [Security defaults](#security-defaults).                                         |
+| An OAuth token Redmine no longer accepts                                                          | 401 `invalid_token` with the `Bearer` challenge, so the client refreshes or signs in again.              |
+| A call the OAuth token's scope does not allow                                                     | 403 `insufficient_scope`, naming the scopes the call needs, if the server's own mode allows the call.    |
 
-The 401 for a missing key and the 403s for `Origin` and `Host` are JSON-RPC errors. The error carries the request's `id` when the body is a single request, declares a `Content-Length` of at most 64 KiB, and arrives within a second. To refuse a request, the server does not read a larger or chunked body and does not wait longer for a slow one, so their errors have a `null` id. A notification, a batch, or a body that is not JSON has no single id, so its error has a `null` id too, as JSON-RPC 2.0 does for an id it cannot detect.
+The 401 for a missing key and the 403s for `Origin` and `Host` are JSON-RPC errors. The error carries the request's `id` when the body is a single request, declares a `Content-Length` of at most 64 KiB, and arrives within a second. To refuse a request, the server does not read a larger or chunked body and does not wait longer for a slow one, so their errors have a `null` id. A notification, a batch, or a body that is not JSON has no single id, so its error has a `null` id too, as JSON-RPC 2.0 does for an id it cannot detect. The 401 for a key Redmine rejects and the 503 for an unanswered check always have a `null` id, because by then the server has read part of the body.
 
 Claude Code:
 
@@ -100,6 +102,9 @@ Cursor, in `.cursor/mcp.json` or `~/.cursor/mcp.json`, with the key read from th
 - The server listens on `127.0.0.1`. To listen anywhere else, pass the address with `--host`.
 - On a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, the address itself, the host of `REDMINE_MCP_PUBLIC_URL`, or a hostname that `--allow-host` lists. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it. A rebound page can also reach a server on another private address, such as `0.0.0.0` in a container, but there the server cannot know every name its clients use. So on any other address the server checks `Host` against the same list only when `--allow-host` is given.
 - A request with an `Origin` header gets 403 unless `--allow-origin` lists it. Browsers send `Origin`; command-line and desktop clients do not, so they pass. See [Browser clients and CORS](#browser-clients-and-cors).
+- Before Redmine accepts a key, the server reads at most 64 KiB of the body and waits at most a second for it. A request with the `X-Redmine-API-Key` header passes its body to the MCP server until the body grows past 64 KiB or is still arriving after a second. Then the server asks Redmine for `GET /users/current.json` with that key, once, and reads nothing more until Redmine answers. A key Redmine refuses gets 401. `initialize`, `tools/list` and most tool calls are smaller and arrive at once, so they cost no extra call. `initialize` and `tools/list` never reach Redmine, so they succeed with any key, and a tool call with a wrong key still shows Redmine's 401 as the tool's error result.
+- That check makes large and slow requests depend on Redmine. When Redmine does not answer that request within 8 seconds, or answers it with an error other than 401, a request with a body over 64 KiB or one still arriving after a second gets 503, even a `tools/list` that needs nothing from Redmine. Each 503 writes one line to stderr, and a refused key writes none, so a client that keeps sending large bodies during an outage makes the server log one line per request.
+- A key that Redmine accepts, or a valid OAuth token, may still send up to 4 MiB as slowly as it likes, until Node's 300-second request timeout closes the connection. A proxy closes it sooner: see `client_body_timeout` in [Same-origin deployment](#same-origin-deployment).
 - The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so for remote use put a proxy that terminates TLS in front of the server and keep the server on loopback. Caddy passes the client's `Host` to the server unless told otherwise. Rewrite it as below, or keep it and start the server with `--allow-host mcp.example.com`:
 
 ```caddy
@@ -382,9 +387,13 @@ server {
         proxy_set_header Cookie $redmine_mcp_cookie;
         proxy_request_buffering off;
         proxy_buffering off;
+        client_max_body_size 4m;
+        client_body_timeout 60s;
     }
 }
 ```
+
+nginx refuses a body over 1 MB with 413 unless `client_max_body_size` raises it, and the server takes up to 4 MiB. `client_body_timeout` ends a request whose body stops arriving for that long, 60 seconds by default, with 408. It applies to every client, including one whose key Redmine accepts, which the server itself waits on until Node's 300-second request timeout.
 
 Caddy:
 
@@ -563,7 +572,7 @@ serveStdio(() =>
 
 `access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. To enable `path` uploads and `attachments_save`, pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. The main entry never imports file system code, so a server without `files` cannot touch local files. `observe` gets each request the server sends to Redmine, with its `method`, its `url`, and a `status` that is set once Redmine answers, and each call that the access mode refuses. `createRedmineMcpHandler` uses it to pick the status of an OAuth request.
 
-`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. With `publicUrl`, it routes the endpoint and the [OAuth paths](#endpoints) itself, so give it every request; `oauth` takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, `store` (see [Grant store](#grant-store)), and the required `fetchClientMetadata`. To accept tokens from another authorization server instead, pass `verifier: { issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback, or when you know every name clients reach the handler by, as `--allow-host` does; without it the handler does not check `Host`.
+`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. With `publicUrl`, it routes the endpoint and the [OAuth paths](#endpoints) itself, so give it every request; `oauth` takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, `store` (see [Grant store](#grant-store)), and the required `fetchClientMetadata`. To accept tokens from another authorization server instead, pass `verifier: { issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. The key check of [Security defaults](#security-defaults) goes through the same `fetch` and `onEvent`, gives up after the shorter of `timeoutMs` and 8 seconds, and reports an unanswered check to `onError`. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback, or when you know every name clients reach the handler by, as `--allow-host` does; without it the handler does not check `Host`.
 
 Bun:
 
