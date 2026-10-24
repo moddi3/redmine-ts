@@ -90,6 +90,13 @@ export type Uploads = {
   content_type?: string;
 }[];
 
+export interface IssueChild {
+  id: number;
+  tracker?: IdName;
+  subject: string;
+  children?: IssueChild[];
+}
+
 export interface Issue {
   id: number;
   project?: IdName;
@@ -123,11 +130,7 @@ export interface Issue {
     comments?: string;
     committed_on?: string;
   }[];
-  children?: {
-    id?: number;
-    tracker?: IdName;
-    subject?: string;
-  }[];
+  children?: IssueChild[];
   attachments?: Attachment[];
   relations?: {
     id?: number;
@@ -284,6 +287,9 @@ export interface User {
   custom_fields?: CustomFieldValue[];
   auth_source?: IdName;
   groups?: IdName[];
+  /**
+   * Project memberships visible to the current user. Memberships in archived projects are excluded.
+   */
   memberships?: {
     id: number;
     project: IdName;
@@ -526,6 +532,9 @@ export interface Group {
   builtin?: string;
   custom_fields?: CustomFieldValue[];
   users?: IdName[];
+  /**
+   * Project memberships visible to the current user. Memberships in archived projects are excluded.
+   */
   memberships?: {
     id: number;
     project: IdName;

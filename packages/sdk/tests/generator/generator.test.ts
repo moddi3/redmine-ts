@@ -18,11 +18,11 @@ const withSpecs = (edit: (byVersion: Record<string, SpecFile["doc"]>) => void): 
 };
 
 describe("drift between vendored versions", () => {
-  test("is one added operation and four added properties, with no conflicts", () => {
+  test("is one added operation, one added schema and four added properties, with the child shape resolved", () => {
     expect(generated.report.drift).toEqual({
       addedOps: [{ id: "removeUsersFromGroup", since: "7.0" }],
       removedOps: [],
-      addedSchemas: [],
+      addedSchemas: [{ name: "issue_child", since: "7.0" }],
       addedProperties: expect.arrayContaining([
         { pointer: "#/components/schemas/custom_field/properties/is_for_all", since: "7.0" },
         {
@@ -33,9 +33,29 @@ describe("drift between vendored versions", () => {
         { pointer: "#/components/schemas/wiki_page.summary/properties/project", since: "7.0" },
       ]),
       conflicts: [],
-      resolved: [],
+      resolved: Object.entries(overlay.resolved).map(([pointer, reason]) => ({ pointer, reason })),
     });
     expect(generated.report.drift.addedProperties).toHaveLength(4);
+  });
+
+  test("a schema new to 7.0 dates from the first version that can send it", async () => {
+    const docBefore = (files: Record<string, string>, type: string) => {
+      const text = files["src/generated/schemas.ts"]!;
+      const head = text.slice(0, text.indexOf(`export interface ${type} `));
+      return head.slice(head.lastIndexOf("\n\n"));
+    };
+    expect(docBefore(generated.files, "IssueChild")).not.toContain("@since");
+
+    const badged = withSpecs((v) => {
+      v["7.0"]!.components.schemas.issue_badge = {
+        type: "object",
+        properties: { label: { type: "string" } },
+      };
+      v["7.0"]!.components.schemas.issue!.properties!.badge = {
+        $ref: "#/components/schemas/issue_badge",
+      };
+    });
+    expect(docBefore((await generate(badged)).files, "IssueBadge")).toContain("@since 7.0");
   });
 
   test("a changed property type fails generation until the overlay resolves it", async () => {
@@ -46,9 +66,9 @@ describe("drift between vendored versions", () => {
     await expect(generate(changed)).rejects.toThrow(pointer);
     const resolved = await generate(changed, {
       ...overlay,
-      resolved: { [pointer]: "6.1 sent strings" },
+      resolved: { ...overlay.resolved, [pointer]: "6.1 sent strings" },
     });
-    expect(resolved.report.drift.resolved).toEqual([{ pointer, reason: "6.1 sent strings" }]);
+    expect(resolved.report.drift.resolved).toContainEqual({ pointer, reason: "6.1 sent strings" });
   });
 
   test("a removed property fails generation", async () => {
@@ -108,6 +128,14 @@ describe("canonical inputs", () => {
 });
 
 describe("operation descriptors", () => {
+  test("stability comes from overlay.stableTags, which must name real tags", async () => {
+    expect(ops.getIssues.stability).toBe("stable");
+    expect(ops.getVersionsByProject.stability).toBe("alpha");
+    await expect(generate(specs, { ...overlay, stableTags: ["Isues"] })).rejects.toThrow(
+      "overlay.stableTags names unknown tag Isues",
+    );
+  });
+
   test("removeUsersFromGroup sends user_ids[] as repeated query params and no body", () => {
     expect(ops.removeUsersFromGroup).toMatchObject({
       method: "DELETE",

@@ -134,7 +134,8 @@ export interface GetIssuesByProjectWhere {
    * Filter by issue ID.
    * Format: `[operator]value`
    * Operators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)
-   * Examples: `1`, `>=100`, `><1|100`
+   * For equality, separate multiple IDs with commas. A pipe separates range bounds, not IDs in an equality list.
+   * Examples: `1`, `1,2`, `>=100`, `><1|100`
    */
   issue_id?: Cond<string | number, "range" | "presence">;
   /**
@@ -488,6 +489,10 @@ export interface CreateIssueUnderProjectInput {
   done_ratio?: number;
   category_id?: number | null;
   fixed_version_id?: number | null;
+  /**
+   * ID of the assignee. If omitted or null, Redmine uses the first assignable default assignee, checking the category before the project.
+   * Default assignees that cannot be assigned (e.g. locked users) are skipped.
+   */
   assigned_to_id?: number | null;
   parent_issue_id?: number | null;
   custom_fields?: CustomFields;

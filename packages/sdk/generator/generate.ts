@@ -124,6 +124,9 @@ function schemaTypes(merged: Merged, ops: OpModel[]): SchemaType[] {
   }
   const added = new Map(merged.drift.addedSchemas.map((s) => [s.name, s.since]));
   const exposedBy = new Map<string, OpModel[]>();
+  // A schema new to a later spec can name a shape older servers already send (issue_child in 7.0.2-r1),
+  // so its type dates from the first version whose payloads can hold it.
+  const reachable = new Map<string, string>();
   for (const m of merged.ops) {
     const reached = new Set<string>();
     const contents = [
@@ -131,8 +134,10 @@ function schemaTypes(merged: Merged, ops: OpModel[]): SchemaType[] {
       m.op.requestBody?.content,
     ];
     for (const c of contents)
-      for (const { schema } of Object.values(c ?? {}))
+      for (const { schema } of Object.values(c ?? {})) {
         refsIn(schema, doc.components.schemas, reached);
+        sinceIn(schema, m.since, doc.components.schemas, merged.versions, reachable);
+      }
     const op = ops.find((o) => o.descriptor.id === m.op.operationId)!;
     for (const name of reached) exposedBy.set(name, [...(exposedBy.get(name) ?? []), op]);
   }
@@ -143,8 +148,9 @@ function schemaTypes(merged: Merged, ops: OpModel[]): SchemaType[] {
     const type = pascal(name);
     const exposing = exposedBy.get(name) ?? [];
     const alpha = exposing.length > 0 && exposing.every((o) => o.descriptor.stability === "alpha");
+    const since = added.has(name) ? (reachable.get(name) ?? added.get(name)) : undefined;
     const comment = jsDoc(s.description, [
-      ...sinceTag(added.get(name)),
+      ...sinceTag(since === merged.versions[0] ? undefined : since),
       ...(alpha ? ["@stability alpha"] : []),
     ]);
     const text = s.properties
@@ -169,6 +175,33 @@ function refsIn(s: Schema | undefined, components: Record<string, Schema>, acc: 
   for (const o of s.oneOf ?? []) refsIn(o, components, acc);
   refsIn(s.items, components, acc);
   if (typeof s.additionalProperties === "object") refsIn(s.additionalProperties, components, acc);
+}
+
+/** For each component schema reachable from `s`, the earliest version whose payloads can hold it. */
+function sinceIn(
+  s: Schema | undefined,
+  at: string,
+  components: Record<string, Schema>,
+  versions: string[],
+  acc: Map<string, string>,
+): void {
+  if (!s) return;
+  const own = s["x-since"];
+  const here = own && versions.indexOf(own) > versions.indexOf(at) ? own : at;
+  if (s.$ref) {
+    const name = refName(s.$ref);
+    const seen = acc.get(name);
+    if (seen === undefined || versions.indexOf(here) < versions.indexOf(seen)) {
+      acc.set(name, here);
+      sinceIn(components[name], here, components, versions, acc);
+    }
+    return;
+  }
+  for (const p of Object.values(s.properties ?? {})) sinceIn(p, here, components, versions, acc);
+  for (const o of s.oneOf ?? []) sinceIn(o, here, components, versions, acc);
+  sinceIn(s.items, here, components, versions, acc);
+  if (typeof s.additionalProperties === "object")
+    sinceIn(s.additionalProperties, here, components, versions, acc);
 }
 
 function schemasFile(schemas: SchemaType[]): string {

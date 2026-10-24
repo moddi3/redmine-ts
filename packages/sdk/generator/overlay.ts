@@ -39,9 +39,18 @@ export interface Overlay {
    */
   sparseIncludes: readonly string[];
   safety: Readonly<Record<string, Safety>>;
+  /**
+   * Tags whose operations are stable; the rest are alpha. The spec's tag descriptions marked these Stable
+   * through 7.0.1-r1, after the status column of https://www.redmine.org/projects/redmine/wiki/Rest_api,
+   * and 7.0.2-r1 dropped them.
+   */
+  stableTags: readonly string[];
   /** JSON pointer of a non-additive change -> why the latest shape is right. */
   resolved: Readonly<Record<string, string>>;
 }
+
+const ISSUE_CHILD =
+  "7.0.2-r1 moved the inline child shape into the recursive issue_child. Redmine 6.1 already renders nested children with id and subject (IssuesHelper#render_api_issue_children), so the 7.0 shape holds for both versions.";
 
 export const overlay: Overlay = {
   namespaces: {
@@ -102,5 +111,11 @@ export const overlay: Overlay = {
     "auth_source",
   ],
   safety: {},
-  resolved: {},
+  stableTags: ["Issues", "Projects", "Users", "Time Entries", "News"],
+  resolved: {
+    "#/components/schemas/issue/properties/children/items": ISSUE_CHILD,
+    "#/components/schemas/issue/properties/children/items/properties/id": ISSUE_CHILD,
+    "#/components/schemas/issue/properties/children/items/properties/tracker": ISSUE_CHILD,
+    "#/components/schemas/issue/properties/children/items/properties/subject": ISSUE_CHILD,
+  },
 };

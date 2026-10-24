@@ -138,7 +138,7 @@ import type {
 import type { RedmineVersion } from "./versions.ts";
 
 /**
- * Issues. Status: Stable, Availability: 1.0
+ * Issues.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Issues
  */
 export interface IssuesNamespace {
@@ -203,7 +203,7 @@ export interface IssuesNamespace {
 }
 
 /**
- * Projects. Status: Stable, Availability: 1.0
+ * Projects.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Projects
  */
 export interface ProjectsNamespace {
@@ -273,7 +273,7 @@ export interface ProjectsNamespace {
 }
 
 /**
- * Project Memberships. Status: Alpha, Availability: 1.4
+ * Project Memberships.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Memberships
  */
 export interface MembershipsNamespace {
@@ -316,7 +316,7 @@ export interface MembershipsNamespace {
 }
 
 /**
- * Users. Status: Stable, Availability: 1.1
+ * Users.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Users
  */
 export interface UsersNamespace {
@@ -367,7 +367,7 @@ export interface UsersNamespace {
 }
 
 /**
- * Time Entries. Status: Stable, Availability: 1.1
+ * Time Entries.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_TimeEntries
  */
 export interface TimeEntriesNamespace {
@@ -403,7 +403,7 @@ export interface TimeEntriesNamespace {
 }
 
 /**
- * News. Status: Stable, Availability: 1.1
+ * News.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_News
  */
 export interface NewsNamespace {
@@ -448,7 +448,7 @@ export interface NewsNamespace {
 }
 
 /**
- * Issue Relations. Status: Alpha, Availability: 1.3
+ * Issue Relations.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_IssueRelations
  */
 export interface RelationsNamespace {
@@ -482,7 +482,7 @@ export interface RelationsNamespace {
 }
 
 /**
- * Versions. Status: Alpha, Availability: 1.3
+ * Versions.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Versions
  */
 export interface VersionsNamespace {
@@ -523,7 +523,7 @@ export interface VersionsNamespace {
 }
 
 /**
- * Wiki Pages. Status: Alpha, Availability: 2.2
+ * Wiki Pages.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_WikiPages
  */
 export interface WikiNamespace {
@@ -570,7 +570,7 @@ export interface WikiNamespace {
 }
 
 /**
- * Queries. Status: Alpha, Availability: 1.3
+ * Queries.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Queries
  */
 export interface QueriesNamespace {
@@ -583,7 +583,7 @@ export interface QueriesNamespace {
 }
 
 /**
- * Attachments. Status: Beta, Availability: 1.3
+ * Attachments.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Attachments
  */
 export interface AttachmentsNamespace {
@@ -610,7 +610,7 @@ export interface AttachmentsNamespace {
 }
 
 /**
- * Issue Statuses. Status: Alpha, Availability: 1.3
+ * Issue Statuses.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_IssueStatuses
  */
 export interface IssueStatusesNamespace {
@@ -623,7 +623,7 @@ export interface IssueStatusesNamespace {
 }
 
 /**
- * Trackers. Status: Alpha, Availability: 1.3
+ * Trackers.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Trackers
  */
 export interface TrackersNamespace {
@@ -636,7 +636,7 @@ export interface TrackersNamespace {
 }
 
 /**
- * Enumerations. Status: Alpha, Availability: 2.2
+ * Enumerations.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Enumerations
  */
 export interface EnumerationsNamespace {
@@ -672,7 +672,7 @@ export interface EnumerationsNamespace {
 }
 
 /**
- * Issue Categories. Status: Alpha, Availability: 1.3
+ * Issue Categories.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_IssueCategories
  */
 export interface IssueCategoriesNamespace {
@@ -713,7 +713,7 @@ export interface IssueCategoriesNamespace {
 }
 
 /**
- * Roles. Status: Alpha, Availability: 1.4
+ * Roles.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Roles
  */
 export interface RolesNamespace {
@@ -733,7 +733,7 @@ export interface RolesNamespace {
 }
 
 /**
- * Groups. Status: Alpha, Availability: 2.1
+ * Groups.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Groups
  */
 export interface GroupsNamespace {
@@ -791,7 +791,7 @@ export interface GroupsNamespace {
 }
 
 /**
- * Custom Fields. Status: Alpha, Availability: 2.4
+ * Custom Fields.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_CustomFields
  */
 export interface CustomFieldsNamespace {
@@ -804,7 +804,7 @@ export interface CustomFieldsNamespace {
 }
 
 /**
- * Search. Status: Alpha, Availability: 3.3
+ * Search.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Search
  */
 export interface SearchNamespace {
@@ -824,7 +824,7 @@ export interface SearchNamespace {
 }
 
 /**
- * Files. Status: Alpha, Availability: 3.4
+ * Files.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Files
  */
 export interface FilesNamespace {
@@ -846,7 +846,7 @@ export interface FilesNamespace {
 }
 
 /**
- * My Account. Status: Alpha, Availability: 4.1
+ * My Account.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_MyAccount
  */
 export interface MyAccountNamespace {
@@ -868,7 +868,7 @@ export interface MyAccountNamespace {
 }
 
 /**
- * Journals. Status: Alpha, Availability: 5.0
+ * Journals.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Journals
  */
 export interface JournalsNamespace {
@@ -883,7 +883,7 @@ export interface JournalsNamespace {
 }
 
 /**
- * Repositories. Undocumented
+ * Repositories.
  */
 export interface RepositoriesNamespace {
   /**
@@ -904,7 +904,7 @@ export interface RepositoriesNamespace {
 }
 
 /**
- * Groups. Status: Alpha, Availability: 2.1
+ * Groups.
  * @see https://www.redmine.org/projects/redmine/wiki/Rest_Groups
  */
 export interface GroupsSince70 {
