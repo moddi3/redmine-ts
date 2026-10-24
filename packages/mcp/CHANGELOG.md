@@ -1,5 +1,22 @@
 # @redmine-ts/mcp
 
+## 0.3.0
+
+### Minor Changes
+
+- d14dc40: Over OAuth, two failures inside a request now get an HTTP status that makes clients act, instead of an error result in HTTP 200:
+
+  - When Redmine refuses the credential inside a valid token, because the Redmine application or token was revoked or the API key behind an API-key sign-in was reset, the request answers 401 `invalid_token` with the Bearer challenge. Clients refresh, the refresh fails, and they ask the person to sign in again.
+  - When a call needs more than the token's scope and the server's own mode allows it, the request answers 403 `insufficient_scope` and names the scopes the call needs. `raw_request` needs the scope of the method it sends.
+
+  OAuth responses now arrive whole when the call has finished, on 2025-era requests too, so the status can still change. A request in which Redmine may have applied a write keeps its results, so a retry cannot repeat the write. The `X-Redmine-API-Key` header works as before. A Redmine 403, a Redmine 401 for a path outside its API such as `my/page.js`, and a call the server's own mode refuses are still error results. With either credential, the error result for such a 401 now says to end the path in `.json` instead of asking for a new sign-in. The error result for a refused call now names the request's access mode as "the read-only access mode", since a narrower token can set it.
+
+  `createRedmineMcpServer` takes an `observe` option, which gets each request the server sends to Redmine and each call that the access mode refuses.
+
+### Patch Changes
+
+- 0acce2b: Add `--allow-host` for a proxy that passes the client's `Host` through. The flag adds hostnames to the `Host` check on loopback. On another address, such as `0.0.0.0` in a container, it turns the check on against the same list. The server's own JSON-RPC errors, the 401 for a missing key and the 403s for `Origin` and `Host`, now carry the request's `id` instead of `null` when the body is a single request of at most 64 KiB with a declared length. It reads at most that much and waits at most a second for it, so a large or stalled body does not hold up the error. `--allow-origin`, `--allow-host` and `--allow-client` now refuse a value with `*` at startup, because they match names exactly and a wildcard matched only itself.
+
 ## 0.2.0
 
 ### Minor Changes
