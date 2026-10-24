@@ -142,15 +142,32 @@ describeServers("Streamable HTTP", (server) => {
     }
   });
 
-  it("uploads a 3 MB file over HTTP with a user's key", async () => {
+  it("attaches a 5 MiB file uploaded over HTTP with a user's key", async () => {
     const client = await connect(full.url, server.userKey, "modern");
-    const file = Buffer.alloc(3_000_000, "redmine");
-    const result = await client.callTool({
+    const file = Buffer.alloc(5 * 1024 * 1024, "redmine");
+    const upload = await client.callTool({
       name: "attachments_upload",
       arguments: { filename: "large.bin", content_base64: file.toString("base64") },
     });
-    expect(result.isError, texts(result).join("\n")).toBeFalsy();
-    expect(result.structuredContent).toMatchObject({ token: expect.any(String) });
+    expect(upload.isError, texts(upload).join("\n")).toBeFalsy();
+    const issue = await client.callTool({
+      name: "issues_create",
+      arguments: {
+        project_id: server.projectIdentifier,
+        subject: `MCP 5 MiB upload ${Date.now().toString(36)}`,
+        uploads: [upload.structuredContent],
+      },
+    });
+    expect(issue.isError, texts(issue).join("\n")).toBeFalsy();
+    const issue_id = (issue.structuredContent as { id: number }).id;
+    created.push(issue_id);
+    const read = await client.callTool({
+      name: "issues_get",
+      arguments: { issue_id, include: ["attachments"] },
+    });
+    expect(read.structuredContent).toMatchObject({
+      attachments: [{ filename: "large.bin", filesize: 5 * 1024 * 1024 }],
+    });
   });
 
   it("answers 503 to a body over 64 KiB while Redmine is down, and still serves small requests", async () => {

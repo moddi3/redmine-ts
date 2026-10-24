@@ -8,7 +8,7 @@ import type { Annotations, LocalFiles, ToolSpec } from "../tools.ts";
 import { defineTool, invalidInput } from "./define.ts";
 
 /** Redmine's default attachment size limit. A larger upload is refused before it is sent. */
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES: number = 5 * 1024 * 1024;
 /** Images up to this size come back as image content. */
 const MAX_IMAGE_BYTES = 1024 * 1024;
 /** Text files up to this size come back as text. */
