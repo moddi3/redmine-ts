@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { parseCli } from "../../src/config.ts";
+import { createRedmineMcpHandler } from "../../src/http.ts";
 import { publicFetch } from "../../src/node.ts";
 
 const KEY = "0d1e2a3d4b5e6e7f8a9b0c1d2e3f4a5b6c7d8e9f";
@@ -151,6 +152,26 @@ describe("parseCli --http", () => {
     expect(command.kind === "http" && command.options.allowedHosts).toEqual(allowedHosts);
   });
 
+  it.each(["127.0.0.1", "0.0.0.0"])(
+    "accepts each --allow-host hostname in Host on %s, next to localhost, and refuses others",
+    async (host) => {
+      const argv = ["--http", "--host", host, "--allow-host", "mcp.example.com"];
+      const command = parseCli([...argv, "--allow-host", "[fd00::1]"], url);
+      if (command.kind !== "http") throw new Error(JSON.stringify(command));
+      const handle = createRedmineMcpHandler(command.options);
+      const status = async (hostHeader: string) =>
+        (await handle(new Request("http://localhost/mcp", { headers: { host: hostHeader } })))
+          .status;
+      const missingKey = 401;
+      const refusedHost = 403;
+      expect(await status("mcp.example.com")).toBe(missingKey);
+      expect(await status("mcp.example.com:443")).toBe(missingKey);
+      expect(await status("[fd00::1]:3737")).toBe(missingKey);
+      expect(await status("localhost:3737")).toBe(missingKey);
+      expect(await status("evil.example")).toBe(refusedHost);
+    },
+  );
+
   it.each([
     ["0", 0],
     ["8080", 8080],
@@ -191,6 +212,12 @@ describe("parseCli --http", () => {
     [["--allow-origin", "ftp://app.example.com"], "--allow-origin takes a hostname"],
     [["--allow-origin", "app.example.com:8443"], "--allow-origin takes a hostname"],
     [["--allow-origin", "App.Example.com"], "--allow-origin takes a hostname"],
+    [["--allow-host", "Mcp.Example.com"], "--allow-host takes a hostname"],
+    [["--allow-host", "mcp.example.com:443"], "--allow-host takes a hostname"],
+    [["--allow-host", "https://mcp.example.com"], "--allow-host takes a hostname"],
+    [["--allow-host", "*.example.com"], "--allow-host does not support wildcards"],
+    [["--allow-origin", "*"], "--allow-origin does not support wildcards"],
+    [["--allow-origin", "https://*.example.com"], "--allow-origin does not support wildcards"],
   ])("explains a bad flag %j", (argv, message) => {
     const command = parseCli(["--http", ...argv], url);
     expect(command.kind === "error" && command.message).toContain(message);
@@ -208,6 +235,10 @@ describe("parseCli --http", () => {
     expect(parseCli(["--port", "80", "--allow-origin", "a.example"], env)).toEqual({
       kind: "error",
       message: "--port, --allow-origin need --http",
+    });
+    expect(parseCli(["--allow-host", "mcp.example.com"], env)).toEqual({
+      kind: "error",
+      message: "--allow-host needs --http",
     });
   });
 });
@@ -302,6 +333,7 @@ describe("parseCli --http with OAuth", () => {
     [{ REDMINE_OAUTH_CLIENT_SECRET: " " }, [], "REDMINE_OAUTH_CLIENT_SECRET is required"],
     [{}, ["--api-key-login"], "--api-key-login replaces the Redmine application"],
     [{}, ["--allow-client", "https://claude.ai"], "--allow-client takes a hostname"],
+    [{}, ["--allow-client", "*.example.com"], "--allow-client does not support wildcards"],
     [
       { REDMINE_MCP_AUTH_SECRET: undefined },
       [],

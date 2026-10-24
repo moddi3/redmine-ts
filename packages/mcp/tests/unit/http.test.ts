@@ -37,15 +37,27 @@ function handler(options: Partial<RedmineMcpHandlerOptions> = {}) {
   return { handle, keys: redmine.keys, errors };
 }
 
-/** Calls the handler in place of the network, adding the Host header a real fetch puts on the wire. */
+/** Calls the handler in place of the network, adding the Host and Content-Length a real fetch sends. */
 function direct(handle: Handler, headers: Record<string, string> = {}): typeof fetch {
   return async (input, init) => {
     const request = new Request(input, init);
+    const body = request.body && (await request.arrayBuffer());
     const sent = new Headers(request.headers);
     sent.set("host", new URL(request.url).host);
+    if (body) sent.set("content-length", String(body.byteLength));
     for (const [name, value] of Object.entries(headers)) sent.set(name, value);
-    return handle(new Request(request, { headers: sent }));
+    return handle(new Request(request, { method: request.method, headers: sent, body }));
   };
+}
+
+function stalled(headers: Record<string, string>): Request {
+  const start = new TextEncoder().encode('{"jsonrpc":"2.0","id":7,"method":"tools/list"');
+  return new Request("http://localhost:3737/mcp", {
+    method: "POST",
+    headers: { host: "localhost:3737", "content-type": "application/json", ...headers },
+    body: new ReadableStream({ start: (controller) => controller.enqueue(start) }),
+    duplex: "half",
+  });
 }
 
 async function connect(
@@ -65,12 +77,16 @@ async function connect(
   return client;
 }
 
-/** One tools/list POST in the 2025 shape, which needs no handshake on a stateless server. */
-function post(handle: Handler, headers: Record<string, string>): Promise<Response> {
+/** Defaults to tools/list in the 2025 shape, which needs no handshake on a stateless server. */
+function post(
+  handle: Handler,
+  headers: Record<string, string>,
+  body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+): Promise<Response> {
   return direct(handle, headers)("http://localhost:3737/mcp", {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    body,
   });
 }
 
@@ -83,12 +99,68 @@ describe("createRedmineMcpHandler", () => {
       expect(response.status).toBe(401);
       expect(await response.json()).toMatchObject({
         jsonrpc: "2.0",
-        id: null,
+        id: 1,
         error: { message: expect.stringContaining("X-Redmine-API-Key header") },
       });
       expect(keys).toEqual([]);
     },
   );
+
+  it.each([
+    ["a string id", { jsonrpc: "2.0", id: "call-7", method: "tools/list" }, "call-7"],
+    ["a number id", { jsonrpc: "2.0", id: 7, method: "tools/list" }, 7],
+    ["a notification", { jsonrpc: "2.0", method: "notifications/initialized" }, null],
+    ["a batch", [{ jsonrpc: "2.0", id: 7, method: "tools/list" }], null],
+    ["a response", { jsonrpc: "2.0", id: 7, result: {} }, null],
+  ])("answers the 401 for %s with that request's id, or null", async (_, body, id) => {
+    const response = await post(handler().handle, {}, JSON.stringify(body));
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id });
+  });
+
+  it("answers the 401 with the id of a body up to 64 KiB, and null past it or for broken JSON", async () => {
+    const { handle } = handler();
+    const padded = (bytes: number) => {
+      const request = { jsonrpc: "2.0", id: 7, method: "tools/list", params: { pad: "" } };
+      request.params.pad = "x".repeat(bytes - JSON.stringify(request).length);
+      return JSON.stringify(request);
+    };
+    for (const [body, id] of [
+      [padded(64 * 1024), 7],
+      [padded(64 * 1024 + 1), null],
+      ['{"jsonrpc":"2.0","id":7,', null],
+    ] as const) {
+      const response = await post(handle, {}, body);
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id });
+    }
+  });
+
+  it.each([
+    ["no declared length", {}],
+    ["a declared length over 64 KiB", { "content-length": String(64 * 1024 + 1) }],
+  ])(
+    "refuses at once, with id null, a body with %s that never ends",
+    async (_, length) => {
+      const { handle } = handler({ allowedHosts: ["localhost"] });
+      for (const [headers, status] of [
+        [{}, 401],
+        [{ origin: "https://evil.example" }, 403],
+        [{ host: "evil.example" }, 403],
+      ] as const) {
+        const response = await handle(stalled({ ...length, ...headers }));
+        expect(response.status).toBe(status);
+        expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id: null });
+      }
+    },
+    1000,
+  );
+
+  it("refuses with id null a small body that stalls, instead of waiting for its end", async () => {
+    const response = await handler().handle(stalled({ "content-length": "100" }));
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id: null });
+  }, 3000);
 
   it("refuses a browser Origin that is not allowed with 403, before the key is checked", async () => {
     const { handle } = handler({ allowedOrigins: ["app.example.com"] });
@@ -274,6 +346,24 @@ describe("createRedmineMcpHandler", () => {
     });
     expect((await post(handle, { ...key, Host: "127.0.0.1:3737" })).status).toBe(200);
     expect((await post(handler().handle, { ...key, Host: "mcp.example.com" })).status).toBe(200);
+  });
+
+  it("answers a refused Host or Origin with a JSON-RPC error naming the request's id", async () => {
+    const { handle } = handler({ allowedHosts: ["localhost"] });
+    const body = JSON.stringify({ jsonrpc: "2.0", id: "call-7", method: "tools/list" });
+    for (const [headers, message] of [
+      [{ Host: "evil.example" }, "Invalid Host: evil.example"],
+      [{ Origin: "https://evil.example" }, "Invalid Origin: evil.example"],
+    ] as const) {
+      const response = await post(handle, headers, body);
+      expect(response.status).toBe(403);
+      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(await response.json()).toEqual({
+        jsonrpc: "2.0",
+        id: "call-7",
+        error: { code: -32000, message },
+      });
+    }
   });
 
   it("sends each client's own key to Redmine, also when their calls overlap", async () => {

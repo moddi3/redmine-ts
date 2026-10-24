@@ -6,10 +6,12 @@
 import {
   bearerAuthChallengeResponse,
   createMcpHandler,
-  hostHeaderValidationResponse,
+  isJSONRPCRequest,
   OAuthError,
   OAuthErrorCode,
-  originValidationResponse,
+  readRequestBody,
+  validateHostHeader,
+  validateOriginHeader,
   verifyBearerToken,
 } from "@modelcontextprotocol/server";
 import type { AuthInfo, OAuthTokenVerifier } from "@modelcontextprotocol/server";
@@ -72,7 +74,10 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
    * Default: none.
    */
   allowedOrigins?: readonly string[];
-  /** Hostnames the Host header may name, against DNS rebinding. Set it when listening on loopback. */
+  /**
+   * Hostnames the Host header may name, against DNS rebinding. Set it when listening on loopback, or
+   * when you know every name clients reach the handler by.
+   */
   allowedHosts?: readonly string[];
   /** Requests the MCP SDK rejects and failures outside a tool result. None of them carries the key. */
   onError?: (error: Error) => void;
@@ -180,11 +185,11 @@ export function createRedmineMcpHandler(
 
   async function endpoint(request: Request): Promise<Response> {
     const origin = request.headers.get("origin");
-    const rejected =
+    const checked =
       origin !== null && exactOrigins.has(origin)
         ? undefined
-        : originValidationResponse(request, hostnames);
-    if (rejected !== undefined) return rejected;
+        : validateOriginHeader(origin, hostnames);
+    if (checked?.ok === false) return refuse(request, 403, checked.message);
     // Origin is empty or allowed from here on; an empty one is no browser's.
     const cors = origin !== null && origin !== "" ? origin : undefined;
     if (cors !== undefined && isPreflight(request)) return preflight(cors);
@@ -196,7 +201,7 @@ export function createRedmineMcpHandler(
         authInfo: { token: apiKey, clientId: "", scopes: [], extra: { redmine } },
       });
     } else if (bearer === undefined) {
-      response = missingKey();
+      response = await missingKey(request);
     } else {
       const authInfo = await bearer.authenticate(request);
       response = authInfo instanceof Response ? authInfo : await mcp.fetch(request, { authInfo });
@@ -205,8 +210,8 @@ export function createRedmineMcpHandler(
   }
 
   return async (request) => {
-    const rejected = hosts && hostHeaderValidationResponse(request, hosts);
-    if (rejected !== undefined) return rejected;
+    const host = hosts && validateHostHeader(request.headers.get("host"), hosts);
+    if (host?.ok === false) return refuse(request, 403, host.message);
     if (paths === undefined) return endpoint(request);
     // Only the path counts: behind a proxy, the URL's origin is the server's, not the public one.
     const path = comparablePath(new URL(request.url).pathname);
@@ -378,17 +383,38 @@ function withCors(response: Response, origin: string): Response {
   return wrapped;
 }
 
+const ID_BODY_LIMIT = 64 * 1024;
+const ID_BODY_WAIT_MS = 1000;
+
+async function requestId(request: Request): Promise<string | number | null> {
+  const length = Number(request.headers.get("content-length"));
+  if (!(length > 0 && length <= ID_BODY_LIMIT)) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ID_BODY_WAIT_MS);
+  });
+  try {
+    const body = await Promise.race([readRequestBody(request, ID_BODY_LIMIT), late]);
+    if (body === null || body.tooLarge) return null;
+    const message: unknown = JSON.parse(body.text);
+    return isJSONRPCRequest(message) ? message.id : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function refuse(request: Request, status: number, message: string): Promise<Response> {
+  const id = await requestId(request);
+  return Response.json({ jsonrpc: "2.0", error: { code: -32000, message }, id }, { status });
+}
+
 /** No WWW-Authenticate: no scheme names a custom header, and a Bearer challenge sends clients to OAuth. */
-function missingKey(): Response {
-  return Response.json(
-    {
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: `Send the API key of a Redmine user in the ${API_KEY_HEADER} header. Redmine shows it under My account, API access key.`,
-      },
-      id: null,
-    },
-    { status: 401 },
+function missingKey(request: Request): Promise<Response> {
+  return refuse(
+    request,
+    401,
+    `Send the API key of a Redmine user in the ${API_KEY_HEADER} header. Redmine shows it under My account, API access key.`,
   );
 }
