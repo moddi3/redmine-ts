@@ -16,7 +16,7 @@ The MCP server builds its tools from the SDK's `@redmine-ts/sdk/catalog` entrypo
 
 The SDK's types, operation registry, and namespaces are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi). It is an unofficial OpenAPI 3.0.3 description of the Redmine REST API, tested against live Redmine servers and released under the MIT license. Without it, this project would have had to describe roughly 94 operations and 39 schemas by hand.
 
-This repo vendors pinned tags of the spec in [spec/redmine-openapi/](spec/redmine-openapi/), currently `6.1.3-r1` and `7.0.1-r1`, together with its license. [spec/README.md](spec/README.md) explains how the copy is updated. The generator's overlay only records naming and visibility decisions for this SDK. It does not patch the spec, so a wrong field or operation belongs upstream: report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues).
+This repo vendors pinned tags of the spec in [spec/redmine-openapi/](spec/redmine-openapi/), currently `6.1.3-r1` and `7.0.2-r1`, together with its license. [spec/README.md](spec/README.md) explains how the copy is updated. The generator's overlay only records naming and visibility decisions for this SDK. It does not patch the spec, so a wrong field or operation belongs upstream: report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues).
 
 ## Set up
 
