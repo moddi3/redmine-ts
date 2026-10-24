@@ -422,3 +422,120 @@ describe("a failed call hands back its uploads", () => {
     expect(error.uploads).toBeUndefined();
   });
 });
+
+describe("streams, which are read once", () => {
+  const stream = (): ReadableStream<Uint8Array> =>
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+
+  test("a stream uploads once, without a retry, and a failed one stays in error.uploads", async () => {
+    const { rm, requests } = client(() => empty(503));
+    const entry = { file: stream(), filename: "s.bin" };
+    const error = await failure(
+      rm.issues.create({ project_id: 1, subject: "s", uploads: [entry] }),
+    );
+
+    expect(error.data).toMatchObject({ kind: "http", status: 503 });
+    expect(paths(requests)).toEqual(["POST uploads.json?filename=s.bin"]);
+    expect([...(requests[0]?.bytes ?? [])]).toEqual([1, 2, 3, 4]);
+    expect(error.uploads?.[0]).toBe(entry);
+  });
+
+  test("a retry with a stream the failed call read asks for new bytes and sends nothing", async () => {
+    const { rm, requests } = client(() => {
+      throw new TypeError("socket hang up");
+    });
+    const input = { project_id: 1, subject: "s", uploads: [{ file: stream(), filename: "s.bin" }] };
+    const first = await failure(rm.issues.create(input));
+    const retry = await failure(rm.issues.create({ ...input, uploads: first.uploads }));
+
+    expect(first.kind).toBe("network");
+    expect(retry.data.kind).toBe("invalid_input");
+    expect(retry.message).toContain("uploads[0].file");
+    expect(retry.message).toContain("pass the file again");
+    expect(requests).toHaveLength(1);
+  });
+
+  test("after a failed stream, new bytes in its place upload only that file", async () => {
+    let call = 0;
+    const { rm, requests } = client((request) => {
+      call++;
+      if (call === 2) return empty(503);
+      return request.url.pathname.endsWith("/uploads.json")
+        ? uploaded(`${call}.t`)
+        : json({ issue }, 201);
+    });
+    const input = {
+      project_id: 1,
+      subject: "s",
+      uploads: [
+        { file: new Blob(["a"]), filename: "a" },
+        { file: stream(), filename: "b" },
+      ],
+    };
+    const error = await failure(rm.issues.create(input));
+    const uploads = error.uploads!.map((entry, at) =>
+      at === 1 ? { file: new Blob(["b"]), filename: "b" } : entry,
+    );
+    await rm.issues.create({ ...input, uploads });
+
+    expect(paths(requests)).toEqual([
+      "POST uploads.json?filename=a",
+      "POST uploads.json?filename=b",
+      "POST uploads.json?filename=b",
+      "POST issues.json",
+    ]);
+    expect(requests[3]?.json()).toMatchObject({
+      issue: { uploads: [{ token: "1.t" }, { token: "3.t" }] },
+    });
+  });
+
+  test("a stream that attachments.upload already sent is refused inline", async () => {
+    const { rm, requests } = client(server());
+    const file = stream();
+    await rm.attachments.upload({ file, filename: "s.bin" });
+    const error = await failure(
+      rm.issues.create({ project_id: 1, subject: "s", uploads: [{ file, filename: "s.bin" }] }),
+    );
+
+    expect(error.message).toContain("uploads[0].file");
+    expect(requests).toHaveLength(1);
+  });
+
+  test("the same stream twice in one call is refused before the first upload", async () => {
+    const { rm, requests } = client(server());
+    const file = stream();
+    const error = await failure(
+      rm.issues.create({
+        project_id: 1,
+        subject: "s",
+        uploads: [
+          { file, filename: "a" },
+          { file, filename: "b" },
+        ],
+      }),
+    );
+
+    expect(error.data.kind).toBe("invalid_input");
+    expect(error.message).toContain("uploads[1].file");
+    expect(error.message).toContain("uploads[0].file");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a stream locked to a reader is refused before anything is sent", async () => {
+    const { rm, requests } = client(server());
+    const file = stream();
+    file.getReader();
+    const error = await failure(
+      rm.issues.update({ issue_id: 1, uploads: [{ file, filename: "a" }] }),
+    );
+
+    expect(error.data.kind).toBe("invalid_input");
+    expect(error.message).toContain("uploads[0].file");
+    expect(requests).toHaveLength(0);
+  });
+});

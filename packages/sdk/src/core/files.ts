@@ -88,12 +88,20 @@ export function createAttachmentFiles(
   };
 }
 
+/**
+ * Streams an upload has started to send, from any client. A stream is read once, so an inline upload refuses
+ * one of these before it sends anything. Module-wide, because a stream is no less used when another client read
+ * it, and a WeakSet keeps no stream alive.
+ */
+const sentStreams = new WeakSet<ReadableStream>();
+
 type Uploader = (file: Omit<InlineUpload, "token">, options?: CallOptions) => Promise<UploadRef>;
 
 /** Step one of the upload, shared by `attachments.upload` and inline uploads. */
 function createUploader(engine: Engine, upload: AnyOp): Uploader {
   const fileKey = binaryKey(upload);
   return async ({ file, filename, content_type, description }, options) => {
+    if (file instanceof ReadableStream) sentStreams.add(file);
     // AnyOp erases the return type, so state what the upload resolves to.
     const created: unknown = await engine.call(
       upload,
@@ -149,11 +157,32 @@ export function createUploadingCall(engine: Engine, upload: AnyOp): UploadingCal
     const refused = engine.refusal(op) ?? engine.refusal(upload);
     if (refused) throw refused;
 
+    const streams = new Map<ReadableStream, string>();
     const checked = (entry: unknown, where: string): UploadEntry => {
       if (!isInline(entry)) return entry as UploadEntry;
       if (entry.token !== undefined) throw invalidInput(`${where} has both file and token`, op.id);
       if (typeof entry.filename !== "string" || entry.filename === "") {
         throw invalidInput(`${where}.filename is required with file`, op.id);
+      }
+      if (entry.file instanceof ReadableStream) {
+        const stream = entry.file;
+        const twin = streams.get(stream);
+        if (sentStreams.has(stream)) {
+          throw invalidInput(
+            `${where}.file is a ReadableStream that an earlier upload already used. A stream is read once, so pass the file again as a new stream, a Blob or bytes`,
+            op.id,
+          );
+        }
+        if (twin !== undefined) {
+          throw invalidInput(
+            `${where}.file is the same ReadableStream as ${twin}.file, and a stream is read once`,
+            op.id,
+          );
+        }
+        if (stream.locked) {
+          throw invalidInput(`${where}.file is a ReadableStream locked to a reader`, op.id);
+        }
+        streams.set(stream, where);
       }
       try {
         const { file, filename, content_type } = entry;
