@@ -117,6 +117,19 @@ async function smoke(name, server) {
       );
     });
 
+    await check("inline upload", async () => {
+      await rm.issues.update({
+        issue_id: issueId,
+        uploads: [{ file: new Blob([`sent by ${runtime}`]).stream(), filename: "inline.txt" }],
+      });
+      const issue = await rm.issues.get({ issue_id: issueId, include: ["attachments"] });
+      const attached = issue.attachments.find((attachment) => attachment.filename === "inline.txt");
+      const text =
+        attached &&
+        new TextDecoder().decode(await (await rm.attachments.download(attached)).bytes());
+      expect(text === `sent by ${runtime}`, `inline.txt holds ${JSON.stringify(text)}`);
+    });
+
     await check("422 validation", async () => {
       const kind = await errorKind(rm.issues.update({ issue_id: issueId, subject: "" }));
       expect(kind === "validation", `got ${kind}`);
