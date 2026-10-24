@@ -293,7 +293,9 @@ describe("a bearer raw_request that Redmine answers 401", () => {
         arguments: { method: "GET", path: "my/page.js" },
       });
       expect(result.isError).toBe(true);
-      expect(texts(result)[0]).toContain("(401)");
+      expect(texts(result)[0]).toContain("401 for my/page.js");
+      expect(texts(result)[0]).toContain("end the path in .json");
+      expect(texts(result)[0]).not.toContain("sign in again");
       expect(responses.at(-1)!.status).toBe(200);
       expect(responses.at(-1)!.headers.has("www-authenticate")).toBe(false);
       expect(requests).toEqual(["GET /my/page.js"]);

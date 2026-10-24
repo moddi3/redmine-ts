@@ -25,7 +25,7 @@ import { comparablePath, CORS_MAX_AGE, publicDocument, publicPaths } from "./oau
 import type { PublicPaths } from "./oauth/web.ts";
 import { createRedmineMcpServer } from "./server.ts";
 import type { Observation } from "./server.ts";
-import { allows, strictest } from "./tools.ts";
+import { allows, isApiPath, strictest } from "./tools.ts";
 
 export const API_KEY_HEADER = "X-Redmine-API-Key";
 
@@ -446,9 +446,8 @@ function verdict(seen: readonly Observation[], serverAccess: Access): Verdict {
   return { kind: "insufficient_scope", scopes };
 }
 
-/** Redmine also answers 401 to a live credential on a path outside its API, such as my/page.js. */
 function refusedCredential(exchange: Extract<Observation, { kind: "exchange" }>): boolean {
-  return exchange.status === 401 && /\.(?:json|xml)$/.test(new URL(exchange.url).pathname);
+  return exchange.status === 401 && isApiPath(exchange.url);
 }
 
 /** Redmine applies nothing it refuses with a 4xx; without an answer, or yet, it may have. */

@@ -96,6 +96,15 @@ export function allows(access: Access, tier: Tier): boolean {
   return TIERS[access].includes(tier);
 }
 
+/**
+ * Whether `url`, absolute or relative to baseUrl, is in Redmine's REST formats: a lower-case .json or
+ * .xml. Redmine answers 401 to a credential it accepts on paths outside them, such as my/page.js and
+ * my/page.JSON.
+ */
+export function isApiPath(url: string): boolean {
+  return /\.(?:json|xml)$/.test(new URL(url, "http://redmine.invalid/").pathname);
+}
+
 /** Whether tools/list shows the tool. A hidden tool still answers a call, and the SDK refuses it. */
 export function isListed(
   tool: ToolSpec,

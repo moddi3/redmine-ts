@@ -244,7 +244,7 @@ Redmine checks a token's permissions on most requests, but not on issue edits, n
 ### Sign out and revoke
 
 - An access token lasts at most an hour, and never longer than the Redmine token inside it. A refresh token lasts 30 days, and each refresh brings a new one. Without a grant store, an API-key sign-in ends 30 days after consent, refreshed or not.
-- People revoke the application in Redmine, under Authorized applications (`/oauth/authorized_applications`). Redmine then refuses its tokens at once. The next tool call that reaches Redmine gets HTTP 401 `invalid_token`, the client's refresh fails, and the client asks them to sign in again.
+- People revoke the application in Redmine, under Authorized applications (`/oauth/authorized_applications`). Redmine then refuses its tokens at once. The next typed tool call, or any call to a `.json` or `.xml` path through `raw_request`, gets HTTP 401 `invalid_token`, the client's refresh fails, and the client asks them to sign in again.
 - An admin who deletes the Redmine application ends every session the same way.
 - With a grant store, a refresh token or a code that comes back more than 30 seconds after its first use ends every token of that sign-in.
 - Changing `REDMINE_MCP_AUTH_SECRET` without keeping the old one signs every client out.

@@ -285,7 +285,9 @@ describeServers("OAuth through Redmine", (server) => {
     const outside = await callTool("raw_request", { method: "GET", path: "my/page.js" });
     expect(outside.status).toBe(200);
     expect(outside.headers.has("www-authenticate")).toBe(false);
-    expect(await outside.text()).toContain("Redmine rejected the credentials (401)");
+    const advice = await outside.text();
+    expect(advice).toContain("401 for my/page.js");
+    expect(advice).toContain("end the path in .json");
     expect(await (await callTool("users_current")).text()).toContain('"login":"jsmith"');
   });
 
