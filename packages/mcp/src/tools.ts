@@ -88,13 +88,18 @@ export function strictest(...modes: readonly Access[]): Access {
   return ACCESS_ORDER[at] ?? "read-only";
 }
 
+/** Whether `access` lets a call of `tier` through. */
+export function allows(access: Access, tier: Tier): boolean {
+  return TIERS[access].includes(tier);
+}
+
 /** Whether tools/list shows the tool. A hidden tool still answers a call, and the SDK refuses it. */
 export function isListed(
   tool: ToolSpec,
   access: Access,
   version: RedmineVersion | undefined,
 ): boolean {
-  if (!TIERS[access].includes(tool.tier)) return false;
+  if (!allows(access, tool.tier)) return false;
   if (version === undefined) return true;
   const at = VERSIONS.indexOf(version);
   return (

@@ -12,6 +12,7 @@ import {
 import type { CallToolResult, JsonSchemaType, Tool } from "@modelcontextprotocol/server";
 import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig, RedmineVersion } from "@redmine-ts/sdk";
+import type { CatalogEntry } from "@redmine-ts/sdk/catalog";
 import pkg from "../package.json" with { type: "json" };
 import { catalogTools, DEFAULT_LIMIT, HEAVY_KEYS, MAX_LIMIT } from "./catalog-tools.ts";
 import { ISSUE_TEMPLATE, readIssue } from "./resources.ts";
@@ -22,12 +23,13 @@ import { ToolError } from "./workflow/define.ts";
 import { workflowTools } from "./workflow/index.ts";
 import { createLookups } from "./workflow/lookups.ts";
 
-/** A fact one request's server saw: a round trip to Redmine, and the status it got, if any. */
-export type Observation = {
-  readonly kind: "exchange";
-  readonly method: string;
-  readonly status: number | undefined;
-};
+/**
+ * A fact one request's server saw: a round trip to Redmine and the status it got, if any, or a call
+ * the access mode refused before sending.
+ */
+export type Observation =
+  | { readonly kind: "exchange"; readonly method: string; readonly status: number | undefined }
+  | { readonly kind: "refused"; readonly method: CatalogEntry["method"] };
 
 export type Observe = (observation: Observation) => void;
 
@@ -65,14 +67,18 @@ export function createRedmineMcpServer(
   config: RedmineConfig,
   options: RedmineMcpOptions = {},
 ): Server {
-  return build(config, options);
+  return build(config, options, undefined);
 }
 
-/** The server for one HTTP request, which reports every exchange with Redmine to `observe`. */
+/**
+ * The server for one HTTP request, which reports to `observe` every exchange with Redmine and every
+ * call its access mode refuses.
+ */
 export function createRequestServer(config: RedmineConfig, observe: Observe | undefined): Server {
   return build(
     observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
     {},
+    observe,
   );
 }
 
@@ -91,7 +97,11 @@ function observed(base: typeof fetch | undefined, observe: Observe): typeof fetc
   };
 }
 
-function build(config: RedmineConfig, options: RedmineMcpOptions): Server {
+function build(
+  config: RedmineConfig,
+  options: RedmineMcpOptions,
+  observe: Observe | undefined,
+): Server {
   const access = config.access ?? "full";
   const rm = createRedmine(config);
   const context: ToolContext = { lookups: createLookups(rm), files: options.files };
@@ -118,7 +128,7 @@ function build(config: RedmineConfig, options: RedmineMcpOptions): Server {
       const reason = (await explainFilters(tool.inputSchema, args.where)) ?? invalid;
       return failure(`Invalid arguments for ${name}: ${reason}. Nothing was sent.`);
     }
-    return call(tool, rm, args, context);
+    return call(tool, rm, args, context, observe);
   });
   server.setRequestHandler("resources/list", () => ({ resources: [] }));
   server.setRequestHandler("resources/templates/list", () => ({
@@ -135,11 +145,15 @@ async function call(
   rm: Client,
   args: Record<string, unknown>,
   context: ToolContext,
+  observe: Observe | undefined,
 ): Promise<CallToolResult> {
   let result: ToolResult;
   try {
     result = await tool.run(rm, args, context);
   } catch (error) {
+    if (RedmineError.is(error, "access_denied")) {
+      observe?.({ kind: "refused", method: error.data.method });
+    }
     if (error instanceof RedmineError) return redmineFailure(tool, error);
     if (error instanceof ToolError) return failure(error.message, error.data);
     throw error;

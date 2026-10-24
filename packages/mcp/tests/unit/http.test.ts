@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import {
   Client,
+  InsufficientScopeError,
   StreamableHTTPClientTransport,
   UnauthorizedError,
 } from "@modelcontextprotocol/client";
@@ -492,6 +493,7 @@ describe("createRedmineMcpHandler with a verifier", () => {
     revoked: signedIn({ bearer: "dead" }, ALL),
     resetkey: signedIn({ apiKey: "reset-key" }, ALL),
     "revoked-mid-request": signedIn({ bearer: "revoked-mid-request" }, ALL),
+    reader: signedIn({ bearer: "redmine-token-of-reader" }, ["redmine:read"]),
   };
   const verifier: BearerVerifier = {
     issuer: "https://auth.example.com",
@@ -500,8 +502,9 @@ describe("createRedmineMcpHandler with a verifier", () => {
   const revokedChallenge = `Bearer error="invalid_token", error_description="Redmine no longer accepts this sign-in. Sign in again.", scope="redmine:read redmine:write redmine:delete", resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`;
 
   /**
-   * A Redmine that names a status after the bearer token it got and creates any issue. It refuses the
-   * credentials of the revoked and resetkey grants, and every read of the revoked-mid-request grant.
+   * A Redmine that names a status after the bearer token it got, creates any issue and answers 403
+   * for time entries. It refuses the credentials of the revoked and resetkey grants, and every read of
+   * the revoked-mid-request grant.
    */
   function bearerRedmine() {
     const seen: (string | null)[] = [];
@@ -521,8 +524,10 @@ describe("createRedmineMcpHandler with a verifier", () => {
       if (request.method === "POST" && path === "/issues.json") {
         return Response.json({ issue: { id: 9, subject: "x" } }, { status: 201 });
       }
-      if (authorization === "Bearer revoked-mid-request")
+      if (authorization === "Bearer revoked-mid-request") {
         return new Response(null, { status: 401 });
+      }
+      if (path === "/time_entries.json") return new Response(null, { status: 403 });
       return Response.json({
         issue_statuses: [{ id: 1, name: `New for ${authorization}`, is_closed: false }],
       });
@@ -717,6 +722,131 @@ describe("createRedmineMcpHandler with a verifier", () => {
     expect(text).toContain('"id":1');
     expect(text).toContain('"id":2');
     expect(requests.filter((sent) => sent === "POST /issues.json")).toHaveLength(1);
+  });
+
+  const scopeChallenge = (scopes: string, needed: string) =>
+    `Bearer error="insufficient_scope", error_description="This request needs ${needed}, which the sign-in did not grant. Sign in again and allow it.", scope="${scopes}", resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`;
+
+  it.each([
+    ["reader", "issues_delete", { issue_id: 1 }, "redmine:delete"],
+    ["alice", "issues_delete", { issue_id: 1 }, "redmine:delete"],
+    ["reader", "raw_request", { method: "POST", path: "issues.json", body: {} }, "redmine:write"],
+    ["alice", "raw_request", { method: "DELETE", path: "issues/1.json" }, "redmine:delete"],
+  ])(
+    "answers 403 insufficient_scope when %s calls %s %j beyond its scope",
+    async (token, name, args, needed) => {
+      const { send, requests } = gated();
+      const response = await send({ Authorization: `Bearer ${token}` }, tool(1, name, args));
+      expect(response.status).toBe(403);
+      const scopes = ALL.slice(0, ALL.indexOf(needed) + 1).join(" ");
+      expect(response.headers.get("www-authenticate")).toBe(scopeChallenge(scopes, needed));
+      expect(await response.json()).toEqual({
+        error: "insufficient_scope",
+        error_description: `This request needs ${needed}, which the sign-in did not grant. Sign in again and allow it.`,
+      });
+      expect(requests).toEqual([]);
+    },
+  );
+
+  it("makes a 2026-07-28 client step up from a raw_request its scope does not allow", async () => {
+    const { handle, requests } = gated();
+    const { client, responses } = await bearerClient(handle, "modern", {
+      token: async () => "reader",
+    });
+    await expect(
+      client.callTool({
+        name: "raw_request",
+        arguments: { method: "POST", path: "issues.json", body: {} },
+      }),
+    ).rejects.toBeInstanceOf(InsufficientScopeError);
+    expect(responses.at(-1)!.status).toBe(403);
+    expect(responses.at(-1)!.headers.get("www-authenticate")).toContain(
+      'scope="redmine:read redmine:write"',
+    );
+    expect(requests).toEqual([]);
+  });
+
+  it("serves a call within the token's scope", async () => {
+    const { send, requests } = gated();
+    const response = await send(
+      { Authorization: "Bearer reader" },
+      tool(1, "raw_request", { method: "GET", path: "issue_statuses.json" }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect(response.headers.has("www-authenticate")).toBe(false);
+    expect((await response.text()).match(/^data: /gm)).toHaveLength(1);
+    expect(requests).toEqual(["GET /issue_statuses.json"]);
+  });
+
+  it("challenges only for scopes the server's own mode grants", async () => {
+    const { send, requests } = gated({ access: "no-delete" });
+    const deleted = await send(
+      { Authorization: "Bearer reader" },
+      tool(1, "issues_delete", { issue_id: 1 }),
+    );
+    expect(deleted.status).toBe(200);
+    expect(deleted.headers.has("www-authenticate")).toBe(false);
+    expect(await deleted.text()).toContain('"isError":true');
+    const posted = await send(
+      { Authorization: "Bearer reader" },
+      tool(2, "raw_request", { method: "POST", path: "issues.json", body: {} }),
+    );
+    expect(posted.status).toBe(403);
+    expect(posted.headers.get("www-authenticate")).toBe(
+      scopeChallenge("redmine:read redmine:write", "redmine:write"),
+    );
+    expect(requests).toEqual([]);
+  });
+
+  it("keeps a call the server's own mode refuses a tool error", async () => {
+    const { send, requests } = gated({ access: "read-only" });
+    const response = await send(
+      { Authorization: "Bearer alice" },
+      tool(1, "raw_request", { method: "POST", path: "issues.json", body: {} }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.has("www-authenticate")).toBe(false);
+    expect(await response.text()).toContain('"isError":true');
+    expect(requests).toEqual([]);
+  });
+
+  it("answers 403 for a 2025-03-26 batch that ran only reads before the refusal", async () => {
+    const { send, requests } = gated();
+    const response = await send(
+      { Authorization: "Bearer reader", "MCP-Protocol-Version": "2025-03-26" },
+      [tool(1, "issue_statuses_list"), tool(2, "issues_delete", { issue_id: 1 })],
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("www-authenticate")).toBe(
+      scopeChallenge(ALL.join(" "), "redmine:delete"),
+    );
+    expect(requests).toEqual(["GET /issue_statuses.json"]);
+  });
+
+  it("keeps the results of a batch whose write Redmine applied next to a refusal", async () => {
+    const { send, requests } = gated();
+    const response = await send(
+      { Authorization: "Bearer alice", "MCP-Protocol-Version": "2025-03-26" },
+      [
+        tool(1, "issues_create", { project_id: 1, subject: "x" }),
+        tool(2, "issues_delete", { issue_id: 1 }),
+      ],
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.has("www-authenticate")).toBe(false);
+    const text = await response.text();
+    expect(text).toContain('"id":1');
+    expect(text).toContain('"id":2');
+    expect(requests).toEqual(["POST /issues.json"]);
+  });
+
+  it("keeps Redmine's 403 a tool error: a token cannot grant what Redmine forbids", async () => {
+    const { send } = gated();
+    const response = await send({ Authorization: "Bearer alice" }, tool(1, "time_entries_list"));
+    expect(response.status).toBe(200);
+    expect(response.headers.has("www-authenticate")).toBe(false);
+    expect(await response.text()).toContain("Redmine answered 403 for time_entries_list");
   });
 
   it("answers 401 invalid_token when the API key behind an API-key sign-in was reset", async () => {

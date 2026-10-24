@@ -17,14 +17,16 @@ import {
 import type { AuthInfo, OAuthTokenVerifier } from "@modelcontextprotocol/server";
 import { createRedmine } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig } from "@redmine-ts/sdk";
-import { accessFor, scopesFor } from "./oauth/scopes.ts";
+import { BY_METHOD } from "./catalog-tools.ts";
+import { accessFor, scopesFor, scopesNeeded } from "./oauth/scopes.ts";
+import type { Scope } from "./oauth/scopes.ts";
 import { createAuthorizationServer } from "./oauth/server.ts";
 import type { AuthorizationServer, RedmineOAuthOptions } from "./oauth/server.ts";
 import { comparablePath, CORS_MAX_AGE, publicDocument, publicPaths } from "./oauth/web.ts";
 import type { PublicPaths } from "./oauth/web.ts";
 import { createRequestServer } from "./server.ts";
 import type { Observation, Observe } from "./server.ts";
-import { strictest } from "./tools.ts";
+import { allows, strictest } from "./tools.ts";
 
 export const API_KEY_HEADER = "X-Redmine-API-Key";
 
@@ -356,8 +358,8 @@ function bearerGate(
     },
     /**
      * Authenticates the request, runs `dispatch` with what its server needs, and answers 401 when
-     * Redmine refused the credential the token stands for. A failure in the gate answers before
-     * `dispatch`.
+     * Redmine refused the credential the token stands for, or 403 when a call needs a scope the
+     * token lacks and this server grants. A failure in the gate answers before `dispatch`.
      */
     async serve(
       request: Request,
@@ -371,17 +373,30 @@ function bearerGate(
         observe: (observation) => void seen.push(observation),
       };
       const response = await settled(await dispatch({ ...authInfo, extra: { redmine } }));
-      if (verdict(seen) === "pass") return response;
-      await response.body?.cancel();
-      return bearerAuthChallengeResponse(
-        new OAuthError(OAuthErrorCode.InvalidToken, REVOKED),
-        challenge,
+      const outcome = verdict(seen, access);
+      if (outcome.kind === "pass") return response;
+      if (outcome.kind === "invalid_token") {
+        return bearerAuthChallengeResponse(
+          new OAuthError(OAuthErrorCode.InvalidToken, REVOKED),
+          challenge,
+        );
+      }
+      const insufficient = new OAuthError(
+        OAuthErrorCode.InsufficientScope,
+        `This request needs ${outcome.scopes.at(-1)}, which the sign-in did not grant. Sign in again and allow it.`,
       );
+      return bearerAuthChallengeResponse(insufficient, {
+        requiredScopes: [...outcome.scopes],
+        resourceMetadataUrl,
+      });
     },
   };
 }
 
-type Verdict = "pass" | "invalid_token";
+type Verdict =
+  | { readonly kind: "pass" }
+  | { readonly kind: "invalid_token" }
+  | { readonly kind: "insufficient_scope"; readonly scopes: readonly [Scope, ...Scope[]] };
 
 const REVOKED = "Redmine no longer accepts this sign-in. Sign in again.";
 
@@ -395,12 +410,23 @@ async function settled(response: Response): Promise<Response> {
   return new Response(await response.arrayBuffer(), response);
 }
 
-function verdict(seen: readonly Observation[]): Verdict {
+/** What the request's server saw means for the token, given `server`, this server's own mode. */
+function verdict(seen: readonly Observation[], server: Access): Verdict {
+  const exchanges = seen.filter((observation) => observation.kind === "exchange");
   // The client retries a refused request after signing in again: a write Redmine applied would run twice.
-  if (seen.some((exchange) => exchange.method !== "GET" && mayHaveApplied(exchange.status))) {
-    return "pass";
+  if (exchanges.some((exchange) => exchange.method !== "GET" && mayHaveApplied(exchange.status))) {
+    return { kind: "pass" };
   }
-  return seen.some((exchange) => exchange.status === 401) ? "invalid_token" : "pass";
+  if (exchanges.some((exchange) => exchange.status === 401)) return { kind: "invalid_token" };
+  // A call this server's own mode refuses too is one no token can fix.
+  const needed = seen
+    .filter((observation) => observation.kind === "refused")
+    .map((refusal) => BY_METHOD[refusal.method].tier)
+    .filter((tier) => allows(server, tier))
+    .map(scopesNeeded);
+  if (needed.length === 0) return { kind: "pass" };
+  const scopes = needed.reduce((most, next) => (next.length > most.length ? next : most));
+  return { kind: "insufficient_scope", scopes };
 }
 
 /** Redmine applies nothing it refuses with a 4xx; without an answer, it may have. */
