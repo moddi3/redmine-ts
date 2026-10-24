@@ -5,7 +5,7 @@ import { VERSIONS } from "../generated/versions.ts";
 import { ACCESS_METHODS, DEFAULT_RETRY, resolveRetry } from "./config.ts";
 import type { CallOptions, ResolvedConfig, RetryPolicy, SdkEvent } from "./config.ts";
 import { RedmineError } from "./errors.ts";
-import { toDownload } from "./files.ts";
+import { markSent, toDownload } from "./files.ts";
 import { createAdminGuard, currentUserOp } from "./impersonation.ts";
 import { createListing } from "./listing.ts";
 import type { FetchPage, ListInput } from "./listing.ts";
@@ -15,7 +15,7 @@ import { isAvailable } from "./version.ts";
 import { decode, decodePage, interpret, planRequest, retryDecision } from "./wire.ts";
 import type { Plan } from "./wire.ts";
 
-/** One engine per createRedmine(). Owns the only shared mutable state in the SDK: the concurrency limiter and the cached admin check. */
+/** One engine per createRedmine(). Owns two pieces of mutable state its requests share: the concurrency limiter and the cached admin check. */
 export interface Engine {
   readonly config: ResolvedConfig;
   /** The single dispatch path. Namespaces, extras, files and the future toolkit all go through it. */
@@ -125,6 +125,7 @@ export function createEngine(config: ResolvedConfig): Engine {
         ...(plan.body === undefined ? {} : { body: plan.body }),
         ...(plan.body instanceof ReadableStream ? { duplex: "half" } : {}),
       };
+      markSent(plan.body);
       const response = await config.fetch(plan.url.href, init);
       emit({
         type: "response",

@@ -31,6 +31,7 @@ const adminPassword = "sdk-admin-pass-1";
 const adminKey = "0d1e2a3d4b5e6e7f8a9b0c1d2e3f4a5b6c7d8e9f";
 const userKey = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
 const userPassword = "sdk-user-pass-1";
+const ownEditorPassword = "sdk-own-editor-pass-1";
 // The OAuth application the MCP server's contract tests sign in through, fixed like the keys.
 const oauthClientId = "redmine-mcp-contract";
 const oauthClientSecret = "redmine-mcp-contract-secret";
@@ -73,6 +74,15 @@ developer = Role.find_by!(name: 'Developer')
 member = Member.find_by(project_id: project.id, user_id: jsmith.id) || Member.new(project: project, user: jsmith)
 member.role_ids = [developer.id]
 member.save!
+
+# Edits only its own issues and adds no notes, so Redmine answers 204 to its update of another author's issue and drops the files.
+own_editor_role = Role.find_by(name: 'Own Issues Editor') || Role.new(name: 'Own Issues Editor')
+own_editor_role.permissions = [:view_issues, :add_issues, :edit_own_issues]
+own_editor_role.save!
+own_editor = seed_user('oeditor', { admin: false, firstname: 'Olive', lastname: 'Editor', mail: 'oeditor@example.net' }, '${ownEditorPassword}')
+own_editor_member = Member.find_by(project_id: project.id, user_id: own_editor.id) || Member.new(project: project, user: own_editor)
+own_editor_member.role_ids = [own_editor_role.id]
+own_editor_member.save!
 
 def seed_issue_field(name, multiple)
   field = IssueCustomField.find_by(name: name) || IssueCustomField.new(name: name)

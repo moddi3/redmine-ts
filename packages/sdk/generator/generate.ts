@@ -1,4 +1,5 @@
 import { format } from "vite-plus/fmt";
+import { uploadKey } from "../src/core/op.ts";
 import { catalogFile } from "./catalog.ts";
 import { mergeSpecs, type Drift, type Merged } from "./merge.ts";
 import { analyzeOperations, type OpModel } from "./operations.ts";
@@ -33,6 +34,7 @@ export interface Report {
   /** namespace -> [verb, operationId] */
   namespaces: Record<string, [string, string][]>;
   includeMisses: string[];
+  inlineUploads: string[];
 }
 
 export interface Generated {
@@ -76,6 +78,7 @@ export async function generate(
       schemas: schemas.length,
       namespaces,
       includeMisses,
+      inlineUploads: ops.flatMap((o) => (uploadKey(o.descriptor) ? [o.descriptor.id] : [])),
     },
   };
 }
@@ -318,6 +321,7 @@ function inputsFile(ops: OpModel[], schemas: SchemaType[]): string {
   return (
     imports(body, [
       ["BinarySource", "../core/files.ts"],
+      ["UploadEntry", "../core/files.ts"],
       ["Cond", "../core/listing.ts"],
       ["ListInput", "../core/listing.ts"],
       ...schemaImports(schemas),
@@ -340,6 +344,7 @@ function opsFile(ops: OpModel[], schemas: SchemaType[]): string {
     imports(body, [
       ["BinarySource", "../core/files.ts"],
       ["Download", "../core/files.ts"],
+      ["UploadEntry", "../core/files.ts"],
       ["Cond", "../core/listing.ts"],
       ["ListInput", "../core/listing.ts"],
       ["Listing", "../core/listing.ts"],
