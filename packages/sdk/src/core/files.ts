@@ -89,11 +89,16 @@ export function createAttachmentFiles(
 }
 
 /**
- * Streams an upload has started to send, from any client. A stream is read once, so an inline upload refuses
- * one of these before it sends anything. Module-wide, because a stream is no less used when another client read
+ * Streams the engine has handed to fetch, from any client. A stream is read once, so an inline upload refuses
+ * one of these before it sends anything. Module-wide, because a stream is no less used when another client sent
  * it, and a WeakSet keeps no stream alive.
  */
 const sentStreams = new WeakSet<ReadableStream>();
+
+/** The engine calls this as it hands a request body to fetch, so a call refused before that leaves the stream unused. */
+export function markSent(body: BodyInit | undefined): void {
+  if (body instanceof ReadableStream) sentStreams.add(body);
+}
 
 type Uploader = (file: Omit<InlineUpload, "token">, options?: CallOptions) => Promise<UploadRef>;
 
@@ -101,7 +106,6 @@ type Uploader = (file: Omit<InlineUpload, "token">, options?: CallOptions) => Pr
 function createUploader(engine: Engine, upload: AnyOp): Uploader {
   const fileKey = binaryKey(upload);
   return async ({ file, filename, content_type, description }, options) => {
-    if (file instanceof ReadableStream) sentStreams.add(file);
     // AnyOp erases the return type, so state what the upload resolves to.
     const created: unknown = await engine.call(
       upload,
@@ -169,7 +173,7 @@ export function createUploadingCall(engine: Engine, upload: AnyOp): UploadingCal
         const twin = streams.get(stream);
         if (sentStreams.has(stream)) {
           throw invalidInput(
-            `${where}.file is a ReadableStream that an earlier upload already used. A stream is read once, so pass the file again as a new stream, a Blob or bytes`,
+            `${where}.file is a ReadableStream that an earlier upload already sent. A stream is read once, so pass the file again as a new stream, a Blob or bytes`,
             op.id,
           );
         }

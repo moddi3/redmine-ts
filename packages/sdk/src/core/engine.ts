@@ -5,7 +5,7 @@ import { VERSIONS } from "../generated/versions.ts";
 import { ACCESS_METHODS, DEFAULT_RETRY, resolveRetry } from "./config.ts";
 import type { CallOptions, ResolvedConfig, RetryPolicy, SdkEvent } from "./config.ts";
 import { RedmineError } from "./errors.ts";
-import { toDownload } from "./files.ts";
+import { markSent, toDownload } from "./files.ts";
 import { createAdminGuard, currentUserOp } from "./impersonation.ts";
 import { createListing } from "./listing.ts";
 import type { FetchPage, ListInput } from "./listing.ts";
@@ -125,6 +125,7 @@ export function createEngine(config: ResolvedConfig): Engine {
         ...(plan.body === undefined ? {} : { body: plan.body }),
         ...(plan.body instanceof ReadableStream ? { duplex: "half" } : {}),
       };
+      markSent(plan.body);
       const response = await config.fetch(plan.url.href, init);
       emit({
         type: "response",

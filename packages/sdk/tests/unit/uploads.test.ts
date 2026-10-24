@@ -506,6 +506,38 @@ describe("streams, which are read once", () => {
     expect(requests).toHaveLength(1);
   });
 
+  test.each([
+    { refusal: "access_denied", config: { access: "read-only" }, options: {} },
+    { refusal: "aborted", config: {}, options: { signal: AbortSignal.abort() } },
+  ])(
+    "a stream that attachments.upload refused with $refusal uploads inline, and is refused once sent",
+    async ({ refusal, config, options }) => {
+      const bodies: unknown[] = [];
+      const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+        bodies.push(init.body);
+        return url.includes("/uploads.json") ? uploaded("1.t") : json({ issue }, 201);
+      };
+      const file = stream();
+      const refused = await failure(
+        client(server(), { fetch, ...config }).rm.attachments.upload(
+          { file, filename: "s.bin" },
+          options,
+        ),
+      );
+      const { rm } = client(server(), { fetch });
+      const input = { project_id: 1, subject: "s", uploads: [{ file, filename: "s.bin" }] };
+      await rm.issues.create(input);
+      const reused = await failure(rm.issues.create(input));
+
+      expect(refused.data.kind).toBe(refusal);
+      expect(bodies[0]).toBe(file);
+      expect(file.locked).toBe(false);
+      expect(reused.data.kind).toBe("invalid_input");
+      expect(reused.message).toContain("uploads[0].file");
+      expect(bodies).toHaveLength(2);
+    },
+  );
+
   test("the same stream twice in one call is refused before the first upload", async () => {
     const { rm, requests } = client(server());
     const file = stream();
