@@ -68,9 +68,11 @@ When npm refuses the exchange, pnpm publishes without a token and npm answers wi
 
 The trusted publisher form lives in a package's settings, so the package must exist on npm first. Publish the first version of each package in one of the two ways below, then add the trusted publisher. From a terminal, run `npm trust github @redmine-ts/<name> --file release.yml --repo moddi3/redmine-ts --allow-publish` outside this repo, because npm refuses to run inside it under the pnpm `devEngines` setting.
 
-#### Blocked for this repository: npm/cli#9969
+#### npm/cli#9969: trusted publishing and immutable OIDC subjects
 
-As of October 2026, npm refuses the exchange for this repository with `404 {"message":"OIDC token exchange error - package not found"}`, although the trusted publisher matches. GitHub repositories created after 2026-07-15 issue OIDC tokens with [immutable subject claims](https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/) (`gh api repos/moddi3/redmine-ts/actions/oidc/customization/sub` shows `use_immutable_subject: true`), which cannot be turned off, and npm's exchange rejects them: [npm/cli#9969](https://github.com/npm/cli/issues/9969). Until npm fixes it, every release is published from the owner's machine, as in [Publish from your machine](#publish-from-your-machine), after the Version Packages pull request is merged. The `publish` job keeps trying and fails with that message, which shows when the fix lands.
+GitHub repositories created after 2026-07-15 issue OIDC tokens with [immutable subject claims](https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/), and this repository does (`gh api repos/moddi3/redmine-ts/actions/oidc/customization/sub` shows `use_immutable_subject: true`). Through 2026-10-23, npm refused the exchange for `@redmine-ts/sdk` with `404 {"message":"OIDC token exchange error - package not found"}`, although its trusted publisher matched ([npm/cli#9969](https://github.com/npm/cli/issues/9969), still open). SDK 0.2.0 through 0.3.0 were therefore published from the owner's machine.
+
+On 2026-10-24 the `publish` job published `@redmine-ts/mcp@0.2.0` through trusted publishing, with provenance. Its trusted publisher was created on 2026-10-23; the SDK's was created on 2026-10-18 and has not published through CI yet. If the SDK's next release fails with the same `package not found`, recreate its trusted publisher (`npm trust list @redmine-ts/sdk`, `npm trust revoke @redmine-ts/sdk --id=<id>`, then `npm trust github @redmine-ts/sdk --file release.yml --repo moddi3/redmine-ts --allow-publish`, run outside this repo) and rerun the whole Release run. [Publish from your machine](#publish-from-your-machine) stays the fallback.
 
 ### First publish with a temporary token
 
@@ -91,7 +93,7 @@ If your npm account requires two-factor authentication for publishing, the token
 
 ### Publish from your machine
 
-This way needs no token in GitHub. It is how the first version of each package is published, and how every release is published while [npm/cli#9969](#blocked-for-this-repository-npmcli9969) blocks trusted publishing. These versions carry no provenance.
+This way needs no token in GitHub. It is how the first version of each package is published, and the fallback when trusted publishing fails (see [npm/cli#9969](#npmcli9969-trusted-publishing-and-immutable-oidc-subjects)). These versions carry no provenance.
 
 1. Merge the Version Packages pull request. Its `publish` job fails because nothing can authenticate.
 2. Publish from an up-to-date `main`:
