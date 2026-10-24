@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
-import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+  UnauthorizedError,
+} from "@modelcontextprotocol/client";
+import type { AuthProvider } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vite-plus/test";
 import { createRedmineMcpHandler } from "../../src/index.ts";
 import type { BearerGrant, BearerVerifier, RedmineMcpHandlerOptions } from "../../src/index.ts";
@@ -447,6 +452,14 @@ describe("createRedmineMcpHandler", () => {
 describe("createRedmineMcpHandler with a verifier", () => {
   const publicUrl = "https://redmine.example.com/redmine/mcp";
   const now = () => Math.floor(Date.now() / 1000);
+  const ALL = ["redmine:read", "redmine:write", "redmine:delete"];
+  const signedIn = (credential: BearerGrant["credential"], scopes: string[]): BearerGrant => ({
+    credential,
+    scopes,
+    resource: publicUrl,
+    expiresAt: now() + 600,
+    clientId: "client",
+  });
   const grants: Record<string, BearerGrant> = {
     alice: {
       credential: { bearer: "redmine-token-of-alice" },
@@ -476,23 +489,69 @@ describe("createRedmineMcpHandler with a verifier", () => {
       expiresAt: now() + 600,
       clientId: "client",
     },
+    revoked: signedIn({ bearer: "dead" }, ALL),
+    resetkey: signedIn({ apiKey: "reset-key" }, ALL),
+    "revoked-mid-request": signedIn({ bearer: "revoked-mid-request" }, ALL),
   };
   const verifier: BearerVerifier = {
     issuer: "https://auth.example.com",
     verify: async (token) => grants[token],
   };
+  const revokedChallenge = `Bearer error="invalid_token", error_description="Redmine no longer accepts this sign-in. Sign in again.", scope="redmine:read redmine:write redmine:delete", resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`;
 
-  /** A Redmine that names a status after the bearer token it got. */
+  /**
+   * A Redmine that names a status after the bearer token it got and creates any issue. It refuses the
+   * credentials of the revoked and resetkey grants, and every read of the revoked-mid-request grant.
+   */
   function bearerRedmine() {
     const seen: (string | null)[] = [];
+    const requests: string[] = [];
     const fetch: typeof globalThis.fetch = async (input, init) => {
-      const authorization = new Request(input, init).headers.get("authorization");
+      const request = new Request(input, init);
+      const authorization = request.headers.get("authorization");
+      const path = new URL(request.url).pathname;
       seen.push(authorization);
+      requests.push(`${request.method} ${path}`);
+      if (
+        authorization === "Bearer dead" ||
+        request.headers.get("x-redmine-api-key") === "reset-key"
+      ) {
+        return new Response(null, { status: 401 });
+      }
+      if (request.method === "POST" && path === "/issues.json") {
+        return Response.json({ issue: { id: 9, subject: "x" } }, { status: 201 });
+      }
+      if (authorization === "Bearer revoked-mid-request")
+        return new Response(null, { status: 401 });
       return Response.json({
         issue_statuses: [{ id: 1, name: `New for ${authorization}`, is_closed: false }],
       });
     };
-    return { fetch, seen };
+    return { fetch, seen, requests };
+  }
+
+  /** The official client on `era`, signed in through `authProvider`, and every response it got. */
+  async function bearerClient(
+    handle: Handler,
+    era: "legacy" | "modern",
+    authProvider: AuthProvider,
+  ): Promise<{ client: Client; responses: Response[] }> {
+    const responses: Response[] = [];
+    const client = new Client(
+      { name: "redmine-mcp-tests", version: "0.0.0" },
+      era === "modern" ? { versionNegotiation: { mode: { pin: "2026-07-28" } } } : {},
+    );
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(publicUrl), {
+        authProvider,
+        fetch: async (input, init) => {
+          const response = await handle(new Request(input, init));
+          responses.push(response.clone());
+          return response;
+        },
+      }),
+    );
+    return { client, responses };
   }
 
   function gated(options: Partial<RedmineMcpHandlerOptions> = {}) {
@@ -521,8 +580,28 @@ describe("createRedmineMcpHandler with a verifier", () => {
           }),
         }),
       );
-    return { handle, call, seen: redmine.seen };
+    /** Any JSON-RPC message or batch in the 2025 shape. */
+    const send = (headers: Record<string, string>, body: unknown) =>
+      handle(
+        new Request(`http://127.0.0.1:3737/redmine/mcp`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            ...headers,
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    return { handle, call, send, seen: redmine.seen, requests: redmine.requests };
   }
+
+  const tool = (id: number, name: string, args: Record<string, unknown> = {}) => ({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name, arguments: args },
+  });
 
   it("serves the protected resource metadata naming the verifier's issuer", async () => {
     const { handle } = gated({ access: "no-delete" });
@@ -601,6 +680,72 @@ describe("createRedmineMcpHandler with a verifier", () => {
     const called = await call({ Authorization: "Bearer alice" }, "tools/call");
     expect(await called.text()).toContain("New for Bearer redmine-token-of-alice");
     expect(seen).toEqual(["Bearer redmine-token-of-alice"]);
+  });
+
+  it.each(["legacy", "modern"] as const)(
+    "answers 401 invalid_token to a %s-era call once Redmine refuses the token's credential",
+    async (era) => {
+      const { handle, seen } = gated();
+      const { client, responses } = await bearerClient(handle, era, {
+        token: async () => "revoked",
+      });
+      await expect(
+        client.callTool({ name: "issue_statuses_list", arguments: {} }),
+      ).rejects.toBeInstanceOf(UnauthorizedError);
+      const refused = responses.at(-1)!;
+      expect(refused.status).toBe(401);
+      expect(refused.headers.get("www-authenticate")).toBe(revokedChallenge);
+      const body = await refused.text();
+      expect(JSON.parse(body)).toEqual({
+        error: "invalid_token",
+        error_description: "Redmine no longer accepts this sign-in. Sign in again.",
+      });
+      expect(body).not.toMatch(/revoked|dead/);
+      expect(seen).toEqual(["Bearer dead"]);
+    },
+  );
+
+  it("keeps the results of a request in which Redmine applied a write before refusing", async () => {
+    const { send, requests } = gated();
+    const response = await send(
+      { Authorization: "Bearer revoked-mid-request", "MCP-Protocol-Version": "2025-03-26" },
+      [tool(1, "issues_create", { project_id: 1, subject: "x" }), tool(2, "issue_statuses_list")],
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.has("www-authenticate")).toBe(false);
+    const text = await response.text();
+    expect(text).toContain('"id":1');
+    expect(text).toContain('"id":2');
+    expect(requests.filter((sent) => sent === "POST /issues.json")).toHaveLength(1);
+  });
+
+  it("answers 401 invalid_token when the API key behind an API-key sign-in was reset", async () => {
+    const { call, seen } = gated();
+    const response = await call({ Authorization: "Bearer resetkey" }, "tools/call");
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(revokedChallenge);
+    expect(seen).toEqual([null]);
+  });
+
+  it("answers 401 invalid_token to resources/read once Redmine refuses the credential", async () => {
+    const { send } = gated();
+    const response = await send(
+      { Authorization: "Bearer revoked" },
+      { jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: "redmine://issues/1" } },
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(revokedChallenge);
+  });
+
+  it("adds CORS to a 401 from inside the request, so a page can read the challenge", async () => {
+    const { send } = gated({ allowedOrigins: ["https://app.example.com"] });
+    const response = await send(
+      { Authorization: "Bearer revoked", Origin: "https://app.example.com" },
+      tool(1, "issue_statuses_list"),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
+    expect(response.headers.get("access-control-expose-headers")).toBe("WWW-Authenticate");
   });
 
   it("keeps the X-Redmine-API-Key header working, ahead of a bearer token", async () => {

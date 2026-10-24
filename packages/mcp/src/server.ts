@@ -22,6 +22,15 @@ import { ToolError } from "./workflow/define.ts";
 import { workflowTools } from "./workflow/index.ts";
 import { createLookups } from "./workflow/lookups.ts";
 
+/** A fact one request's server saw: a round trip to Redmine, and the status it got, if any. */
+export type Observation = {
+  readonly kind: "exchange";
+  readonly method: string;
+  readonly status: number | undefined;
+};
+
+export type Observe = (observation: Observation) => void;
+
 export interface RedmineMcpOptions {
   /**
    * A local directory the server may read uploads from and save attachments to, from `localFiles` in
@@ -56,6 +65,33 @@ export function createRedmineMcpServer(
   config: RedmineConfig,
   options: RedmineMcpOptions = {},
 ): Server {
+  return build(config, options);
+}
+
+/** The server for one HTTP request, which reports every exchange with Redmine to `observe`. */
+export function createRequestServer(config: RedmineConfig, observe: Observe | undefined): Server {
+  return build(
+    observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
+    {},
+  );
+}
+
+function observed(base: typeof fetch | undefined, observe: Observe): typeof fetch {
+  const send = base ?? ((input, init) => globalThis.fetch(input, init));
+  return async (input, init) => {
+    const method = init?.method ?? "GET";
+    let status: number | undefined;
+    try {
+      const response = await send(input, init);
+      status = response.status;
+      return response;
+    } finally {
+      observe({ kind: "exchange", method, status });
+    }
+  };
+}
+
+function build(config: RedmineConfig, options: RedmineMcpOptions): Server {
   const access = config.access ?? "full";
   const rm = createRedmine(config);
   const context: ToolContext = { lookups: createLookups(rm), files: options.files };
