@@ -15,7 +15,7 @@ import { isAvailable } from "./version.ts";
 import { decode, decodePage, interpret, planRequest, retryDecision } from "./wire.ts";
 import type { Plan } from "./wire.ts";
 
-/** One engine per createRedmine(). Owns the only shared mutable state in the SDK: the concurrency limiter and the cached admin check. */
+/** One engine per createRedmine(). Owns the mutable state its requests share: the concurrency limiter and the cached admin check. */
 export interface Engine {
   readonly config: ResolvedConfig;
   /** The single dispatch path. Namespaces, extras, files and the future toolkit all go through it. */
