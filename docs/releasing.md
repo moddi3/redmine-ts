@@ -72,7 +72,9 @@ The trusted publisher form lives in a package's settings, so the package must ex
 
 GitHub repositories created after 2026-07-15 issue OIDC tokens with [immutable subject claims](https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/), and this repository does (`gh api repos/moddi3/redmine-ts/actions/oidc/customization/sub` shows `use_immutable_subject: true`). Through 2026-10-23, npm refused the exchange for `@redmine-ts/sdk` with `404 {"message":"OIDC token exchange error - package not found"}`, although its trusted publisher matched ([npm/cli#9969](https://github.com/npm/cli/issues/9969), still open). SDK 0.2.0 through 0.3.0 were therefore published from the owner's machine.
 
-On 2026-10-24 the `publish` job published `@redmine-ts/mcp@0.2.0` through trusted publishing, with provenance. Its trusted publisher was created on 2026-10-23; the SDK's was created on 2026-10-18 and has not published through CI yet. If the SDK's next release fails with the same `package not found`, recreate its trusted publisher (`npm trust list @redmine-ts/sdk`, `npm trust revoke @redmine-ts/sdk --id=<id>`, then `npm trust github @redmine-ts/sdk --file release.yml --repo moddi3/redmine-ts --allow-publish`, run outside this repo) and rerun the whole Release run. [Publish from your machine](#publish-from-your-machine) stays the fallback.
+On 2026-10-24 the `publish` job published `@redmine-ts/mcp@0.2.0` through trusted publishing, with provenance. Its trusted publisher was created on 2026-10-23. The SDK's, created on 2026-10-18, was then recreated with the same settings, and the job published `@redmine-ts/sdk@0.3.1` the same way. Both packages now publish from CI.
+
+If a package fails with the same `package not found`, recreate its trusted publisher (`npm trust list @redmine-ts/<name>`, `npm trust revoke @redmine-ts/<name> --id=<id>`, then `npm trust github @redmine-ts/<name> --file release.yml --repo moddi3/redmine-ts --allow-publish`, run outside this repo) and rerun the whole Release run. [Publish from your machine](#publish-from-your-machine) stays the fallback.
 
 ### First publish with a temporary token
 
