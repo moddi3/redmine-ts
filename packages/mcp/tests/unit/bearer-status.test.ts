@@ -434,4 +434,13 @@ describe("a bearer subscriptions/listen", () => {
       honoring.mockRestore();
     }
   }, 2000);
+
+  it("is held like any call when a 2025-era request names it only in Mcp-Method", async () => {
+    const { send } = gated();
+    const response = await send(
+      { Authorization: "Bearer revoked", "Mcp-Method": "subscriptions/listen" },
+      tool(1, "issue_statuses_list"),
+    );
+    expect(response.status).toBe(401);
+  });
 });

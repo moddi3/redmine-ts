@@ -370,10 +370,16 @@ function bearerGate(
         access: bearer.access,
         observe: (observation) => void seen.push(observation),
       };
-      const response = await settled(
-        request,
-        await dispatch({ ...bearer.authInfo, extra: { redmine } }),
-      );
+      let response: Response;
+      try {
+        response = await settled(
+          request,
+          await dispatch({ ...bearer.authInfo, extra: { redmine } }),
+        );
+      } catch (error) {
+        onError?.(error instanceof Error ? error : new Error(String(error)));
+        return new Response(null, { status: 500 });
+      }
       const outcome = verdict(seen, access);
       if (outcome.kind === "pass") return response;
       if (outcome.kind === "invalid_token") {
@@ -411,10 +417,12 @@ const REVOKED = "Redmine no longer accepts this sign-in. Sign in again.";
 /**
  * The response with every answer in it written, so its status can still change: the head reaches the
  * client only when the handler returns. A subscriptions/listen stream is passed on as it is, because it
- * may never end; 2026-07-28, the only revision with that method, requires the Mcp-Method header.
+ * may never end; from 2026-07-28 on, the SDK refuses a request whose Mcp-Method header and body differ.
  */
 async function settled(request: Request, response: Response): Promise<Response> {
-  if (request.headers.get("mcp-method") === "subscriptions/listen") return response;
+  const version = request.headers.get("mcp-protocol-version") ?? "";
+  const listens = request.headers.get("mcp-method") === "subscriptions/listen";
+  if (listens && version >= "2026-07-28") return response;
   const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
   if (type !== "text/event-stream" || response.body === null) return response;
   return new Response(await response.arrayBuffer(), response);
