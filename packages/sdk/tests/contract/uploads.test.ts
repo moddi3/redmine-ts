@@ -204,6 +204,30 @@ describeServers("inline uploads", (server) => {
     ]);
   });
 
+  it("a role that edits only its own issues gets 204 on another author's issue, and Redmine drops the files", async () => {
+    const ownEditor = admin.with({ as: "oeditor" });
+    const project_id = server.projectIdentifier;
+    const theirs = await admin.issues.create({ project_id, subject: unique("theirs") });
+    cleanup.add(() => admin.issues.delete({ issue_id: theirs.id }));
+    const own = await ownEditor.issues.create({ project_id, subject: unique("own") });
+    cleanup.add(() => admin.issues.delete({ issue_id: own.id }));
+
+    log.events.length = 0;
+    await ownEditor.issues.update({ issue_id: theirs.id, uploads: [file("dropped.txt")] });
+    await ownEditor.issues.update({ issue_id: own.id, uploads: [file("kept.txt")] });
+
+    const updates = log.events.flatMap((e) =>
+      e.type === "response" && e.op === "updateIssue" ? [e.status] : [],
+    );
+    expect(updates).toEqual([204, 204]);
+    const attached = async (issue_id: number) =>
+      (await admin.issues.get({ issue_id, include: ["attachments"] })).attachments.map(
+        (a) => a.filename,
+      );
+    expect(await attached(theirs.id)).toEqual([]);
+    expect(await attached(own.id)).toEqual(["kept.txt"]);
+  });
+
   it("a read-only client refuses a create with files and sends nothing", async () => {
     const quiet = recorder();
     const reader = clientFor(server, "admin", {
