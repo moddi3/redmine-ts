@@ -321,6 +321,7 @@ function inputsFile(ops: OpModel[], schemas: SchemaType[]): string {
   return (
     imports(body, [
       ["BinarySource", "../core/files.ts"],
+      ["UploadEntry", "../core/files.ts"],
       ["Cond", "../core/listing.ts"],
       ["ListInput", "../core/listing.ts"],
       ...schemaImports(schemas),
@@ -343,6 +344,7 @@ function opsFile(ops: OpModel[], schemas: SchemaType[]): string {
     imports(body, [
       ["BinarySource", "../core/files.ts"],
       ["Download", "../core/files.ts"],
+      ["UploadEntry", "../core/files.ts"],
       ["Cond", "../core/listing.ts"],
       ["ListInput", "../core/listing.ts"],
       ["Listing", "../core/listing.ts"],

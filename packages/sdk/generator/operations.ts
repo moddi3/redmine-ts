@@ -15,6 +15,18 @@ import type { Overlay } from "./overlay.ts";
 import { deref, refName, type OpenApi, type Param, type Schema } from "./spec.ts";
 import { camel, jsDoc, members, pascal, sinceTag, tsType, type Member } from "./typescript.ts";
 
+const UPLOAD_LIST_DOC = [
+  "Files to attach, in order. An entry is an UploadRef from `attachments.upload`, or",
+  "`{ file, filename, content_type?, description? }`, which the call uploads first, one file at a time.",
+  "After a failure, `RedmineError.uploads` holds the entries to retry with.",
+].join("\n");
+
+/** The TypeScript side of an upload list. Its schema stays the spec's, so the catalog keeps the JSON form. */
+function uploadList(field: Member): Member {
+  const text = [field.description?.trim(), UPLOAD_LIST_DOC].filter(Boolean).join("\n\n");
+  return { ...field, type: "UploadEntry[]", doc: jsDoc(text, sinceTag(field.schema["x-since"])) };
+}
+
 /** Params the transport and the pager own. They never appear in an input. */
 const TRANSPORT_QUERY = new Set(["offset", "limit", "nometa", "format"]);
 
@@ -216,7 +228,7 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
       ...(clear ? { clear } : {}),
       ...(uploads ? { uploads } : {}),
     };
-    fields.push(...bodyFields);
+    fields.push(...bodyFields.map((f) => (f.key === uploads ? uploadList(f) : f)));
   } else if (Object.keys(content).length > 0) {
     fail(`unsupported request content ${Object.keys(content).join(", ")}`);
   }

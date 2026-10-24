@@ -1,6 +1,6 @@
 // Generated from spec/redmine-openapi/*.yaml by `vp run gen`. Do not edit.
 
-import type { BinarySource, Download } from "../core/files.ts";
+import type { BinarySource, Download, UploadEntry } from "../core/files.ts";
 import type { Cond, ListInput, Listing } from "../core/listing.ts";
 import type { Op } from "../core/op.ts";
 import type {
@@ -118,7 +118,6 @@ import type {
   TimeEntry,
   TimeEntryActivity,
   Tracker,
-  Uploads,
   User,
   UserSummary,
   Version,
@@ -500,7 +499,12 @@ export interface CreateIssueUnderProjectInput {
   watcher_user_ids?: number[];
   is_private?: boolean;
   estimated_hours?: number | null;
-  uploads?: Uploads;
+  /**
+   * Files to attach, in order. An entry is an UploadRef from `attachments.upload`, or
+   * `{ file, filename, content_type?, description? }`, which the call uploads first, one file at a time.
+   * After a failure, `RedmineError.uploads` holds the entries to retry with.
+   */
+  uploads?: UploadEntry[];
 }
 
 export interface GetTimeEntriesByProjectWhere {
