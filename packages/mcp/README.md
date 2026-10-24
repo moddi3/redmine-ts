@@ -70,6 +70,8 @@ The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisi
 | A `Host` that is not one of the server's names  | 403, on a loopback address or with `--allow-host`. See [Security defaults](#security-defaults).          |
 | A path other than `/mcp`                        | 404. With `REDMINE_MCP_PUBLIC_URL`, the server serves that URL's path and the OAuth paths instead.       |
 | A key Redmine rejects                           | The tool call returns an error result with Redmine's 401.                                                |
+| An OAuth token Redmine no longer accepts        | 401 `invalid_token` with the `Bearer` challenge, so the client refreshes or signs in again.              |
+| A call the OAuth token's scope does not allow   | 403 `insufficient_scope`, naming the scopes the call needs, if the server's own mode allows the call.    |
 
 The 401 for a missing key and the 403s for `Origin` and `Host` are JSON-RPC errors. The error carries the request's `id` when the body is a single request, declares a `Content-Length` of at most 64 KiB, and arrives within a second. To refuse a request, the server does not read a larger or chunked body and does not wait longer for a slow one, so their errors have a `null` id. A notification, a batch, or a body that is not JSON has no single id, so its error has a `null` id too, as JSON-RPC 2.0 does for an id it cannot detect.
 
@@ -242,7 +244,7 @@ Redmine checks a token's permissions on most requests, but not on issue edits, n
 ### Sign out and revoke
 
 - An access token lasts at most an hour, and never longer than the Redmine token inside it. A refresh token lasts 30 days, and each refresh brings a new one. Without a grant store, an API-key sign-in ends 30 days after consent, refreshed or not.
-- People revoke the application in Redmine, under Authorized applications (`/oauth/authorized_applications`). Redmine then refuses its tokens at once: tool calls return an error result that carries Redmine's 401, and the next refresh fails, so the client asks them to sign in again within the hour.
+- People revoke the application in Redmine, under Authorized applications (`/oauth/authorized_applications`). Redmine then refuses its tokens at once. The next tool call that reaches Redmine gets HTTP 401 `invalid_token`, the client's refresh fails, and the client asks them to sign in again.
 - An admin who deletes the Redmine application ends every session the same way.
 - With a grant store, a refresh token or a code that comes back more than 30 seconds after its first use ends every token of that sign-in.
 - Changing `REDMINE_MCP_AUTH_SECRET` without keeping the old one signs every client out.
@@ -312,12 +314,13 @@ Without a store, the server keeps the weaker guarantees of each process's or iso
 
 - **No per-client revocation** on the server's side; revocation happens in Redmine, or by changing the secret for everyone.
 - **The secret protects everything.** With the secret and a captured token, someone can read the Redmine token inside until it expires, or the API key with [API key sign-in](#api-key-sign-in). Keep the secret out of logs and repositories, and change it if it leaks.
-- **Errors inside a request are tool results.** A tool the token's scope does not allow, or a Redmine that revoked the sign-in, returns an error result with HTTP 200, not a 403 `insufficient_scope` or a 401 that would send the client to sign in again. The client finds out when the access token expires, within the hour. Per-tool step-up is not offered either.
+- **Some failures inside a request stay error results.** Over OAuth, a tool call gets HTTP 401 `invalid_token` once Redmine refuses the sign-in, and HTTP 403 `insufficient_scope` when it needs a scope that the token lacks and the server grants. A call that the server's own mode refuses, and a Redmine 403, still return an error result with HTTP 200, because a new sign-in cannot fix them. So does a request in which Redmine may have applied a write, so that the client's retry cannot repeat the write. The client's next request gets the 401. Tools beyond the token's scope stay out of `tools/list`, so the 403 comes from `raw_request` or from a call to an unlisted tool.
+- **OAuth responses arrive whole.** To set the status, the server holds each OAuth response until the call ends. A long call sends no keep-alive events, and a client on a 2025 revision gets the result in one piece. Every 401 from Redmine counts, also one that `raw_request` gets for a path Redmine serves only to browsers, such as `my/page.js`.
 - **Plain http to Redmine.** `REDMINE_URL` and `REDMINE_PUBLIC_URL` may be http. The server's own https rule covers only the public URL, so secure the browser's way to Redmine's login and the server's way to Redmine's API yourself.
 
 ### API key sign-in
 
-For a Redmine without OAuth applications, `--api-key-login` replaces `REDMINE_OAUTH_CLIENT_ID` and `REDMINE_OAUTH_CLIENT_SECRET`: the consent page asks for the person's API key, checks it with `GET /users/current.json`, and seals it into the code and the tokens. A refresh checks the key again, so resetting it in Redmine, under My account, ends the session. Checking keys has limits, so the page is a slow oracle for a list of leaked keys:
+For a Redmine without OAuth applications, `--api-key-login` replaces `REDMINE_OAUTH_CLIENT_ID` and `REDMINE_OAUTH_CLIENT_SECRET`: the consent page asks for the person's API key, checks it with `GET /users/current.json`, and seals it into the code and the tokens. Resetting the key in Redmine, under My account, ends the session. Tool calls then get HTTP 401 `invalid_token`, and the refresh fails because it checks the key again. Checking keys has limits, so the page is a slow oracle for a list of leaked keys:
 
 - One sign-in may try 5 keys. Each try needs the page that came back from the last one, so going back does not reset the count. A key Redmine did not answer for counts too, and the page says Redmine did not answer.
 - With a grant store, one browser may fail 10 keys an hour; after that it gets an error page.
@@ -526,7 +529,7 @@ Every result carries the object twice: as `structuredContent`, and as compact JS
 
 ### Errors
 
-A failed Redmine request comes back as a tool result with `isError: true`, never as a protocol error. The first text block says what went wrong and what to do. The last text block is the SDK's error as JSON, with a `kind` such as `validation`, `not_found`, `conflict`, `access_denied`, or `unsupported_version`.
+A failed Redmine request comes back as a tool result with `isError: true`, never as a protocol error. Over OAuth, a sign-in that Redmine refuses and a missing scope get HTTP 401 and 403 instead, as [What holds either way](#what-holds-either-way) describes. The first text block says what went wrong and what to do. The last text block is the SDK's error as JSON, with a `kind` such as `validation`, `not_found`, `conflict`, `access_denied`, or `unsupported_version`.
 
 - A 422 carries Redmine's own messages, such as `Subject cannot be blank`, in the user's language.
 - A 404 says to check the ids.
