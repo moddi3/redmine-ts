@@ -35,7 +35,8 @@ const DEFAULT_PORT = 3737;
 
 export const USAGE: string = `Usage: redmine-mcp [--read-only] [--no-delete]
        redmine-mcp --http [--port <n>] [--host <addr>] [--allow-origin <hostname|origin>]...
-                          [--api-key-login] [--allow-client <hostname>]...
+                          [--allow-host <hostname>]... [--api-key-login]
+                          [--allow-client <hostname>]...
 
 Serves the Redmine REST API as MCP tools over stdio, or over Streamable HTTP at /mcp
 or at the path of REDMINE_MCP_PUBLIC_URL.
@@ -78,6 +79,10 @@ Flags:
                        port) or exact origin, such as https://app.example.com, and
                        send them CORS headers. Repeatable. Without it, any request
                        with an Origin gets 403
+  --allow-host <hostname>
+                       Accept this hostname in the Host header too, as a proxy that
+                       keeps the client's Host sends it. Repeatable. On an address
+                       other than loopback, it turns the Host check on
   --api-key-login      OAuth without a Redmine application: the consent page asks
                        for the person's API key
   --allow-client <hostname>
@@ -187,6 +192,12 @@ const HttpSettings = Env.omit({ REDMINE_API_KEY: true, REDMINE_MCP_FILES_DIR: tr
           "takes a hostname such as app.example.com or an origin such as https://app.example.com, in lowercase and without a path",
       })
       .default([]),
+    "--allow-host": z
+      .array(z.string())
+      .refine((entries) => entries.every(isHostname), {
+        error: "takes a hostname such as mcp.example.com, in lowercase and without a port",
+      })
+      .default([]),
     "--api-key-login": z.boolean().optional(),
     "--allow-client": z
       .array(z.string())
@@ -232,7 +243,14 @@ const HttpSettings = Env.omit({ REDMINE_API_KEY: true, REDMINE_MCP_FILES_DIR: tr
     }
   });
 
-const HTTP_FLAGS = ["port", "host", "allow-origin", "api-key-login", "allow-client"] as const;
+const HTTP_FLAGS = [
+  "port",
+  "host",
+  "allow-origin",
+  "allow-host",
+  "api-key-login",
+  "allow-client",
+] as const;
 
 interface Flags {
   "read-only"?: boolean;
@@ -241,6 +259,7 @@ interface Flags {
   port?: string;
   host?: string;
   "allow-origin"?: string[];
+  "allow-host"?: string[];
   "api-key-login"?: boolean;
   "allow-client"?: string[];
   help?: boolean;
@@ -269,6 +288,7 @@ export function parseCli(
         port: { type: "string" },
         host: { type: "string" },
         "allow-origin": { type: "string", multiple: true },
+        "allow-host": { type: "string", multiple: true },
         "api-key-login": { type: "boolean" },
         "allow-client": { type: "string", multiple: true },
         help: { type: "boolean", short: "h" },
@@ -316,6 +336,7 @@ function httpCommand(flags: Flags, env: Readonly<Record<string, string | undefin
     "--port": flags.port,
     "--host": flags.host,
     "--allow-origin": flags["allow-origin"],
+    "--allow-host": flags["allow-host"],
     "--api-key-login": flags["api-key-login"],
     "--allow-client": flags["allow-client"],
   });
@@ -323,12 +344,15 @@ function httpCommand(flags: Flags, env: Readonly<Record<string, string | undefin
   const settings = parsed.data;
   const { REDMINE_URL, REDMINE_VERSION, REDMINE_MCP_ACCESS, REDMINE_MCP_PUBLIC_URL } = settings;
   const { "--port": port, "--host": host, "--allow-origin": allowedOrigins } = settings;
+  const proxyHosts = settings["--allow-host"];
   const loopback =
     host === "localhost" || host === "::1" || (isIPv4(host) && host.startsWith("127."));
   const hostnames = [...localhostAllowedHostnames(), isIPv6(host) ? `[${host}]` : host];
   // A proxy that keeps the client's Host sends the public one, which no rebinding page can name.
   const publicHost = REDMINE_MCP_PUBLIC_URL && new URL(REDMINE_MCP_PUBLIC_URL).hostname;
   if (publicHost && !hostnames.includes(publicHost)) hostnames.push(publicHost);
+  for (const name of proxyHosts) if (!hostnames.includes(name)) hostnames.push(name);
+  const knowsEveryHost = loopback || proxyHosts.length > 0;
   const oauth = oauthOptions(settings);
   return {
     kind: "http",
@@ -340,7 +364,7 @@ function httpCommand(flags: Flags, env: Readonly<Record<string, string | undefin
       access: requestedAccess(REDMINE_MCP_ACCESS, flags),
       allowedOrigins,
       // A browser page on another site may reach a loopback port, but its Host still names that site.
-      ...(loopback ? { allowedHosts: hostnames } : {}),
+      ...(knowsEveryHost ? { allowedHosts: hostnames } : {}),
       ...(REDMINE_MCP_PUBLIC_URL === undefined ? {} : { publicUrl: REDMINE_MCP_PUBLIC_URL }),
       ...(oauth === undefined ? {} : { oauth }),
     },

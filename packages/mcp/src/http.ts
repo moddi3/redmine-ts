@@ -72,7 +72,10 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
    * Default: none.
    */
   allowedOrigins?: readonly string[];
-  /** Hostnames the Host header may name, against DNS rebinding. Set it when listening on loopback. */
+  /**
+   * Hostnames the Host header may name, against DNS rebinding. Set it when listening on loopback, or
+   * when you know every name clients reach the handler by.
+   */
   allowedHosts?: readonly string[];
   /** Requests the MCP SDK rejects and failures outside a tool result. None of them carries the key. */
   onError?: (error: Error) => void;

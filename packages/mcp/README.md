@@ -63,13 +63,13 @@ REDMINE_URL=https://tracker.example.com npx -y @redmine-ts/mcp --http --no-delet
 
 The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisions without sessions: each request stands alone, and `GET` and `DELETE` on `/mcp` answer 405. The access mode and `REDMINE_VERSION` apply to every request, as they do over stdio. `SIGINT` or `SIGTERM` lets requests in flight finish and then stops the server; a second signal stops it at once.
 
-| Request                                              | Answer                                                                                                   |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| No `X-Redmine-API-Key` header, or an empty one       | 401, with a JSON-RPC error that names the header. With [OAuth](#oauth), a 401 with a `Bearer` challenge. |
-| An `Origin` that `--allow-origin` does not list      | 403.                                                                                                     |
-| A `Host` other than localhost, on a loopback address | 403.                                                                                                     |
-| A path other than `/mcp`                             | 404. With `REDMINE_MCP_PUBLIC_URL`, the server serves that URL's path and the OAuth paths instead.       |
-| A key Redmine rejects                                | The tool call returns an error result with Redmine's 401.                                                |
+| Request                                         | Answer                                                                                                   |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| No `X-Redmine-API-Key` header, or an empty one  | 401, with a JSON-RPC error that names the header. With [OAuth](#oauth), a 401 with a `Bearer` challenge. |
+| An `Origin` that `--allow-origin` does not list | 403.                                                                                                     |
+| A `Host` that is not one of the server's names  | 403, on a loopback address or with `--allow-host`. See [Security defaults](#security-defaults).          |
+| A path other than `/mcp`                        | 404. With `REDMINE_MCP_PUBLIC_URL`, the server serves that URL's path and the OAuth paths instead.       |
+| A key Redmine rejects                           | The tool call returns an error result with Redmine's 401.                                                |
 
 Claude Code:
 
@@ -94,9 +94,9 @@ Cursor, in `.cursor/mcp.json` or `~/.cursor/mcp.json`, with the key read from th
 ### Security defaults
 
 - The server listens on `127.0.0.1`. To listen anywhere else, pass the address with `--host`.
-- On a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, or the address itself. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it.
+- On a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, the address itself, the host of `REDMINE_MCP_PUBLIC_URL`, or a hostname that `--allow-host` lists. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it. A rebound page can also reach a server on another private address, such as `0.0.0.0` in a container, but there the server cannot know every name its clients use. So on any other address the server checks `Host` against the same list only when `--allow-host` is given.
 - A request with an `Origin` header gets 403 unless `--allow-origin` lists it. Browsers send `Origin`; command-line and desktop clients do not, so they pass. See [Browser clients and CORS](#browser-clients-and-cors).
-- The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so for remote use put a proxy that terminates TLS in front of the server and keep the server on loopback. Caddy passes the client's `Host` to the server unless told otherwise:
+- The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so for remote use put a proxy that terminates TLS in front of the server and keep the server on loopback. Caddy passes the client's `Host` to the server unless told otherwise. Rewrite it as below, or keep it and start the server with `--allow-host mcp.example.com`:
 
 ```caddy
 mcp.example.com {
@@ -423,11 +423,12 @@ The server reads its settings once at startup. A missing or invalid value stops 
 | `--port <n>`                        | The HTTP port, 3737 by default. `0` picks a free port.                                                                                             |
 | `--host <addr>`                     | The address to listen on, `127.0.0.1` by default.                                                                                                  |
 | `--allow-origin <hostname\|origin>` | Admits browser requests from a hostname or an exact origin and sends them CORS headers. Repeat it for more. See [CORS](#browser-clients-and-cors). |
+| `--allow-host <hostname>`           | Accepts this hostname in `Host`, for a proxy that keeps the client's `Host`. Repeat it for more. Off loopback, it turns the `Host` check on.       |
 | `--api-key-login`                   | OAuth without a Redmine application: the consent page asks for the API key. See [API key sign-in](#api-key-sign-in).                               |
 | `--allow-client <hostname>`         | Admits only OAuth clients on this host. Repeat it for more. See [Run the server](#run-the-server).                                                 |
 | `--help`                            | Prints the settings and exits.                                                                                                                     |
 
-`--port`, `--host`, `--allow-origin`, `--api-key-login` and `--allow-client` need `--http`.
+`--port`, `--host`, `--allow-origin`, `--allow-host`, `--api-key-login` and `--allow-client` need `--http`.
 
 ## Access modes
 
@@ -557,7 +558,7 @@ serveStdio(() =>
 
 `access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. To enable `path` uploads and `attachments_save`, pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. The main entry never imports file system code, so a server without `files` cannot touch local files.
 
-`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. With `publicUrl`, it routes the endpoint and the [OAuth paths](#endpoints) itself, so give it every request; `oauth` takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, `store` (see [Grant store](#grant-store)), and the required `fetchClientMetadata`. To accept tokens from another authorization server instead, pass `verifier: { issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback; without it the handler does not check `Host`.
+`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. With `publicUrl`, it routes the endpoint and the [OAuth paths](#endpoints) itself, so give it every request; `oauth` takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, `store` (see [Grant store](#grant-store)), and the required `fetchClientMetadata`. To accept tokens from another authorization server instead, pass `verifier: { issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames; a bad origin entry throws when the handler is created. Set `allowedHosts` when you listen on loopback, or when you know every name clients reach the handler by, as `--allow-host` does; without it the handler does not check `Host`.
 
 Bun:
 
