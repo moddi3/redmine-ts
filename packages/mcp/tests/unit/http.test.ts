@@ -846,7 +846,10 @@ describe("createRedmineMcpHandler with a verifier", () => {
     );
     expect(deleted.status).toBe(200);
     expect(deleted.headers.has("www-authenticate")).toBe(false);
-    expect(await deleted.text()).toContain('"isError":true');
+    const refusal = await deleted.text();
+    expect(refusal).toContain('"isError":true');
+    // The token narrowed the mode to read-only, so the refusal must not blame the server's.
+    expect(refusal).toContain('which the \\"read-only\\" access mode refuses');
     const posted = await send(
       { Authorization: "Bearer reader" },
       tool(2, "raw_request", { method: "POST", path: "issues.json", body: {} }),

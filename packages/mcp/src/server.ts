@@ -232,7 +232,7 @@ function redmineFailure(tool: ToolSpec, error: RedmineError): CallToolResult {
       case "invalid_input":
         return `Invalid input for ${tool.name}: ${data.detail}. Nothing was sent.`;
       case "access_denied":
-        return `${tool.name} sends ${data.method}, which this server's "${data.access}" access mode refuses. Nothing was sent.`;
+        return `${tool.name} sends ${data.method}, which the "${data.access}" access mode refuses. Nothing was sent.`;
       case "unsupported_version":
         return `${tool.name} needs Redmine ${data.since}${data.until ? ` to ${data.until}` : " or newer"}, and this server is configured for ${data.declared}. Nothing was sent.`;
       case "conflict":
