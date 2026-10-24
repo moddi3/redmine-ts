@@ -6,10 +6,12 @@
 import {
   bearerAuthChallengeResponse,
   createMcpHandler,
-  hostHeaderValidationResponse,
+  isJSONRPCRequest,
   OAuthError,
   OAuthErrorCode,
-  originValidationResponse,
+  readRequestBody,
+  validateHostHeader,
+  validateOriginHeader,
   verifyBearerToken,
 } from "@modelcontextprotocol/server";
 import type { AuthInfo, OAuthTokenVerifier } from "@modelcontextprotocol/server";
@@ -183,11 +185,11 @@ export function createRedmineMcpHandler(
 
   async function endpoint(request: Request): Promise<Response> {
     const origin = request.headers.get("origin");
-    const rejected =
+    const checked =
       origin !== null && exactOrigins.has(origin)
         ? undefined
-        : originValidationResponse(request, hostnames);
-    if (rejected !== undefined) return rejected;
+        : validateOriginHeader(origin, hostnames);
+    if (checked?.ok === false) return refuse(request, 403, checked.message);
     // Origin is empty or allowed from here on; an empty one is no browser's.
     const cors = origin !== null && origin !== "" ? origin : undefined;
     if (cors !== undefined && isPreflight(request)) return preflight(cors);
@@ -199,7 +201,7 @@ export function createRedmineMcpHandler(
         authInfo: { token: apiKey, clientId: "", scopes: [], extra: { redmine } },
       });
     } else if (bearer === undefined) {
-      response = missingKey();
+      response = await missingKey(request);
     } else {
       const authInfo = await bearer.authenticate(request);
       response = authInfo instanceof Response ? authInfo : await mcp.fetch(request, { authInfo });
@@ -208,8 +210,8 @@ export function createRedmineMcpHandler(
   }
 
   return async (request) => {
-    const rejected = hosts && hostHeaderValidationResponse(request, hosts);
-    if (rejected !== undefined) return rejected;
+    const host = hosts && validateHostHeader(request.headers.get("host"), hosts);
+    if (host?.ok === false) return refuse(request, 403, host.message);
     if (paths === undefined) return endpoint(request);
     // Only the path counts: behind a proxy, the URL's origin is the server's, not the public one.
     const path = comparablePath(new URL(request.url).pathname);
@@ -381,17 +383,26 @@ function withCors(response: Response, origin: string): Response {
   return wrapped;
 }
 
+type JsonRpcId = string | number | null;
+
+function jsonRpcId(body: unknown): JsonRpcId {
+  return isJSONRPCRequest(body) ? body.id : null;
+}
+
+async function refuse(request: Request, status: number, message: string): Promise<Response> {
+  let id: JsonRpcId = null;
+  try {
+    const body = await readRequestBody(request);
+    if (!body.tooLarge) id = jsonRpcId(JSON.parse(body.text));
+  } catch {}
+  return Response.json({ jsonrpc: "2.0", error: { code: -32000, message }, id }, { status });
+}
+
 /** No WWW-Authenticate: no scheme names a custom header, and a Bearer challenge sends clients to OAuth. */
-function missingKey(): Response {
-  return Response.json(
-    {
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: `Send the API key of a Redmine user in the ${API_KEY_HEADER} header. Redmine shows it under My account, API access key.`,
-      },
-      id: null,
-    },
-    { status: 401 },
+function missingKey(request: Request): Promise<Response> {
+  return refuse(
+    request,
+    401,
+    `Send the API key of a Redmine user in the ${API_KEY_HEADER} header. Redmine shows it under My account, API access key.`,
   );
 }
