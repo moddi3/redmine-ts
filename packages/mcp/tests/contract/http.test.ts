@@ -114,25 +114,32 @@ describeServers("Streamable HTTP", (server) => {
   });
 
   it("answers 401 with id null to a wrong key whose body is over 64 KiB", async () => {
-    const response = await fetch(full.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-        "X-Redmine-API-Key": "0000000000000000000000000000000000000000",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "users_current", arguments: {}, _meta: { pad: "x".repeat(4_000_000) } },
-      }),
-    });
-    expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({
-      id: null,
-      error: { message: expect.stringContaining("does not accept the API key") },
-    });
+    // Node never reads the rest of a refused body, so a later request on a reused connection hangs.
+    const running = await start(server);
+    try {
+      const response = await fetch(running.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "X-Redmine-API-Key": "0000000000000000000000000000000000000000",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "users_current", arguments: {}, _meta: { pad: "x".repeat(4_000_000) } },
+        }),
+      });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({
+        id: null,
+        error: { message: expect.stringContaining("does not accept the API key") },
+      });
+    } finally {
+      running.child.kill();
+      await once(running.child, "exit");
+    }
   });
 
   it("uploads a 3 MB file over HTTP with a user's key", async () => {
