@@ -5,7 +5,7 @@
 | File            | Upstream tag | Redmine version it describes |
 | --------------- | ------------ | ---------------------------- |
 | `6.1.3-r1.yaml` | `6.1.3-r1`   | 6.1                          |
-| `7.0.1-r1.yaml` | `7.0.1-r1`   | 7.0                          |
+| `7.0.2-r1.yaml` | `7.0.2-r1`   | 7.0                          |
 
 The files are byte-for-byte copies of the upstream tags. The generator in `packages/sdk/generator/` reads every file here, takes the Redmine version from the file name, and merges them into one superset. Edit nothing in `redmine-openapi/` by hand: a fix belongs upstream, and a decision about this SDK's surface belongs in `packages/sdk/generator/overlay.ts`.
 
