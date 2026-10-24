@@ -259,7 +259,7 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
       safety:
         overlay.safety[id] ??
         (method === "GET" ? "read" : method === "DELETE" ? "idempotent" : "write"),
-      stability: /Status: Stable\b/.test(tag.description ?? "") ? "stable" : "alpha",
+      stability: overlay.stableTags.includes(tag.name) ? "stable" : "alpha",
     },
     tag: tag.name,
     namespace,
@@ -358,6 +358,10 @@ function checkOverlay(ops: OpModel[], doc: OpenApi, overlay: Overlay): void {
   for (const tag of Object.keys(overlay.namespaces)) {
     if (!doc.tags.some((t) => t.name === tag))
       throw new Error(`overlay.namespaces names unknown tag ${tag}`);
+  }
+  for (const tag of overlay.stableTags) {
+    if (!doc.tags.some((t) => t.name === tag))
+      throw new Error(`overlay.stableTags names unknown tag ${tag}`);
   }
   for (const [id, verb] of Object.entries(overlay.verbs)) {
     if (!need("verbs", id).verb) throw new Error(`overlay.verbs names hidden operation ${id}`);

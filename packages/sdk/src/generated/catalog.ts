@@ -247,6 +247,20 @@ const inUploads: JsonSchema = {
   },
 };
 
+const outIssueChild: JsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "integer" },
+    tracker: outIdName,
+    subject: { type: "string" },
+    children: {
+      type: "array",
+      items: { type: "object", description: "Same shape as the enclosing issue_child." },
+    },
+  },
+  required: ["id", "subject"],
+};
+
 const outIssue: JsonSchema = {
   type: "object",
   properties: {
@@ -286,13 +300,7 @@ const outIssue: JsonSchema = {
         },
       },
     },
-    children: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: { id: { type: "integer" }, tracker: outIdName, subject: { type: "string" } },
-      },
-    },
+    children: { type: "array", items: outIssueChild },
     attachments: { type: "array", items: outAttachment },
     relations: {
       type: "array",
@@ -540,6 +548,8 @@ const outUser: JsonSchema = {
     auth_source: outIdName,
     groups: { type: "array", items: outIdName },
     memberships: {
+      description:
+        "Project memberships visible to the current user. Memberships in archived projects are excluded.",
       type: "array",
       items: {
         type: "object",
@@ -851,6 +861,8 @@ const outGroup: JsonSchema = {
     custom_fields: { type: "array", items: outCustomFieldValue },
     users: { type: "array", items: outIdName },
     memberships: {
+      description:
+        "Project memberships visible to the current user. Memberships in archived projects are excluded.",
       type: "array",
       items: {
         type: "object",
@@ -1029,7 +1041,7 @@ export const CATALOG: readonly CatalogEntry[] = [
           properties: {
             issue_id: {
               description:
-                "Filter by issue ID.\nFormat: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `1`, `>=100`, `><1|100`",
+                "Filter by issue ID.\nFormat: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nFor equality, separate multiple IDs with commas. A pipe separates range bounds, not IDs in an equality list.\nExamples: `1`, `1,2`, `>=100`, `><1|100`",
               anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
             },
             project_id: {
@@ -1378,7 +1390,11 @@ export const CATALOG: readonly CatalogEntry[] = [
         done_ratio: { type: "integer", minimum: 0, maximum: 100 },
         category_id: { type: ["integer", "null"] },
         fixed_version_id: { type: ["integer", "null"] },
-        assigned_to_id: { type: ["integer", "null"] },
+        assigned_to_id: {
+          description:
+            "ID of the assignee. If omitted or null, Redmine uses the first assignable default assignee, checking the category before the project.\nDefault assignees that cannot be assigned (e.g. locked users) are skipped.",
+          type: ["integer", "null"],
+        },
         parent_issue_id: { type: ["integer", "null"] },
         custom_fields: inCustomFields,
         custom_field_values: inCustomFieldValues,
@@ -1424,7 +1440,7 @@ export const CATALOG: readonly CatalogEntry[] = [
             ],
           },
           description:
-            "Comma-separated list of associated data to include in the response.\nValues: `children` (child issues), `attachments` (file attachments), `relations` (issue relations), `changesets` (associated VCS changesets), `journals` (change history and notes), `watchers` (users watching the issue), `allowed_statuses` (status transitions available for the current user)",
+            "Comma-separated list of associated data to include in the response.\nValues: `children` (child issues and their descendants, limited to issues visible to the current user), `attachments` (file attachments), `relations` (issue relations), `changesets` (associated VCS changesets), `journals` (change history and notes), `watchers` (users watching the issue), `allowed_statuses` (status transitions available for the current user)\nThe `children` field is omitted for leaf issues. For non-leaf issues, it may be empty when none of their children are visible.",
         },
       },
       required: ["issue_id"],
@@ -2289,7 +2305,7 @@ export const CATALOG: readonly CatalogEntry[] = [
           type: "array",
           items: { type: "string", enum: ["memberships", "groups", "auth_source"] },
           description:
-            "Comma-separated list of associated data to include in the response.\nValues: `memberships` (project memberships with roles), `groups` (groups the user belongs to), `auth_source` (authentication source information)",
+            "Comma-separated list of associated data to include in the response.\nValues: `memberships` (project memberships with roles, limited to projects visible to the current user), `groups` (groups the user belongs to), `auth_source` (authentication source information)",
         },
       },
       required: ["user_id"],
@@ -2412,7 +2428,7 @@ export const CATALOG: readonly CatalogEntry[] = [
           type: "array",
           items: { type: "string", enum: ["memberships", "groups", "auth_source"] },
           description:
-            "Comma-separated list of associated data to include in the response.\nValues: `memberships` (project memberships with roles), `groups` (groups the user belongs to), `auth_source` (authentication source information)",
+            "Comma-separated list of associated data to include in the response.\nValues: `memberships` (project memberships with roles, limited to projects visible to the current user), `groups` (groups the user belongs to), `auth_source` (authentication source information)",
         },
       },
       additionalProperties: false,
@@ -3671,7 +3687,7 @@ export const CATALOG: readonly CatalogEntry[] = [
           type: "array",
           items: { type: "string", enum: ["users", "memberships"] },
           description:
-            "Comma-separated list of associated data to include in the response.\nValues: `users` (list of users in the group), `memberships` (project memberships with roles)",
+            "Comma-separated list of associated data to include in the response.\nValues: `users` (list of users in the group), `memberships` (project memberships with roles, limited to projects visible to the current user)",
         },
       },
       required: ["group_id"],

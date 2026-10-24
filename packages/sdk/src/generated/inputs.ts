@@ -10,7 +10,8 @@ export interface GetIssuesWhere {
    * Filter by issue ID.
    * Format: `[operator]value`
    * Operators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)
-   * Examples: `1`, `>=100`, `><1|100`
+   * For equality, separate multiple IDs with commas. A pipe separates range bounds, not IDs in an equality list.
+   * Examples: `1`, `1,2`, `>=100`, `><1|100`
    */
   issue_id?: Cond<string | number, "range" | "presence">;
   /**
@@ -371,6 +372,10 @@ export interface CreateIssueInput {
   done_ratio?: number;
   category_id?: number | null;
   fixed_version_id?: number | null;
+  /**
+   * ID of the assignee. If omitted or null, Redmine uses the first assignable default assignee, checking the category before the project.
+   * Default assignees that cannot be assigned (e.g. locked users) are skipped.
+   */
   assigned_to_id?: number | null;
   parent_issue_id?: number | null;
   custom_fields?: CustomFields;
@@ -394,7 +399,8 @@ export interface GetIssueInput<I extends GetIssueInclude = GetIssueInclude> {
   issue_id: number;
   /**
    * Comma-separated list of associated data to include in the response.
-   * Values: `children` (child issues), `attachments` (file attachments), `relations` (issue relations), `changesets` (associated VCS changesets), `journals` (change history and notes), `watchers` (users watching the issue), `allowed_statuses` (status transitions available for the current user)
+   * Values: `children` (child issues and their descendants, limited to issues visible to the current user), `attachments` (file attachments), `relations` (issue relations), `changesets` (associated VCS changesets), `journals` (change history and notes), `watchers` (users watching the issue), `allowed_statuses` (status transitions available for the current user)
+   * The `children` field is omitted for leaf issues. For non-leaf issues, it may be empty when none of their children are visible.
    */
   include?: readonly I[];
 }
@@ -821,7 +827,7 @@ export interface GetUserInput<I extends GetUserInclude = GetUserInclude> {
   user_id: number;
   /**
    * Comma-separated list of associated data to include in the response.
-   * Values: `memberships` (project memberships with roles), `groups` (groups the user belongs to), `auth_source` (authentication source information)
+   * Values: `memberships` (project memberships with roles, limited to projects visible to the current user), `groups` (groups the user belongs to), `auth_source` (authentication source information)
    */
   include?: readonly I[];
 }
@@ -888,7 +894,7 @@ export type GetCurrentUserInclude = "memberships" | "groups" | "auth_source";
 export interface GetCurrentUserInput<I extends GetCurrentUserInclude = GetCurrentUserInclude> {
   /**
    * Comma-separated list of associated data to include in the response.
-   * Values: `memberships` (project memberships with roles), `groups` (groups the user belongs to), `auth_source` (authentication source information)
+   * Values: `memberships` (project memberships with roles, limited to projects visible to the current user), `groups` (groups the user belongs to), `auth_source` (authentication source information)
    */
   include?: readonly I[];
 }
@@ -1357,7 +1363,7 @@ export interface GetGroupInput<I extends GetGroupInclude = GetGroupInclude> {
   group_id: number;
   /**
    * Comma-separated list of associated data to include in the response.
-   * Values: `users` (list of users in the group), `memberships` (project memberships with roles)
+   * Values: `users` (list of users in the group), `memberships` (project memberships with roles, limited to projects visible to the current user)
    */
   include?: readonly I[];
 }

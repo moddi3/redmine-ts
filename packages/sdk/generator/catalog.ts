@@ -61,11 +61,12 @@ export function catalogFile(ops: OpModel[], merged: Merged): string {
     return new Ref(name);
   };
 
-  const component = (name: string, mode: Mode): Ref => {
+  /** A recursive schema is inlined one level deep; the nested level is an object whose shape repeats. */
+  const component = (name: string, mode: Mode): Ref | JsObject => {
     const id = `${mode === "input" ? "in" : "out"}${pascal(name)}`;
     if (declared.has(id)) return new Ref(id);
     if (pending.has(id))
-      throw new Error(`schema ${name} is recursive, which the catalog cannot inline`);
+      return { type: "object", description: `Same shape as the enclosing ${name}.` };
     const schema = components[name];
     if (!schema) throw new Error(`unknown schema ${name}`);
     pending.add(id);

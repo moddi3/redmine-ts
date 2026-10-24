@@ -96,6 +96,19 @@ describe("catalog", () => {
     expect(entry("issues.update").output).toEqual({ kind: "empty" });
     expect(entry("attachments.download").output).toEqual({ kind: "binary" });
   });
+
+  test("recursive issue children are checked one level deep", () => {
+    const issue = schemaOf(entry("issues.get").output) as { properties: Record<string, object> };
+    const children = issue.properties.children!;
+
+    expect(
+      check(children, [{ id: 2, subject: "Child", children: [{ id: 3, subject: "Grandchild" }] }]),
+    ).toEqual([]);
+    expect(check(children, [{ id: 2, children: [] }])).not.toEqual([]);
+    expect(
+      check(children, [{ id: 2, subject: "Child", children: [{ from: "a plugin" }] }]),
+    ).toEqual([]);
+  });
 });
 
 describe("where schemas accept exactly the conditions compileWhere accepts", () => {
