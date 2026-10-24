@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { parseCli } from "../../src/config.ts";
+import { publicFetch } from "../../src/node.ts";
 
 const KEY = "0d1e2a3d4b5e6e7f8a9b0c1d2e3f4a5b6c7d8e9f";
 const env = { REDMINE_URL: "https://tracker.example.com/redmine", REDMINE_API_KEY: KEY };
@@ -207,6 +208,124 @@ describe("parseCli --http", () => {
     expect(parseCli(["--port", "80", "--allow-origin", "a.example"], env)).toEqual({
       kind: "error",
       message: "--port, --allow-origin need --http",
+    });
+  });
+});
+
+describe("parseCli --http with OAuth", () => {
+  const SECRET = "c2VjcmV0LXNlY3JldC1zZWNyZXQtc2VjcmV0LXNlY3JldA==";
+  const oauth = {
+    REDMINE_URL: "http://redmine:3000",
+    REDMINE_MCP_PUBLIC_URL: "https://redmine.example.com/redmine/mcp",
+    REDMINE_MCP_AUTH_SECRET: SECRET,
+    REDMINE_OAUTH_CLIENT_ID: "app-id",
+    REDMINE_OAUTH_CLIENT_SECRET: "app-secret",
+  };
+
+  it("builds the authorization server from the environment and checks Metadata URLs publicly", () => {
+    const command = parseCli(["--http", "--allow-client", "claude.ai"], {
+      ...oauth,
+      REDMINE_PUBLIC_URL: "https://redmine.example.com/redmine",
+      REDMINE_MCP_AUTH_PREVIOUS_SECRET: `old-${SECRET}`,
+    });
+    expect(command).toMatchObject({
+      kind: "http",
+      options: {
+        baseUrl: "http://redmine:3000",
+        publicUrl: "https://redmine.example.com/redmine/mcp",
+        // A proxy that keeps the public Host still reaches a loopback listener.
+        allowedHosts: ["localhost", "127.0.0.1", "[::1]", "127.0.0.1", "redmine.example.com"],
+        oauth: {
+          secret: SECRET,
+          previousSecret: `old-${SECRET}`,
+          redmineApp: { clientId: "app-id", clientSecret: "app-secret" },
+          redminePublicUrl: "https://redmine.example.com/redmine",
+          allowedClientHosts: ["claude.ai"],
+          fetchClientMetadata: publicFetch,
+          // One process, so its memory is a real store: single use and rotation hold.
+          store: { consume: expect.any(Function), has: expect.any(Function) },
+        },
+      },
+    });
+  });
+
+  it("takes --api-key-login instead of the Redmine application", () => {
+    const { REDMINE_OAUTH_CLIENT_ID: _, REDMINE_OAUTH_CLIENT_SECRET: __, ...keys } = oauth;
+    const command = parseCli(["--http", "--api-key-login"], keys);
+    expect(command).toMatchObject({ kind: "http", options: { oauth: { apiKeyLogin: true } } });
+    expect(command.kind === "http" && command.options.oauth).not.toHaveProperty("redmineApp");
+  });
+
+  it("serves a public URL's path without OAuth, unchanged otherwise", () => {
+    const command = parseCli(["--http"], {
+      REDMINE_URL: "http://redmine:3000",
+      REDMINE_MCP_PUBLIC_URL: "http://example.com/mcp",
+    });
+    expect(command).toMatchObject({
+      kind: "http",
+      options: { publicUrl: "http://example.com/mcp" },
+    });
+    expect(command.kind === "http" && command.options).not.toHaveProperty("oauth");
+  });
+
+  it.each([
+    [
+      { REDMINE_MCP_AUTH_SECRET: "short" },
+      [],
+      "REDMINE_MCP_AUTH_SECRET must be at least 32 random characters",
+    ],
+    [
+      { REDMINE_MCP_AUTH_SECRET: "redmine".repeat(6) },
+      [],
+      "REDMINE_MCP_AUTH_SECRET must be at least 32 random characters",
+    ],
+    [
+      { REDMINE_MCP_PUBLIC_URL: "https://redmine.example.com/redmine/mcp/" },
+      [],
+      "REDMINE_MCP_PUBLIC_URL must be written as https://redmine.example.com/redmine/mcp",
+    ],
+    [
+      { REDMINE_MCP_PUBLIC_URL: undefined },
+      [],
+      "REDMINE_MCP_AUTH_SECRET needs REDMINE_MCP_PUBLIC_URL",
+    ],
+    [
+      { REDMINE_MCP_PUBLIC_URL: "http://redmine.example.com/mcp" },
+      [],
+      "REDMINE_MCP_PUBLIC_URL must be https for OAuth, except on localhost",
+    ],
+    [
+      { REDMINE_MCP_PUBLIC_URL: "https://redmine.example.com/mcp#x" },
+      [],
+      "REDMINE_MCP_PUBLIC_URL must not carry a query, a fragment or credentials",
+    ],
+    [{ REDMINE_OAUTH_CLIENT_SECRET: " " }, [], "REDMINE_OAUTH_CLIENT_SECRET is required"],
+    [{}, ["--api-key-login"], "--api-key-login replaces the Redmine application"],
+    [{}, ["--allow-client", "https://claude.ai"], "--allow-client takes a hostname"],
+    [
+      { REDMINE_MCP_AUTH_SECRET: undefined },
+      [],
+      "REDMINE_OAUTH_CLIENT_ID needs REDMINE_MCP_AUTH_SECRET",
+    ],
+    [
+      {
+        REDMINE_MCP_AUTH_SECRET: undefined,
+        REDMINE_OAUTH_CLIENT_ID: undefined,
+        REDMINE_OAUTH_CLIENT_SECRET: undefined,
+      },
+      ["--api-key-login"],
+      "--api-key-login needs REDMINE_MCP_AUTH_SECRET",
+    ],
+  ] as const)("explains %j %j", (override, argv, message) => {
+    const command = parseCli(["--http", ...argv], { ...oauth, ...override });
+    expect(command.kind === "error" && command.message).toContain(message);
+    expect(JSON.stringify(command)).not.toMatch(/app-secret|c2VjcmV0/);
+  });
+
+  it("refuses the OAuth flags without --http", () => {
+    expect(parseCli(["--api-key-login", "--allow-client", "claude.ai"], env)).toEqual({
+      kind: "error",
+      message: "--api-key-login, --allow-client need --http",
     });
   });
 });

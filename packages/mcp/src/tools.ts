@@ -82,6 +82,12 @@ const TIERS: Readonly<Record<Access, readonly Tier[]>> = {
 /** Least to most restrictive, so the strictest of several requested modes is the highest index. */
 export const ACCESS_ORDER: readonly Access[] = ["full", "no-delete", "read-only"];
 
+/** The most restrictive of `modes`. */
+export function strictest(...modes: readonly Access[]): Access {
+  const at = Math.max(...modes.map((mode) => ACCESS_ORDER.indexOf(mode)));
+  return ACCESS_ORDER[at] ?? "read-only";
+}
+
 /** Whether tools/list shows the tool. A hidden tool still answers a call, and the SDK refuses it. */
 export function isListed(
   tool: ToolSpec,

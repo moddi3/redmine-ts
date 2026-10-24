@@ -31,6 +31,9 @@ const adminPassword = "sdk-admin-pass-1";
 const adminKey = "0d1e2a3d4b5e6e7f8a9b0c1d2e3f4a5b6c7d8e9f";
 const userKey = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
 const userPassword = "sdk-user-pass-1";
+// The OAuth application the MCP server's contract tests sign in through, fixed like the keys.
+const oauthClientId = "redmine-mcp-contract";
+const oauthClientSecret = "redmine-mcp-contract-secret";
 const seedMarker = "REDMINE_ENV_JSON ";
 const bootTimeoutMs = 10 * 60_000;
 
@@ -89,6 +92,17 @@ severity = seed_issue_field('Severity', false)
 tags = seed_issue_field('Tags', true)
 
 raise 'no time entry activities' unless TimeEntryActivity.active.exists?
+
+# Loopback redirect URIs match on any port, so the tests may listen anywhere.
+app = Doorkeeper::Application.find_by(uid: '${oauthClientId}') || Doorkeeper::Application.new(uid: '${oauthClientId}')
+app.name = 'redmine-mcp contract tests'
+app.redirect_uri = "http://127.0.0.1/mcp/oauth/redmine/callback\nhttp://127.0.0.1/redmine/mcp/oauth/redmine/callback"
+app.scopes = Redmine::AccessControl.permissions.map(&:name).join(' ')
+app.confidential = true
+unless app.secret.present? && Doorkeeper::Application.secret_matches?('${oauthClientSecret}', app.secret)
+  Doorkeeper::Application.secret_strategy.store_secret(app, :secret, '${oauthClientSecret}')
+end
+app.save! if app.changed?
 
 puts '${seedMarker}' + JSON.generate(
   adminKey: admin.reload.api_key,
