@@ -4,6 +4,7 @@ import { describe, expect, expectTypeOf, test } from "vite-plus/test";
 import { generate } from "../../generator/generate.ts";
 import { overlay } from "../../generator/overlay.ts";
 import { loadSpecs, type SpecFile } from "../../generator/spec.ts";
+import { uploadKey } from "../../src/core/op.ts";
 import { ops } from "../../src/generated/ops.ts";
 import type { CustomField, Issue } from "../../src/generated/schemas.ts";
 
@@ -252,6 +253,7 @@ describe("operation descriptors", () => {
       envelope: "issue",
       siblings: [],
       clear: ["assigned_to_id"],
+      uploads: "uploads",
     });
   });
 
@@ -260,6 +262,77 @@ describe("operation descriptors", () => {
     await expect(generate(specs, bad)).rejects.toThrow(/updateIssue: subject is not a nullable/);
     const worse = { ...overlay, commaLists: [{ ops: ["getIssues"], filters: ["subject"] }] };
     await expect(generate(specs, worse)).rejects.toThrow(/no filter subject documents =/);
+  });
+
+  describe("inline uploads", () => {
+    const issueBody = (doc: SpecFile["doc"]) =>
+      doc.paths["/issues/{issue_id}.{format}"]!.put!.requestBody!.content["application/json"]!
+        .schema!.properties!.issue!.properties!;
+
+    test("mark every body that references the uploads component, and nothing else", () => {
+      const marked = Object.values(ops).flatMap((op) => {
+        const key = uploadKey(op);
+        return key === undefined ? [] : [`${op.id}.${key}`];
+      });
+      const six = [
+        "createIssue",
+        "createIssueUnderProject",
+        "updateIssue",
+        "createNews",
+        "updateNews",
+        "updateWikiPage",
+      ];
+      expect(marked.toSorted()).toEqual(six.map((id) => `${id}.uploads`).toSorted());
+      expect(generated.report.inlineUploads.toSorted()).toEqual(six.toSorted());
+      expect(uploadKey(ops.createFile)).toBeUndefined();
+    });
+
+    test("an overlay naming a missing component fails generation", async () => {
+      await expect(generate(specs, { ...overlay, inlineUploads: "nope" })).rejects.toThrow(
+        "overlay.inlineUploads: nope is not an array of objects with a string token",
+      );
+    });
+
+    test("a component without a string token fails generation", async () => {
+      const tokenless = withSpecs((v) => {
+        for (const doc of Object.values(v)) {
+          delete doc.components.schemas.uploads!.items!.properties!.token;
+        }
+      });
+      await expect(generate(tokenless)).rejects.toThrow(
+        "not an array of objects with a string token",
+      );
+    });
+
+    test("a top-level uploads field that stops referencing the component fails generation", async () => {
+      const inline = withSpecs((v) => {
+        for (const doc of Object.values(v)) {
+          issueBody(doc).uploads = {
+            type: "array",
+            items: { type: "object", properties: { token: { type: "string" } } },
+          };
+        }
+      });
+      await expect(generate(inline)).rejects.toThrow(
+        "updateIssue: body field uploads does not reference uploads",
+      );
+    });
+
+    test("the component below the top of the body fails generation", async () => {
+      const nested = withSpecs((v) => {
+        for (const doc of Object.values(v)) {
+          const body = issueBody(doc);
+          body.attachments = {
+            type: "object",
+            properties: { list: { $ref: "#/components/schemas/uploads" } },
+          };
+          delete body.uploads;
+        }
+      });
+      await expect(generate(nested)).rejects.toThrow(
+        "updateIssue: uploads is referenced below the top of the body",
+      );
+    });
   });
 
   test("time entry from/to are plain query params, not filters", () => {

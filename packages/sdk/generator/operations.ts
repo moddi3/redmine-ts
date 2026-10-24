@@ -1,13 +1,14 @@
 // Turns merged spec operations into Op descriptors, canonical flat inputs and namespace slots.
 
-import type {
-  FilterSpec,
-  HttpMethod,
-  QueryStyle,
-  RequestBody,
-  ResponseShape,
-  Safety,
-  Stability,
+import {
+  uploadKey,
+  type FilterSpec,
+  type HttpMethod,
+  type QueryStyle,
+  type RequestBody,
+  type ResponseShape,
+  type Safety,
+  type Stability,
 } from "../src/core/op.ts";
 import type { Merged, MergedOp } from "./merge.ts";
 import type { Overlay } from "./overlay.ts";
@@ -88,6 +89,12 @@ export interface Operations {
 
 export function analyzeOperations(merged: Merged, overlay: Overlay): Operations {
   const doc = merged.latest;
+  const list = doc.components.schemas[overlay.inlineUploads];
+  if (list?.type !== "array" || list.items?.properties?.token?.type !== "string") {
+    throw new Error(
+      `overlay.inlineUploads: ${overlay.inlineUploads} is not an array of objects with a string token`,
+    );
+  }
   const includeMisses: string[] = [];
   const ops = merged.ops.map((m) => analyze(m, doc, overlay, includeMisses));
   checkOverlay(ops, doc, overlay);
@@ -197,14 +204,19 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
     const envelope = envelopes[0];
     const siblings = top.filter(([k]) => k !== envelope?.[0]).map(([k]) => k);
     const clear = overlay.clearAsEmpty[id];
+    const bodyFields = [
+      ...(envelope ? members(envelope[1]) : []),
+      ...members(schema).filter((f) => siblings.includes(f.key)),
+    ];
+    const uploads = uploadListKey(schema, bodyFields, doc, overlay.inlineUploads, fail);
     body = {
       kind: "json",
       envelope: envelope?.[0] ?? null,
       siblings,
       ...(clear ? { clear } : {}),
+      ...(uploads ? { uploads } : {}),
     };
-    if (envelope) fields.push(...members(envelope[1]));
-    fields.push(...members(schema).filter((f) => siblings.includes(f.key)));
+    fields.push(...bodyFields);
   } else if (Object.keys(content).length > 0) {
     fail(`unsupported request content ${Object.keys(content).join(", ")}`);
   }
@@ -279,6 +291,52 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
     description: op.description,
     docsUrl: op.externalDocs?.url,
   };
+}
+
+/**
+ * The top-level body field typed by the `component` schema. Redmine reads attachments from `uploads`, so a field
+ * of that name typed otherwise fails, and so does the component below the top of the body: either reshape would
+ * drop inline uploads from the operation without a word.
+ */
+function uploadListKey(
+  body: Schema,
+  fields: readonly Member[],
+  doc: OpenApi,
+  component: string,
+  fail: (msg: string) => never,
+): string | undefined {
+  const typed = (f: Member): boolean =>
+    f.schema.$ref !== undefined && refName(f.schema.$ref) === component;
+  const named = fields.find((f) => f.key === "uploads");
+  if (named && !typed(named)) fail(`body field uploads does not reference ${component}`);
+  const lists = fields.filter(typed);
+  if (lists.length > 1) fail(`several ${component} fields: ${lists.map((f) => f.key).join(", ")}`);
+  if (refersTo(body, component, doc, new Set(lists.map((f) => f.schema)))) {
+    fail(`${component} is referenced below the top of the body`);
+  }
+  return lists[0]?.key;
+}
+
+/** Whether `s` references the `component` schema outside the `allowed` nodes, following other components once. */
+function refersTo(
+  s: Schema | undefined,
+  component: string,
+  doc: OpenApi,
+  allowed: ReadonlySet<Schema>,
+  seen = new Set<string>(),
+): boolean {
+  if (!s || allowed.has(s)) return false;
+  if (s.$ref) {
+    const name = refName(s.$ref);
+    if (name === component) return true;
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return refersTo(doc.components.schemas[name], component, doc, allowed, seen);
+  }
+  const extra = typeof s.additionalProperties === "object" ? [s.additionalProperties] : [];
+  return [...Object.values(s.properties ?? {}), ...(s.oneOf ?? []), s.items, ...extra].some(
+    (child) => refersTo(child, component, doc, allowed, seen),
+  );
 }
 
 function analyzeResponse(
@@ -378,6 +436,9 @@ function checkOverlay(ops: OpModel[], doc: OpenApi, overlay: Overlay): void {
         `overlay.scopedDuplicates.${id}: ${sibling} takes no "${key}", so hiding ${id} loses it`,
       );
     }
+  }
+  if (!ops.some((o) => uploadKey(o.descriptor) !== undefined)) {
+    throw new Error(`overlay.inlineUploads: no request body uses ${overlay.inlineUploads}`);
   }
   for (const id of overlay.extras) need("extras", id);
   for (const [id, param] of Object.entries(overlay.keyset)) {
