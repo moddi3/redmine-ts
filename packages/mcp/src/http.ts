@@ -415,9 +415,9 @@ type Verdict =
 const REVOKED = "Redmine no longer accepts this sign-in. Sign in again.";
 
 /**
- * The response with every answer in it written, so its status can still change: the head reaches the
- * client only when the handler returns. A subscriptions/listen stream is passed on as it is, because it
- * may never end; from 2026-07-28 on, the SDK refuses a request whose Mcp-Method header and body differ.
+ * Reads an event stream to its end, so the status can still change. The head reaches the client only
+ * when the handler returns. A subscriptions/listen stream may never end, so it passes on as it is. From
+ * 2026-07-28 on, the SDK refuses a request whose Mcp-Method header and body differ.
  */
 async function settled(request: Request, response: Response): Promise<Response> {
   const version = request.headers.get("mcp-protocol-version") ?? "";

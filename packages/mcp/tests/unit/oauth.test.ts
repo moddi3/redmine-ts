@@ -434,7 +434,6 @@ describe("built-in authorization server", () => {
     });
     expect(posted.status).toBe(403);
     expect(posted.headers.get("www-authenticate")).toContain('scope="redmine:read redmine:write"');
-    // The server's own mode refuses deletes, so no scope would help.
     const deleted = await callTool(setupped.handle, bearer, "issues_delete", { issue_id: 1 });
     expect(deleted.status).toBe(200);
     expect(await deleted.text()).toContain('"isError":true');

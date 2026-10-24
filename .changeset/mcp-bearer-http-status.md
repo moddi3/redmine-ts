@@ -8,3 +8,5 @@ Over OAuth, two failures inside a request now get an HTTP status that makes clie
 - When a call needs more than the token's scope and the server's own mode allows it, the request answers 403 `insufficient_scope` and names the scopes the call needs. `raw_request` needs the scope of the method it sends.
 
 OAuth responses now arrive whole when the call has finished, on 2025-era requests too, so the status can still change. A request in which Redmine may have applied a write keeps its results, so a retry cannot repeat the write. The `X-Redmine-API-Key` header works as before, and a Redmine 403 or a call the server's own mode refuses is still an error result. That error result now names the request's access mode as "the read-only access mode", since a narrower token can set it.
+
+`createRedmineMcpServer` takes an `observe` option, which gets each request the server sends to Redmine and each call that the access mode refuses.
