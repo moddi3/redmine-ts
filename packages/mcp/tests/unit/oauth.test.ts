@@ -155,7 +155,12 @@ async function tokens(setup: Setup, options: Record<string, string> = {}): Promi
   return (await response.json()) as Issued;
 }
 
-function callTool(handle: Handler, headers: Record<string, string>, name = "issue_statuses_list") {
+function callTool(
+  handle: Handler,
+  headers: Record<string, string>,
+  name = "issue_statuses_list",
+  args: Record<string, unknown> = {},
+) {
   return direct(handle)(PUBLIC_URL, {
     method: "POST",
     headers: {
@@ -167,7 +172,7 @@ function callTool(handle: Handler, headers: Record<string, string>, name = "issu
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name, arguments: {} },
+      params: { name, arguments: args },
     }),
   });
 }
@@ -421,6 +426,18 @@ describe("built-in authorization server", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
     });
     expect((await list.text()).match(/"name":"/g)?.length).toBe(43);
+    const bearer = { Authorization: `Bearer ${read.access_token}` };
+    const posted = await callTool(setupped.handle, bearer, "raw_request", {
+      method: "POST",
+      path: "issues.json",
+      body: {},
+    });
+    expect(posted.status).toBe(403);
+    expect(posted.headers.get("www-authenticate")).toContain('scope="redmine:read redmine:write"');
+    const deleted = await callTool(setupped.handle, bearer, "issues_delete", { issue_id: 1 });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.text()).toContain('"isError":true');
+    expect(setupped.redmine.apiCalls).toEqual([]);
     // Asking for more than the server offers gets what it offers.
     const capped = await tokens(setupped, { scope: "redmine:delete" });
     expect(capped.scope).toBe("redmine:read redmine:write");
@@ -430,6 +447,30 @@ describe("built-in authorization server", () => {
     const { handle } = setup();
     const response = await callTool(handle, { "X-Redmine-API-Key": "jsmith-api-key" });
     expect(await response.text()).toContain("New for jsmith");
+  });
+
+  it("answers 401 invalid_token once Redmine revokes the sign-in, and the refresh fails", async () => {
+    const setupped = setup();
+    const issued = await tokens(setupped);
+    const bearer = { Authorization: `Bearer ${issued.access_token}` };
+    expect(await (await callTool(setupped.handle, bearer)).text()).toContain("New for jsmith");
+    setupped.redmine.revokeAll();
+    const refused = await callTool(setupped.handle, bearer);
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get("www-authenticate")).toBe(
+      `Bearer error="invalid_token", error_description="Redmine no longer accepts this sign-in. Sign in again.", scope="redmine:read redmine:write redmine:delete", resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource"`,
+    );
+    const refreshed = await form(setupped.handle, TOKEN, {
+      grant_type: "refresh_token",
+      refresh_token: issued.refresh_token,
+      client_id: CLAUDE,
+    });
+    expect(refreshed.status).toBe(400);
+    expect(await refreshed.json()).toMatchObject({
+      error: "invalid_grant",
+      error_description: expect.stringContaining("Redmine refused the grant"),
+    });
+    expect(setupped.errors).toEqual([]);
   });
 
   it("refuses tokens that are forged, sealed for another purpose, or expired, with 401", async () => {
@@ -1288,6 +1329,9 @@ describe("API key sign-in, the opt-in fallback", () => {
       });
     expect((await refresh()).status).toBe(200);
     redmine.rotateKey("jsmith-api-key", "new-key");
+    const refused = await callTool(handle, { Authorization: `Bearer ${issued.access_token}` });
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get("www-authenticate")).toContain('error="invalid_token"');
     expect(await (await refresh()).json()).toMatchObject({
       error: "invalid_grant",
       error_description: "Redmine no longer accepts the API key",

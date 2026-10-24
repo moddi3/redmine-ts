@@ -1,11 +1,13 @@
 // raw_request: rm.request for what the typed tools do not cover. The SDK refuses methods the access
 // mode does not allow and paths outside REDMINE_URL, so this tool only says which ones it will send.
 
+import { RedmineError } from "@redmine-ts/sdk";
 import type { Access } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
+import { isApiPath } from "../tools.ts";
 import type { Annotations, ToolSpec } from "../tools.ts";
-import { defineTool } from "./define.ts";
+import { defineTool, ToolError } from "./define.ts";
 
 const BY_ACCESS: Readonly<Record<Access, { sends: string; annotations: Annotations }>> = {
   "read-only": {
@@ -61,13 +63,23 @@ export function rawRequestTool(access: Access): ToolSpec {
     tier: "read",
     annotations,
     run: async (rm, { method, path, query, body, array_format }) => {
-      const response = await rm.request({
-        method,
-        path,
-        ...(query === undefined ? {} : { query }),
-        ...(body === undefined ? {} : { body }),
-        ...(array_format === undefined ? {} : { arrayFormat: array_format }),
-      });
+      const response = await rm
+        .request({
+          method,
+          path,
+          ...(query === undefined ? {} : { query }),
+          ...(body === undefined ? {} : { body }),
+          ...(array_format === undefined ? {} : { arrayFormat: array_format }),
+        })
+        .catch((error: unknown) => {
+          if (RedmineError.is(error, "unauthorized") && !isApiPath(path)) {
+            throw new ToolError(
+              `Redmine answered 401 for ${path}. Redmine accepts API credentials only on its REST formats and answers 401 elsewhere even to valid ones, so end the path in .json, such as issues/7.json.`,
+              error.toJSON(),
+            );
+          }
+          throw error;
+        });
       // rm.request resolves to parsed JSON, or undefined when Redmine sends no body.
       return { structured: { response: (response ?? null) as z.output<typeof Json> } };
     },

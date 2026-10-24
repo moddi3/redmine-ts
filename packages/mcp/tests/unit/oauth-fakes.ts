@@ -16,7 +16,8 @@ interface Grant {
 
 /**
  * Redmine's OAuth as Doorkeeper runs it: single-use codes bound to PKCE and the redirect URI,
- * rotating refresh tokens, and the REST API answering Bearer tokens and API keys. Its authorize page
+ * rotating refresh tokens, and the REST API answering Bearer tokens and API keys a moment later, as
+ * over a network. Its authorize page
  * approves at once for `user`, as a signed-in person who clicks Authorize would. A refresh token dies
  * on use, unless `doorkeeper`, which keeps it valid until the new access token is first used, as
  * Doorkeeper's previous_refresh_token does.
@@ -105,6 +106,7 @@ export function fakeRedmine({ user = "jsmith", expiresIn = 7200, doorkeeper = fa
       }
       return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
     }
+    await new Promise((resolve) => setTimeout(resolve, 2));
     const authorization = request.headers.get("authorization");
     const key = request.headers.get("x-redmine-api-key");
     apiCalls.push({ path, authorization, key });

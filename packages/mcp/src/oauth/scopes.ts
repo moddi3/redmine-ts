@@ -4,7 +4,8 @@
 
 import { VERSIONS } from "@redmine-ts/sdk";
 import type { Access, RedmineVersion } from "@redmine-ts/sdk";
-import { ACCESS_ORDER } from "../tools.ts";
+import { ACCESS_ORDER, allows } from "../tools.ts";
+import type { Tier } from "../tools.ts";
 
 /** Least to most: read, then writes, then deletes. */
 export const SCOPES = ["redmine:read", "redmine:write", "redmine:delete"] as const;
@@ -22,6 +23,12 @@ export function scopesFor(access: Access): Scope[] {
   return SCOPES.filter(
     (scope) => ACCESS_ORDER.indexOf(MODE[scope]) >= ACCESS_ORDER.indexOf(access),
   );
+}
+
+/** The scopes a call of `tier` needs: the least scope that allows it, and every scope below it. */
+export function scopesNeeded(tier: Tier): [Scope, ...Scope[]] {
+  const at = SCOPES.findIndex((scope) => allows(MODE[scope], tier));
+  return SCOPES.slice(0, at + 1) as [Scope, ...Scope[]];
 }
 
 /** The mode `scopes` allow: their highest scope's. Undefined when none of them is ours. */

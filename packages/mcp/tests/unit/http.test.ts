@@ -7,15 +7,20 @@ import { texts } from "../connect.ts";
 
 type Handler = (request: Request) => Promise<Response>;
 
-/** A Redmine that knows two keys, records the key each request carried, and names a status after it. */
+/**
+ * A Redmine that knows two keys, records the key each request carried, and names a status after it.
+ * Like Redmine 6.1 and 7.0, it answers 401 to my/page.js for any key, because the path is outside its API.
+ */
 function fakeRedmine() {
   const keys: (string | null)[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     const key = request.headers.get("x-redmine-api-key");
+    const path = new URL(request.url).pathname;
     keys.push(key);
     if (key !== "alice-key" && key !== "bob-key") return new Response(null, { status: 401 });
-    if (new URL(request.url).pathname === "/issue_statuses.json") {
+    if (path === "/my/page.js") return new Response(null, { status: 401 });
+    if (path === "/issue_statuses.json") {
       return Response.json({
         issue_statuses: [{ id: 1, name: `New for ${key}`, is_closed: false, description: null }],
       });
@@ -412,6 +417,36 @@ describe("createRedmineMcpHandler", () => {
     expect(JSON.stringify([result, errors.map((error) => error.message)])).not.toContain(
       "stolen-key",
     );
+  });
+
+  it("tells raw_request to end the path in .json when Redmine answers 401 outside its API", async () => {
+    const { handle, keys } = handler();
+    const client = await connect(handle, "alice-key");
+    const result = await client.callTool({
+      name: "raw_request",
+      arguments: { method: "GET", path: "my/page.js" },
+    });
+    expect(result.isError).toBe(true);
+    const [message] = texts(result);
+    expect(message).toContain("401 for my/page.js");
+    expect(message).toContain("end the path in .json");
+    expect(message).not.toMatch(/credentials \(401\)|sign in again/);
+    expect(JSON.parse(texts(result).at(-1)!)).toMatchObject({ kind: "unauthorized", status: 401 });
+    expect(keys).toEqual(["alice-key"]);
+  });
+
+  it("keeps the credentials advice for a raw_request that Redmine answers 401 on an API path", async () => {
+    const { handle } = handler();
+    const client = await connect(handle, "revoked-key");
+    const result = await client.callTool({
+      name: "raw_request",
+      arguments: { method: "GET", path: "users/current.json" },
+    });
+    expect(result.isError).toBe(true);
+    const [message] = texts(result);
+    expect(message).toContain("Redmine rejected the credentials (401)");
+    expect(message).not.toContain("end the path in .json");
+    expect(JSON.parse(texts(result).at(-1)!)).toMatchObject({ kind: "unauthorized", status: 401 });
   });
 
   it("throws on a bad baseUrl when created, not on each request", () => {

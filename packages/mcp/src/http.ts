@@ -14,16 +14,18 @@ import {
   validateOriginHeader,
   verifyBearerToken,
 } from "@modelcontextprotocol/server";
-import type { AuthInfo, OAuthTokenVerifier } from "@modelcontextprotocol/server";
+import type { AuthInfo } from "@modelcontextprotocol/server";
 import { createRedmine } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig } from "@redmine-ts/sdk";
-import { accessFor, scopesFor } from "./oauth/scopes.ts";
+import { accessFor, scopesFor, scopesNeeded } from "./oauth/scopes.ts";
+import type { Scope } from "./oauth/scopes.ts";
 import { createAuthorizationServer } from "./oauth/server.ts";
 import type { AuthorizationServer, RedmineOAuthOptions } from "./oauth/server.ts";
 import { comparablePath, CORS_MAX_AGE, publicDocument, publicPaths } from "./oauth/web.ts";
 import type { PublicPaths } from "./oauth/web.ts";
 import { createRedmineMcpServer } from "./server.ts";
-import { strictest } from "./tools.ts";
+import type { Observation } from "./server.ts";
+import { allows, isApiPath, strictest } from "./tools.ts";
 
 export const API_KEY_HEADER = "X-Redmine-API-Key";
 
@@ -102,11 +104,18 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
   verifier?: BearerVerifier;
 }
 
-/** The credential and access mode one request's server is built with. */
-interface RequestAuth {
-  auth: BearerGrant["credential"];
-  access: Access;
-}
+/**
+ * The credential and access mode one request's server is built with. A bearer request's status
+ * depends on what its server sees, so its server reports to `observe`.
+ */
+type RequestAuth =
+  | { readonly kind: "key"; readonly auth: { apiKey: string }; readonly access: Access }
+  | {
+      readonly kind: "bearer";
+      readonly auth: BearerGrant["credential"];
+      readonly access: Access;
+      readonly observe: (observation: Observation) => void;
+    };
 
 const ORIGIN_SCHEME = /^https?:\/\//i;
 
@@ -174,8 +183,13 @@ export function createRedmineMcpHandler(
   const hosts = allowedHosts && [...allowedHosts];
   // fetch below hands the credential over in authInfo.extra, so every server the factory builds has one.
   const mcp = createMcpHandler(
-    ({ authInfo }) =>
-      createRedmineMcpServer({ ...config, ...(authInfo?.extra?.redmine as RequestAuth) }),
+    ({ authInfo }) => {
+      const redmine = authInfo?.extra?.redmine as RequestAuth;
+      return createRedmineMcpServer(
+        { ...config, auth: redmine.auth, access: redmine.access },
+        redmine.kind === "bearer" ? { observe: redmine.observe } : {},
+      );
+    },
     { onerror: onError },
   );
   const bearer =
@@ -196,15 +210,14 @@ export function createRedmineMcpHandler(
     const apiKey = request.headers.get(API_KEY_HEADER)?.trim();
     let response: Response;
     if (apiKey) {
-      const redmine: RequestAuth = { auth: { apiKey }, access };
+      const redmine: RequestAuth = { kind: "key", auth: { apiKey }, access };
       response = await mcp.fetch(request, {
         authInfo: { token: apiKey, clientId: "", scopes: [], extra: { redmine } },
       });
     } else if (bearer === undefined) {
       response = await missingKey(request);
     } else {
-      const authInfo = await bearer.authenticate(request);
-      response = authInfo instanceof Response ? authInfo : await mcp.fetch(request, { authInfo });
+      response = await bearer.serve(request, (authInfo) => mcp.fetch(request, { authInfo }));
     }
     return cors === undefined ? response : withCors(response, cors);
   }
@@ -273,29 +286,69 @@ function bearerGate(
   const resource = new URL(paths.identifier);
   const resourceMetadataUrl = paths.origin + paths.resourceMetadata.at(-1)!;
   const scopes = scopesFor(access);
-  const tokens: OAuthTokenVerifier = {
-    async verifyAccessToken(token) {
+  // Without any credential, the challenge names no error, as RFC 6750 asks.
+  const missing = `Bearer resource_metadata="${resourceMetadataUrl}", scope="${scopes.join(" ")}"`;
+  const challenge = { requiredScopes: scopes, resourceMetadataUrl };
+  async function authenticate(request: Request): Promise<Bearer | Response> {
+    const authorization = request.headers.get("authorization");
+    if (authorization === null) {
+      return Response.json(
+        {
+          error: OAuthErrorCode.InvalidToken,
+          error_description: `Sign in with OAuth, or send the API key of a Redmine user in the ${API_KEY_HEADER} header.`,
+        },
+        { status: 401, headers: { "WWW-Authenticate": missing } },
+      );
+    }
+    // One Bearer credential and nothing after it; the SDK's parser ignores trailing fields.
+    const token = BEARER.exec(authorization)?.[1];
+    if (token === undefined) {
+      const malformed = new OAuthError(
+        OAuthErrorCode.InvalidToken,
+        "Send one token as Authorization: Bearer <token>",
+      );
+      return bearerAuthChallengeResponse(malformed, challenge);
+    }
+    try {
       const grant = await verifier.verify(token);
       if (grant === undefined) {
         throw new OAuthError(OAuthErrorCode.InvalidToken, "The token is invalid or has expired");
       }
+      const authInfo = await verifyBearerToken(`Bearer ${token}`, {
+        verifier: {
+          verifyAccessToken: async () => ({
+            token,
+            clientId: grant.clientId,
+            scopes: [...grant.scopes],
+            expiresAt: grant.expiresAt,
+            resource: new URL(grant.resource),
+          }),
+        },
+        expectedResource: resource,
+        resourceMetadataUrl,
+      });
       const granted = accessFor(grant.scopes);
-      const redmine: RequestAuth | undefined = granted && {
-        auth: grant.credential,
-        access: strictest(access, granted),
-      };
-      return {
-        token,
-        clientId: grant.clientId,
-        scopes: [...grant.scopes],
-        expiresAt: grant.expiresAt,
-        resource: new URL(grant.resource),
-        ...(redmine === undefined ? {} : { extra: { redmine } }),
-      };
-    },
-  };
-  // Without any credential, the challenge names no error, as RFC 6750 asks.
-  const missing = `Bearer resource_metadata="${resourceMetadataUrl}", scope="${scopes.join(" ")}"`;
+      if (granted !== undefined) {
+        return { authInfo, auth: grant.credential, access: strictest(access, granted) };
+      }
+      const insufficient = new OAuthError(
+        OAuthErrorCode.InsufficientScope,
+        `The token grants none of ${scopes.join(", ")}`,
+      );
+      return bearerAuthChallengeResponse(insufficient, challenge);
+    } catch (error) {
+      if (error instanceof OAuthError) return bearerAuthChallengeResponse(error, challenge);
+      // The verifier could not tell, such as when a grant store is down: closed, and retryable.
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+      return Response.json(
+        {
+          error: "temporarily_unavailable",
+          error_description: "Tokens cannot be checked right now. Try again in a moment.",
+        },
+        { status: 503 },
+      );
+    }
+  }
   return {
     metadata: {
       resource: paths.identifier,
@@ -304,53 +357,102 @@ function bearerGate(
       bearer_methods_supported: ["header"],
       resource_name: "Redmine",
     },
-    async authenticate(request: Request): Promise<AuthInfo | Response> {
-      const authorization = request.headers.get("authorization");
-      if (authorization === null) {
-        return Response.json(
-          {
-            error: OAuthErrorCode.InvalidToken,
-            error_description: `Sign in with OAuth, or send the API key of a Redmine user in the ${API_KEY_HEADER} header.`,
-          },
-          { status: 401, headers: { "WWW-Authenticate": missing } },
-        );
-      }
-      const challenge = { requiredScopes: scopes, resourceMetadataUrl };
-      // One Bearer credential and nothing after it; the SDK's parser ignores trailing fields.
-      const token = BEARER.exec(authorization)?.[1];
-      if (token === undefined) {
-        const malformed = new OAuthError(
-          OAuthErrorCode.InvalidToken,
-          "Send one token as Authorization: Bearer <token>",
-        );
-        return bearerAuthChallengeResponse(malformed, challenge);
-      }
+    async serve(
+      request: Request,
+      dispatch: (authInfo: AuthInfo) => Promise<Response>,
+    ): Promise<Response> {
+      const bearer = await authenticate(request);
+      if (bearer instanceof Response) return bearer;
+      const seen: Observation[] = [];
+      const redmine: RequestAuth = {
+        kind: "bearer",
+        auth: bearer.auth,
+        access: bearer.access,
+        observe: (observation) => void seen.push(observation),
+      };
+      let response: Response;
       try {
-        const authInfo = await verifyBearerToken(`Bearer ${token}`, {
-          verifier: tokens,
-          expectedResource: resource,
-          resourceMetadataUrl,
-        });
-        if (authInfo.extra !== undefined) return authInfo;
-        const insufficient = new OAuthError(
-          OAuthErrorCode.InsufficientScope,
-          `The token grants none of ${scopes.join(", ")}`,
+        response = await settled(
+          request,
+          await dispatch({ ...bearer.authInfo, extra: { redmine } }),
         );
-        return bearerAuthChallengeResponse(insufficient, challenge);
       } catch (error) {
-        if (error instanceof OAuthError) return bearerAuthChallengeResponse(error, challenge);
-        // The verifier could not tell, such as when a grant store is down: closed, and retryable.
         onError?.(error instanceof Error ? error : new Error(String(error)));
-        return Response.json(
-          {
-            error: "temporarily_unavailable",
-            error_description: "Tokens cannot be checked right now. Try again in a moment.",
-          },
-          { status: 503 },
+        return new Response(null, { status: 500 });
+      }
+      const outcome = verdict(seen, access);
+      if (outcome.kind === "pass") return response;
+      if (outcome.kind === "invalid_token") {
+        return bearerAuthChallengeResponse(
+          new OAuthError(OAuthErrorCode.InvalidToken, REVOKED),
+          challenge,
         );
       }
+      const insufficient = new OAuthError(
+        OAuthErrorCode.InsufficientScope,
+        `This request needs ${outcome.scopes.at(-1)}, which the sign-in did not grant. Sign in again and allow it.`,
+      );
+      return bearerAuthChallengeResponse(insufficient, {
+        requiredScopes: [...outcome.scopes],
+        resourceMetadataUrl,
+      });
     },
   };
+}
+
+/** A request whose token the gate accepted, with the credential and mode its server is built with. */
+interface Bearer {
+  readonly authInfo: AuthInfo;
+  readonly auth: BearerGrant["credential"];
+  readonly access: Access;
+}
+
+type Verdict =
+  | { readonly kind: "pass" }
+  | { readonly kind: "invalid_token" }
+  | { readonly kind: "insufficient_scope"; readonly scopes: readonly [Scope, ...Scope[]] };
+
+const REVOKED = "Redmine no longer accepts this sign-in. Sign in again.";
+
+/**
+ * Reads an event stream to its end, so the status can still change. The head reaches the client only
+ * when the handler returns. A subscriptions/listen stream may never end, so it passes on as it is. From
+ * 2026-07-28 on, the SDK refuses a request whose Mcp-Method header and body differ.
+ */
+async function settled(request: Request, response: Response): Promise<Response> {
+  const version = request.headers.get("mcp-protocol-version") ?? "";
+  const listens = request.headers.get("mcp-method") === "subscriptions/listen";
+  if (listens && version >= "2026-07-28") return response;
+  const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  if (type !== "text/event-stream" || response.body === null) return response;
+  return new Response(await response.arrayBuffer(), response);
+}
+
+function verdict(seen: readonly Observation[], serverAccess: Access): Verdict {
+  const exchanges = seen.filter((observation) => observation.kind === "exchange");
+  // The client retries a refused request after signing in again: a write Redmine applied would run twice.
+  if (exchanges.some((exchange) => exchange.method !== "GET" && mayHaveApplied(exchange.status))) {
+    return { kind: "pass" };
+  }
+  if (exchanges.some(refusedCredential)) return { kind: "invalid_token" };
+  // A call this server's own mode refuses too is one no token can fix.
+  const needed = seen
+    .filter((observation) => observation.kind === "refused")
+    .map((refusal) => refusal.tier)
+    .filter((tier) => allows(serverAccess, tier))
+    .map(scopesNeeded);
+  if (needed.length === 0) return { kind: "pass" };
+  const scopes = needed.reduce((most, next) => (next.length > most.length ? next : most));
+  return { kind: "insufficient_scope", scopes };
+}
+
+function refusedCredential(exchange: Extract<Observation, { kind: "exchange" }>): boolean {
+  return exchange.status === 401 && isApiPath(exchange.url);
+}
+
+/** Redmine applies nothing it refuses with a 4xx; without an answer, or yet, it may have. */
+function mayHaveApplied(status: number | undefined): boolean {
+  return status === undefined || status < 400 || status >= 500;
 }
 
 function isPreflight(request: Request): boolean {

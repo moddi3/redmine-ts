@@ -99,6 +99,30 @@ function browser(publicOrigin: string, serve: Serve) {
       const logout = form(page, (action) => action.endsWith("/logout"));
       if (logout !== undefined) await submit(new URL(logout.action, redmine), logout.fields);
     },
+    /**
+     * Signs jsmith in to Redmine and revokes every application on its authorized applications page,
+     * as each row's Revoke link does: a DELETE that Rails reads from `_method`.
+     */
+    async revokeAll(redmine: string): Promise<number> {
+      const login = form(await (await send(new URL("login", `${redmine}/`))).text(), (action) =>
+        action.endsWith("/login"),
+      );
+      await submit(new URL(login!.action, redmine), { ...login!.fields, ...JSMITH });
+      const page = await (
+        await send(new URL("oauth/authorized_applications", `${redmine}/`))
+      ).text();
+      const token = /<meta name="csrf-token" content="([^"]+)"/.exec(page)![1]!;
+      const links = [...page.matchAll(/href="([^"]*\/oauth\/authorized_applications\/\d+)"/g)];
+      for (const [, href] of links) {
+        const revoked = await submit(new URL(decode(href!), redmine), {
+          _method: "delete",
+          authenticity_token: decode(token),
+        });
+        expect(revoked.status, `revoking ${href}`).toBe(302);
+      }
+      await this.signOut(redmine);
+      return links.length;
+    },
   };
 }
 
@@ -205,33 +229,37 @@ async function signInAndUse(server: ContractServer, publicUrl: string, serve: Se
       }),
     });
   const first = store.tokens!.refresh_token!;
-  const renewed = (await (await refresh(first)).json()) as { access_token: string };
-  const call = await toServer(publicUrl, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${renewed.access_token}`,
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: { name: "users_current", arguments: {} },
-    }),
-  });
-  expect(await call.text()).toContain('"login":"jsmith"');
+  const renewed = (await (await refresh(first)).json()) as {
+    access_token: string;
+    refresh_token: string;
+  };
+  const callTool = (name: string, args: Record<string, unknown> = {}) =>
+    toServer(publicUrl, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${renewed.access_token}`,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }),
+    });
+  expect(await (await callTool("users_current")).text()).toContain('"login":"jsmith"');
   expect(await (await refresh(first)).json()).toMatchObject({ error: "invalid_grant" });
+  return { person, callTool, refresh: () => refresh(renewed.refresh_token) };
 }
 
 describeServers("OAuth through Redmine", (server) => {
   // The subpath server's MCP endpoint sits under Redmine's own path, as a same-origin proxy mounts it.
   const mount = server.name === "7.0-subpath" ? "/redmine/mcp" : "/mcp";
-
-  it(`signs jsmith in through Redmine's own OAuth with the endpoint at ${mount}`, async () => {
-    // Nothing listens on this URL: the browser and the client hand its requests to the handler.
-    const publicUrl = `http://127.0.0.1:3737${mount}`;
-    const handle = createRedmineMcpHandler({
+  // Nothing listens on this URL: the browser and the client hand its requests to the handler.
+  const publicUrl = `http://127.0.0.1:3737${mount}`;
+  const handler = () =>
+    createRedmineMcpHandler({
       baseUrl: server.baseUrl,
       version: server.version,
       publicUrl,
@@ -242,7 +270,38 @@ describeServers("OAuth through Redmine", (server) => {
         fetchClientMetadata: publicFetch,
       },
     });
-    await signInAndUse(server, publicUrl, handle);
+
+  it(`signs jsmith in through Redmine's own OAuth with the endpoint at ${mount}`, async () => {
+    await signInAndUse(server, publicUrl, handler());
+  });
+
+  it("keeps a raw_request 403 for my/page.json and 401 for my/page.js tool errors on a live sign-in", async () => {
+    const { callTool } = await signInAndUse(server, publicUrl, handler());
+    // Redmine ignores the credential on an action without accept_api_auth, and answers 403 on a JSON
+    // path and 401 elsewhere.
+    const forbidden = await callTool("raw_request", { method: "GET", path: "my/page.json" });
+    expect(forbidden.status).toBe(200);
+    expect(await forbidden.text()).toContain("Redmine answered 403 for raw_request");
+    const outside = await callTool("raw_request", { method: "GET", path: "my/page.js" });
+    expect(outside.status).toBe(200);
+    expect(outside.headers.has("www-authenticate")).toBe(false);
+    const advice = await outside.text();
+    expect(advice).toContain("401 for my/page.js");
+    expect(advice).toContain("end the path in .json");
+    expect(await (await callTool("users_current")).text()).toContain('"login":"jsmith"');
+  });
+
+  it("answers 401 invalid_token once jsmith revokes the sign-in in Redmine", async () => {
+    const { person, callTool, refresh } = await signInAndUse(server, publicUrl, handler());
+    expect(await person.revokeAll(browserUrl(server))).toBeGreaterThan(0);
+    const refused = await callTool("users_current");
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get("www-authenticate")).toBe(
+      `Bearer error="invalid_token", error_description="Redmine no longer accepts this sign-in. Sign in again.", scope="redmine:read redmine:write redmine:delete", resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`,
+    );
+    const refreshed = await refresh();
+    expect(refreshed.status).toBe(400);
+    expect(await refreshed.json()).toMatchObject({ error: "invalid_grant" });
   });
 
   it.runIf(server.name === "7.0")("does the same through the CLI", async () => {

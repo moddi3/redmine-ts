@@ -39,7 +39,10 @@ export interface LocalFiles {
   ): Promise<{ path: string; bytes: number }>;
 }
 
-/** What one server lends its tools across calls. */
+/**
+ * What one server lends its tools across calls. No channel to the client: http.ts holds a bearer
+ * response until the call ends, so progress would arrive with the result.
+ */
 export interface ToolContext {
   /** Statuses, trackers and the other global lists, cached for a few minutes. */
   readonly lookups: Lookups;
@@ -88,13 +91,27 @@ export function strictest(...modes: readonly Access[]): Access {
   return ACCESS_ORDER[at] ?? "read-only";
 }
 
+/** Whether `access` lets a call of `tier` through. */
+export function allows(access: Access, tier: Tier): boolean {
+  return TIERS[access].includes(tier);
+}
+
+/**
+ * Whether `url`, absolute or relative to baseUrl, is in Redmine's REST formats: a lower-case .json or
+ * .xml. Redmine answers 401 to a credential it accepts on paths outside them, such as my/page.js and
+ * my/page.JSON.
+ */
+export function isApiPath(url: string): boolean {
+  return /\.(?:json|xml)$/.test(new URL(url, "http://redmine.invalid/").pathname);
+}
+
 /** Whether tools/list shows the tool. A hidden tool still answers a call, and the SDK refuses it. */
 export function isListed(
   tool: ToolSpec,
   access: Access,
   version: RedmineVersion | undefined,
 ): boolean {
-  if (!TIERS[access].includes(tool.tier)) return false;
+  if (!allows(access, tool.tier)) return false;
   if (version === undefined) return true;
   const at = VERSIONS.indexOf(version);
   return (
