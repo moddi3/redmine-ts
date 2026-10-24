@@ -71,7 +71,7 @@ The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisi
 | A path other than `/mcp`                        | 404. With `REDMINE_MCP_PUBLIC_URL`, the server serves that URL's path and the OAuth paths instead.       |
 | A key Redmine rejects                           | The tool call returns an error result with Redmine's 401.                                                |
 
-The 401 for a missing key and the 403s for `Origin` and `Host` are JSON-RPC errors. When the body is a single request, the error carries that request's `id`. A notification, a batch, or a body that is not JSON has no single id, so the `id` is `null`, as JSON-RPC 2.0 does for an id it cannot detect.
+The 401 for a missing key and the 403s for `Origin` and `Host` are JSON-RPC errors. The error carries the request's `id` when the body is a single request, declares a `Content-Length` of at most 64 KiB, and arrives within a second. To refuse a request, the server does not read a larger or chunked body and does not wait longer for a slow one, so their errors have a `null` id. A notification, a batch, or a body that is not JSON has no single id, so its error has a `null` id too, as JSON-RPC 2.0 does for an id it cannot detect.
 
 Claude Code:
 

@@ -383,18 +383,30 @@ function withCors(response: Response, origin: string): Response {
   return wrapped;
 }
 
-type JsonRpcId = string | number | null;
+const ID_BODY_LIMIT = 64 * 1024;
+const ID_BODY_WAIT_MS = 1000;
 
-function jsonRpcId(body: unknown): JsonRpcId {
-  return isJSONRPCRequest(body) ? body.id : null;
+async function requestId(request: Request): Promise<string | number | null> {
+  const length = Number(request.headers.get("content-length"));
+  if (!(length > 0 && length <= ID_BODY_LIMIT)) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ID_BODY_WAIT_MS);
+  });
+  try {
+    const body = await Promise.race([readRequestBody(request, ID_BODY_LIMIT), late]);
+    if (body === null || body.tooLarge) return null;
+    const message: unknown = JSON.parse(body.text);
+    return isJSONRPCRequest(message) ? message.id : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function refuse(request: Request, status: number, message: string): Promise<Response> {
-  let id: JsonRpcId = null;
-  try {
-    const body = await readRequestBody(request);
-    if (!body.tooLarge) id = jsonRpcId(JSON.parse(body.text));
-  } catch {}
+  const id = await requestId(request);
   return Response.json({ jsonrpc: "2.0", error: { code: -32000, message }, id }, { status });
 }
 

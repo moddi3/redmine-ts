@@ -37,15 +37,27 @@ function handler(options: Partial<RedmineMcpHandlerOptions> = {}) {
   return { handle, keys: redmine.keys, errors };
 }
 
-/** Calls the handler in place of the network, adding the Host header a real fetch puts on the wire. */
+/** Calls the handler in place of the network, adding the Host and Content-Length a real fetch sends. */
 function direct(handle: Handler, headers: Record<string, string> = {}): typeof fetch {
   return async (input, init) => {
     const request = new Request(input, init);
+    const body = request.body && (await request.arrayBuffer());
     const sent = new Headers(request.headers);
     sent.set("host", new URL(request.url).host);
+    if (body) sent.set("content-length", String(body.byteLength));
     for (const [name, value] of Object.entries(headers)) sent.set(name, value);
-    return handle(new Request(request, { headers: sent }));
+    return handle(new Request(request, { method: request.method, headers: sent, body }));
   };
+}
+
+function stalled(headers: Record<string, string>): Request {
+  const start = new TextEncoder().encode('{"jsonrpc":"2.0","id":7,"method":"tools/list"');
+  return new Request("http://localhost:3737/mcp", {
+    method: "POST",
+    headers: { host: "localhost:3737", "content-type": "application/json", ...headers },
+    body: new ReadableStream({ start: (controller) => controller.enqueue(start) }),
+    duplex: "half",
+  });
 }
 
 async function connect(
@@ -106,16 +118,49 @@ describe("createRedmineMcpHandler", () => {
     expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id });
   });
 
-  it("answers the 401 with id null for a body that is not JSON or is over the 4 MiB bound", async () => {
+  it("answers the 401 with the id of a body up to 64 KiB, and null past it or for broken JSON", async () => {
     const { handle } = handler();
-    const pad = "x".repeat(4 * 1024 * 1024);
-    const big = { jsonrpc: "2.0", id: 7, method: "tools/list", params: { pad } };
-    for (const body of ['{"jsonrpc":"2.0","id":7,', JSON.stringify(big)]) {
+    const padded = (bytes: number) => {
+      const request = { jsonrpc: "2.0", id: 7, method: "tools/list", params: { pad: "" } };
+      request.params.pad = "x".repeat(bytes - JSON.stringify(request).length);
+      return JSON.stringify(request);
+    };
+    for (const [body, id] of [
+      [padded(64 * 1024), 7],
+      [padded(64 * 1024 + 1), null],
+      ['{"jsonrpc":"2.0","id":7,', null],
+    ] as const) {
       const response = await post(handle, {}, body);
       expect(response.status).toBe(401);
-      expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id: null });
+      expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id });
     }
   });
+
+  it.each([
+    ["no declared length", {}],
+    ["a declared length over 64 KiB", { "content-length": String(64 * 1024 + 1) }],
+  ])(
+    "refuses at once, with id null, a body with %s that never ends",
+    async (_, length) => {
+      const { handle } = handler({ allowedHosts: ["localhost"] });
+      for (const [headers, status] of [
+        [{}, 401],
+        [{ origin: "https://evil.example" }, 403],
+        [{ host: "evil.example" }, 403],
+      ] as const) {
+        const response = await handle(stalled({ ...length, ...headers }));
+        expect(response.status).toBe(status);
+        expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id: null });
+      }
+    },
+    1000,
+  );
+
+  it("refuses with id null a small body that stalls, instead of waiting for its end", async () => {
+    const response = await handler().handle(stalled({ "content-length": "100" }));
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id: null });
+  }, 3000);
 
   it("refuses a browser Origin that is not allowed with 403, before the key is checked", async () => {
     const { handle } = handler({ allowedOrigins: ["app.example.com"] });
