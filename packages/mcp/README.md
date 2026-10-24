@@ -144,6 +144,43 @@ Generate the secret once, with `openssl rand -base64 32`, and keep it: a new one
 
 Codes, tokens, states and client registrations are encrypted with keys derived from `REDMINE_MCP_AUTH_SECRET`, so the server needs no database. What must be used only once, and the sign-ins that a reused token ends, are marked in a [grant store](#grant-store). The CLI keeps it in memory; an embedded server with several processes or Worker isolates shares one, or runs with the weaker guarantees of each process's own memory.
 
+### What a sign-in looks like
+
+Here MCP Inspector signs in to a Redmine 7.0. The server runs as in the example above, with `REDMINE_MCP_PUBLIC_URL=http://localhost:3737/mcp`, `--no-delete`, and `--allow-origin http://127.0.0.1:6274` for the Inspector's page:
+
+<!-- Recorded by scripts/oauth-walkthrough/record.sh. Run it again after a change to these pages. -->
+
+![MCP Inspector adds the server by its URL; the person allows it on the server's consent page, signs in to Redmine and authorizes the application; a tool call then returns their user](https://raw.githubusercontent.com/moddi3/redmine-ts/main/packages/mcp/docs/oauth/sign-in.webp)
+
+<details>
+<summary>Step by step</summary>
+
+1. The client gets the server's URL and nothing else.
+
+   ![MCP Inspector's Add server dialog with the URL http://localhost:3737/mcp](https://raw.githubusercontent.com/moddi3/redmine-ts/main/packages/mcp/docs/oauth/1-add-server.webp)
+
+2. The server's consent page names the client, where it sends the person back, and the access it asks for: read and write, since the server runs with `--no-delete`.
+
+   ![The consent page: Allow MCP Inspector to use Redmine as you?](https://raw.githubusercontent.com/moddi3/redmine-ts/main/packages/mcp/docs/oauth/2-consent.webp)
+
+3. Allow leads to Redmine's own login.
+
+   ![Redmine's login page](https://raw.githubusercontent.com/moddi3/redmine-ts/main/packages/mcp/docs/oauth/3-redmine-login.webp)
+
+4. Redmine asks the person to authorize the application the admin created, listing the permissions the server asked for. Redmine skips this page when the person has already authorized the application for the same permissions and has not revoked it; the server's consent page still comes first.
+
+   ![Redmine's Authorization required page for the application MCP](https://raw.githubusercontent.com/moddi3/redmine-ts/main/packages/mcp/docs/oauth/4-redmine-authorize.webp)
+
+5. Redmine sends the browser back through the server, and the client is connected.
+
+   ![MCP Inspector connected to the server, with Authorization complete](https://raw.githubusercontent.com/moddi3/redmine-ts/main/packages/mcp/docs/oauth/5-connected.webp)
+
+6. Tools act as the person who signed in: `users_current` returns jsmith.
+
+   ![The users_current tool result in MCP Inspector](https://raw.githubusercontent.com/moddi3/redmine-ts/main/packages/mcp/docs/oauth/6-tool-call.webp)
+
+</details>
+
 ### Set up Redmine
 
 OAuth needs Redmine 6.1 or later with the REST API turned on (Administration, Settings, API). Create one application as an admin:
