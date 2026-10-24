@@ -29,6 +29,14 @@ function docsOf(id: string): string | null {
   return CATALOG.find((entry) => entry.id === id)?.docsUrl ?? null;
 }
 
+const takingUploads = CATALOG.filter((entry) => entry.inlineUploads !== null)
+  .map((entry) => `${entry.namespace}.${entry.verb}`)
+  .toSorted();
+const uploadTargets =
+  takingUploads.length < 2
+    ? takingUploads.join("")
+    : `${takingUploads.slice(0, -1).join(", ")} or ${takingUploads.at(-1)}`;
+
 /** The hand-written Extras in `redmine.ts` and `core/files.ts`, whose inputs the spec does not describe. */
 const extras: readonly CatalogEntry[] = [
   {
@@ -53,6 +61,7 @@ const extras: readonly CatalogEntry[] = [
       ["issue_id", "status_id"],
       true,
     ),
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -60,8 +69,7 @@ const extras: readonly CatalogEntry[] = [
     namespace: "attachments",
     verb: "upload",
     title: "Upload a file",
-    description:
-      "Step one of Redmine's two-step upload. Returns a reference to pass in `uploads` of issues.create, issues.update, news.create, news.update or wiki.update. Over the size limit is a 422.",
+    description: `Step one of Redmine's two-step upload. Returns a reference to pass in \`uploads\` of ${uploadTargets}. Over the size limit is a 422.`,
     docsUrl: "https://www.redmine.org/projects/redmine/wiki/Rest_api#Attaching-files",
     method: ops.uploadAttachmentFile.method,
     safety: ops.uploadAttachmentFile.safety,
@@ -81,6 +89,7 @@ const extras: readonly CatalogEntry[] = [
       ["file", "filename"],
       true,
     ),
+    inlineUploads: null,
     output: {
       kind: "item",
       optional: false,
@@ -114,6 +123,7 @@ const extras: readonly CatalogEntry[] = [
       ["id", "filename"],
       true,
     ),
+    inlineUploads: null,
     output: { kind: "binary" },
   },
   {
@@ -139,6 +149,7 @@ const extras: readonly CatalogEntry[] = [
       ["id"],
       true,
     ),
+    inlineUploads: null,
     output: { kind: "binary" },
   },
 ];
