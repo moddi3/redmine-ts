@@ -39,7 +39,11 @@ export interface LocalFiles {
   ): Promise<{ path: string; bytes: number }>;
 }
 
-/** What one server lends its tools across calls. */
+/**
+ * What one server lends its tools across calls. It has no channel to the client during a call: over
+ * HTTP with a bearer token, the response is held until the call ends so its status can still change,
+ * and progress sent on such a channel would arrive together with the result.
+ */
 export interface ToolContext {
   /** Statuses, trackers and the other global lists, cached for a few minutes. */
   readonly lookups: Lookups;

@@ -733,6 +733,42 @@ describe("createRedmineMcpHandler with a verifier", () => {
     },
   );
 
+  it.each(["legacy", "modern"] as const)(
+    "lets a %s-era client refresh after that 401 and retry the call",
+    async (era) => {
+      const { handle, seen } = gated();
+      let token = "revoked";
+      let refreshed = 0;
+      const { client } = await bearerClient(handle, era, {
+        token: async () => token,
+        onUnauthorized: async () => {
+          refreshed++;
+          token = "alice";
+        },
+      });
+      const result = await client.callTool({ name: "issue_statuses_list", arguments: {} });
+      expect(refreshed).toBe(1);
+      expect(result.isError).toBeUndefined();
+      expect(texts(result)[0]).toContain("New for Bearer redmine-token-of-alice");
+      expect(seen).toEqual(["Bearer dead", "Bearer redmine-token-of-alice"]);
+    },
+  );
+
+  it("answers a 2026-07-28 bearer call that asks for progress with one JSON body", async () => {
+    const { send } = gated();
+    const { headers, body } = modern("tools/call", {
+      name: "issue_statuses_list",
+      arguments: {},
+      _meta: { progressToken: "p1" },
+    });
+    const response = await send({ ...headers, Authorization: "Bearer alice" }, body);
+    expect(response.status).toBe(200);
+    expect(
+      response.headers.get("content-type"),
+      "bearerGate's serve in http.ts holds a bearer response to its end: revisit that hold before a tool reports progress",
+    ).toBe("application/json");
+  });
+
   it("keeps the results of a request in which Redmine applied a write before refusing", async () => {
     const { send, requests } = gated();
     const response = await send(
