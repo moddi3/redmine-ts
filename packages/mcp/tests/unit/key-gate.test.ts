@@ -256,10 +256,10 @@ describe("an X-Redmine-API-Key when Redmine does not answer", () => {
 });
 
 describe("an X-Redmine-API-Key that Redmine accepts", () => {
-  it("uploads a 3 MB file through attachments_upload after one key check", async () => {
+  it("uploads a 5 MiB file through attachments_upload after one key check", async () => {
     const { handle, calls, uploads } = handler();
     const client = await connect(handle, "good-key");
-    const file = new Uint8Array(3_000_000).map((_, index) => index % 251);
+    const file = new Uint8Array(5 * 1024 * 1024).map((_, index) => index % 251);
     const result = await client.callTool({
       name: "attachments_upload",
       arguments: { filename: "x.bin", content_base64: Buffer.from(file).toString("base64") },
@@ -268,6 +268,19 @@ describe("an X-Redmine-API-Key that Redmine accepts", () => {
     expect(uploads).toHaveLength(1);
     expect(Buffer.from(uploads[0]!).equals(file)).toBe(true);
     expect(calls.filter((path) => path === "/users/current.json")).toHaveLength(1);
+  });
+
+  it("refuses a file one byte over 5 MiB with the tool's own error, not the request limit", async () => {
+    const { handle, uploads } = handler();
+    const client = await connect(handle, "good-key");
+    const file = Buffer.alloc(5 * 1024 * 1024 + 1, 7);
+    const result = await client.callTool({
+      name: "attachments_upload",
+      arguments: { filename: "x.bin", content_base64: file.toString("base64") },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("upload limit");
+    expect(uploads).toEqual([]);
   });
 
   it("serves a small body still arriving after a second, after one key check", async () => {
