@@ -2,8 +2,9 @@
 // and text inline when they are small, and otherwise the metadata, or a saved file in the directory.
 
 import type { Attachment } from "@redmine-ts/sdk";
+import { catalog } from "@redmine-ts/sdk/catalog";
 import { z } from "zod";
-import { BY_METHOD } from "../catalog-tools.ts";
+import { BY_METHOD, toolName } from "../catalog-tools.ts";
 import type { Annotations, LocalFiles, ToolSpec } from "../tools.ts";
 import { defineTool, invalidInput } from "./define.ts";
 
@@ -24,6 +25,12 @@ const IMAGE_TYPES: ReadonlyMap<string, string> = new Map([
 const TEXT_TYPES =
   /^(text\/|application\/(json|xml|x-yaml|yaml|csv|x-ndjson)$|application\/.+\+(json|xml)$)/;
 const TEXT_EXTENSIONS = new Set(["txt", "log", "md", "json", "xml", "csv", "tsv", "yaml", "yml"]);
+
+const takingUploads = catalog
+  .filter((entry) => entry.inlineUploads !== null)
+  .map(toolName)
+  .toSorted();
+const ATTACH_TOOLS = `${takingUploads.slice(0, -1).join(", ")} or ${takingUploads.at(-1)}`;
 
 const UploadRef = z.object({
   token: z.string(),
@@ -57,8 +64,8 @@ export function uploadTool(files: boolean): ToolSpec {
     description: [
       `Uploads a file to Redmine, the first step of attaching it. Give filename and ${sources}, at most ${humanSize(MAX_UPLOAD_BYTES)}.`,
       "Returns the upload reference {token, filename, content_type, description}.",
-      'Next: attach it by passing the reference in the uploads array of issues_create or issues_update, such as {issue_id: 7, notes: "Log attached", uploads: [reference]}; news_create, news_update and wiki_update take uploads too.',
-      "An unattached upload is discarded by Redmine.",
+      `Next: attach it by passing the reference in the uploads array of ${ATTACH_TOOLS}, such as issues_update with {issue_id: 7, notes: "Log attached", uploads: [reference]}.`,
+      "Redmine keeps an unattached upload until an admin prunes it, so upload only what you attach.",
     ].join(" "),
     input: z.strictObject({
       filename: z.string().min(1).describe("The name the attachment gets, such as build.log."),
