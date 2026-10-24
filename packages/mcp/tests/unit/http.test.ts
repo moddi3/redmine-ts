@@ -608,6 +608,29 @@ describe("createRedmineMcpHandler with a verifier", () => {
     params: { name, arguments: args },
   });
 
+  /** A 2026-07-28 request: the envelope in `_meta`, and the headers that name its method and tool. */
+  const modern = (method: string, params: Record<string, unknown>) => ({
+    headers: {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": method,
+      ...(typeof params.name === "string" ? { "Mcp-Name": params.name } : {}),
+    },
+    body: {
+      jsonrpc: "2.0",
+      id: 1,
+      method,
+      params: {
+        ...params,
+        _meta: {
+          ...(params._meta as Record<string, unknown> | undefined),
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "redmine-mcp-tests", version: "0.0.0" },
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      },
+    },
+  });
+
   it("serves the protected resource metadata naming the verifier's issuer", async () => {
     const { handle } = gated({ access: "no-delete" });
     for (const path of [
@@ -877,6 +900,21 @@ describe("createRedmineMcpHandler with a verifier", () => {
     expect(response.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
     expect(response.headers.get("access-control-expose-headers")).toBe("WWW-Authenticate");
   });
+
+  it("answers a bearer subscriptions/listen without holding its stream", async () => {
+    const { send } = gated();
+    const { headers, body } = modern("subscriptions/listen", {
+      notifications: { toolsListChanged: true },
+    });
+    const response = await send({ ...headers, Authorization: "Bearer alice" }, body);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    // The SDK ends the stream at once because this server honors no listen filter. Once it honors one,
+    // read only up to the acknowledgement: a held stream would never answer.
+    const text = await response.text();
+    expect(text).toContain("notifications/subscriptions/acknowledged");
+    expect(text).toContain('"resultType":"complete"');
+  }, 2000);
 
   it("keeps the X-Redmine-API-Key header working, ahead of a bearer token", async () => {
     const { handle, keys } = handler({ publicUrl, verifier });

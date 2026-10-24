@@ -372,7 +372,7 @@ function bearerGate(
         ...(authInfo.extra!.redmine as RequestAuth),
         observe: (observation) => void seen.push(observation),
       };
-      const response = await settled(await dispatch({ ...authInfo, extra: { redmine } }));
+      const response = await settled(request, await dispatch({ ...authInfo, extra: { redmine } }));
       const outcome = verdict(seen, access);
       if (outcome.kind === "pass") return response;
       if (outcome.kind === "invalid_token") {
@@ -402,9 +402,12 @@ const REVOKED = "Redmine no longer accepts this sign-in. Sign in again.";
 
 /**
  * The response once every answer in it is written, so its status can still change: an event stream
- * is read to its end. Nothing reaches the client before the handler returns.
+ * is read to its end. Nothing reaches the client before the handler returns. A subscriptions/listen
+ * stream can stay open for good and never reaches Redmine, so it passes as it is; 2026-07-28, the only
+ * revision with that method, requires the Mcp-Method header that names it.
  */
-async function settled(response: Response): Promise<Response> {
+async function settled(request: Request, response: Response): Promise<Response> {
+  if (request.headers.get("mcp-method") === "subscriptions/listen") return response;
   const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
   if (type !== "text/event-stream" || response.body === null) return response;
   return new Response(await response.arrayBuffer(), response);
