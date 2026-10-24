@@ -138,6 +138,10 @@ const Env = z.object({
 
 const PORT = "must be a port from 0 to 65535, where 0 picks a free one";
 
+/** URL parsing keeps a `*` in a hostname, so a wildcard passes as one and then matches only itself. */
+const noWildcards = (entries: string[]) => entries.every((entry) => !entry.includes("*"));
+const WILDCARDS = "does not support wildcards: repeat the flag for each hostname";
+
 /** Settings HTTP does not read, and why, so a set one is warned about instead of silently dropped. */
 const NOT_READ_OVER_HTTP = {
   REDMINE_API_KEY: `each request sends its own key in ${API_KEY_HEADER}`,
@@ -187,6 +191,7 @@ const HttpSettings = Env.omit({ REDMINE_API_KEY: true, REDMINE_MCP_FILES_DIR: tr
     "--host": z.string().trim().min(1, { error: "is empty" }).default("127.0.0.1"),
     "--allow-origin": z
       .array(z.string())
+      .refine(noWildcards, { error: WILDCARDS })
       .refine((entries) => entries.every((entry) => isHostname(entry) || isOrigin(entry)), {
         error:
           "takes a hostname such as app.example.com or an origin such as https://app.example.com, in lowercase and without a path",
@@ -194,6 +199,7 @@ const HttpSettings = Env.omit({ REDMINE_API_KEY: true, REDMINE_MCP_FILES_DIR: tr
       .default([]),
     "--allow-host": z
       .array(z.string())
+      .refine(noWildcards, { error: WILDCARDS })
       .refine((entries) => entries.every(isHostname), {
         error: "takes a hostname such as mcp.example.com, in lowercase and without a port",
       })
@@ -201,6 +207,7 @@ const HttpSettings = Env.omit({ REDMINE_API_KEY: true, REDMINE_MCP_FILES_DIR: tr
     "--api-key-login": z.boolean().optional(),
     "--allow-client": z
       .array(z.string())
+      .refine(noWildcards, { error: WILDCARDS })
       .refine((entries) => entries.every(isHostname), {
         error: "takes a hostname such as claude.ai, in lowercase",
       })

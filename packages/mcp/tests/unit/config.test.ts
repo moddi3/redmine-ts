@@ -215,6 +215,9 @@ describe("parseCli --http", () => {
     [["--allow-host", "Mcp.Example.com"], "--allow-host takes a hostname"],
     [["--allow-host", "mcp.example.com:443"], "--allow-host takes a hostname"],
     [["--allow-host", "https://mcp.example.com"], "--allow-host takes a hostname"],
+    [["--allow-host", "*.example.com"], "--allow-host does not support wildcards"],
+    [["--allow-origin", "*"], "--allow-origin does not support wildcards"],
+    [["--allow-origin", "https://*.example.com"], "--allow-origin does not support wildcards"],
   ])("explains a bad flag %j", (argv, message) => {
     const command = parseCli(["--http", ...argv], url);
     expect(command.kind === "error" && command.message).toContain(message);
@@ -330,6 +333,7 @@ describe("parseCli --http with OAuth", () => {
     [{ REDMINE_OAUTH_CLIENT_SECRET: " " }, [], "REDMINE_OAUTH_CLIENT_SECRET is required"],
     [{}, ["--api-key-login"], "--api-key-login replaces the Redmine application"],
     [{}, ["--allow-client", "https://claude.ai"], "--allow-client takes a hostname"],
+    [{}, ["--allow-client", "*.example.com"], "--allow-client does not support wildcards"],
     [
       { REDMINE_MCP_AUTH_SECRET: undefined },
       [],

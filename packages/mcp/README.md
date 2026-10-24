@@ -430,7 +430,7 @@ The server reads its settings once at startup. A missing or invalid value stops 
 | `--allow-client <hostname>`         | Admits only OAuth clients on this host. Repeat it for more. See [Run the server](#run-the-server).                                                 |
 | `--help`                            | Prints the settings and exits.                                                                                                                     |
 
-`--port`, `--host`, `--allow-origin`, `--allow-host`, `--api-key-login` and `--allow-client` need `--http`.
+`--port`, `--host`, `--allow-origin`, `--allow-host`, `--api-key-login` and `--allow-client` need `--http`. `--allow-origin`, `--allow-host` and `--allow-client` match each name exactly, so a value with `*` stops the server at startup.
 
 ## Access modes
 
