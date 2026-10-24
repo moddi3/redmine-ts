@@ -45,7 +45,8 @@ const scopeChallenge = (scopes: string, needed: string) =>
  * after the SDK has returned its event stream. It names a status after the bearer token, creates any
  * issue and answers 403 for time entries. It refuses the revoked and resetkey credentials, and every
  * request of a write-* credential except its issue creation, which Redmine applies, fails with 503,
- * or never answers.
+ * or never answers. Like Redmine 6.1 and 7.0, it answers 401 to my/page.js and my/page.JSON for any
+ * credential, because neither is a path of its API.
  */
 function fakeRedmine() {
   const seen: (string | null)[] = [];
@@ -61,6 +62,9 @@ function fakeRedmine() {
       authorization === "Bearer dead" ||
       request.headers.get("x-redmine-api-key") === "reset-key"
     ) {
+      return new Response(null, { status: 401 });
+    }
+    if (path === "/my/page.js" || path === "/my/page.JSON") {
       return new Response(null, { status: 401 });
     }
     if (request.method === "POST" && path === "/issues.json") {
@@ -273,6 +277,52 @@ describe("a bearer request Redmine refuses", () => {
     expect(response.status).toBe(200);
     expect(response.headers.has("www-authenticate")).toBe(false);
     expect(await response.text()).toContain("Redmine answered 403 for time_entries_list");
+  });
+});
+
+describe("a bearer raw_request that Redmine answers 401", () => {
+  it.each(["legacy", "modern"] as const)(
+    "stays a tool error in a %s-era call to my/page.js, which is outside Redmine's API",
+    async (era) => {
+      const { handle, requests } = gated();
+      const { client, responses } = await bearerClient(handle, era, {
+        token: async () => "alice",
+      });
+      const result = await client.callTool({
+        name: "raw_request",
+        arguments: { method: "GET", path: "my/page.js" },
+      });
+      expect(result.isError).toBe(true);
+      expect(texts(result)[0]).toContain("(401)");
+      expect(responses.at(-1)!.status).toBe(200);
+      expect(responses.at(-1)!.headers.has("www-authenticate")).toBe(false);
+      expect(requests).toEqual(["GET /my/page.js"]);
+    },
+  );
+
+  it("stays a tool error for my/page.JSON, because Redmine reads only a lower-case extension as its API", async () => {
+    const { send } = gated();
+    const response = await send(
+      { Authorization: "Bearer alice" },
+      tool(1, "raw_request", { method: "GET", path: "my/page.JSON" }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.has("www-authenticate")).toBe(false);
+    expect(await response.text()).toContain('"isError":true');
+  });
+
+  it.each([
+    { path: "users/current.json" },
+    { path: "users/current.xml" },
+    { path: "issues.json", query: { limit: 1 } },
+  ])("answers 401 invalid_token for %j, a path of Redmine's API", async (args) => {
+    const { send } = gated();
+    const response = await send(
+      { Authorization: "Bearer revoked" },
+      tool(1, "raw_request", { method: "GET", ...args }),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(revokedChallenge);
   });
 });
 

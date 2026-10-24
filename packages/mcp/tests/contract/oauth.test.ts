@@ -275,14 +275,22 @@ describeServers("OAuth through Redmine", (server) => {
     await signInAndUse(server, publicUrl, handler());
   });
 
+  it("keeps a raw_request 403 for my/page.json and 401 for my/page.js tool errors on a live sign-in", async () => {
+    const { callTool } = await signInAndUse(server, publicUrl, handler());
+    // Redmine ignores the credential on an action without accept_api_auth, and answers 403 on a JSON
+    // path and 401 elsewhere.
+    const forbidden = await callTool("raw_request", { method: "GET", path: "my/page.json" });
+    expect(forbidden.status).toBe(200);
+    expect(await forbidden.text()).toContain("Redmine answered 403 for raw_request");
+    const outside = await callTool("raw_request", { method: "GET", path: "my/page.js" });
+    expect(outside.status).toBe(200);
+    expect(outside.headers.has("www-authenticate")).toBe(false);
+    expect(await outside.text()).toContain("Redmine rejected the credentials (401)");
+    expect(await (await callTool("users_current")).text()).toContain('"login":"jsmith"');
+  });
+
   it("answers 401 invalid_token once jsmith revokes the sign-in in Redmine", async () => {
     const { person, callTool, refresh } = await signInAndUse(server, publicUrl, handler());
-    // A JSON action without accept_api_auth ignores the credential and answers 403, so a raw_request 401
-    // on a JSON path means Redmine refused the credential. A path such as my/page.js gets 401.
-    const ignored = await callTool("raw_request", { method: "GET", path: "my/page.json" });
-    expect(ignored.status).toBe(200);
-    expect(await ignored.text()).toContain("Redmine answered 403 for raw_request");
-
     expect(await person.revokeAll(browserUrl(server))).toBeGreaterThan(0);
     const refused = await callTool("users_current");
     expect(refused.status).toBe(401);

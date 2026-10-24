@@ -434,7 +434,7 @@ function verdict(seen: readonly Observation[], serverAccess: Access): Verdict {
   if (exchanges.some((exchange) => exchange.method !== "GET" && mayHaveApplied(exchange.status))) {
     return { kind: "pass" };
   }
-  if (exchanges.some((exchange) => exchange.status === 401)) return { kind: "invalid_token" };
+  if (exchanges.some(refusedCredential)) return { kind: "invalid_token" };
   // A call this server's own mode refuses too is one no token can fix.
   const needed = seen
     .filter((observation) => observation.kind === "refused")
@@ -444,6 +444,11 @@ function verdict(seen: readonly Observation[], serverAccess: Access): Verdict {
   if (needed.length === 0) return { kind: "pass" };
   const scopes = needed.reduce((most, next) => (next.length > most.length ? next : most));
   return { kind: "insufficient_scope", scopes };
+}
+
+/** Redmine also answers 401 to a live credential on a path outside its API, such as my/page.js. */
+function refusedCredential(exchange: Extract<Observation, { kind: "exchange" }>): boolean {
+  return exchange.status === 401 && /\.(?:json|xml)$/.test(new URL(exchange.url).pathname);
 }
 
 /** Redmine applies nothing it refuses with a 4xx; without an answer, or yet, it may have. */

@@ -35,7 +35,12 @@ import { createLookups } from "./workflow/lookups.ts";
  * answers, or a call that the access mode refused before sending.
  */
 export type Observation =
-  | { readonly kind: "exchange"; readonly method: string; status: number | undefined }
+  | {
+      readonly kind: "exchange";
+      readonly method: string;
+      readonly url: string;
+      status: number | undefined;
+    }
   | { readonly kind: "refused"; readonly tier: Tier };
 
 export interface RedmineMcpOptions {
@@ -124,6 +129,7 @@ function observed(
     const exchange: Observation = {
       kind: "exchange",
       method: init?.method ?? "GET",
+      url: input instanceof Request ? input.url : String(input),
       status: undefined,
     };
     observe(exchange);
