@@ -12,26 +12,31 @@ import {
 import type { CallToolResult, JsonSchemaType, Tool } from "@modelcontextprotocol/server";
 import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig, RedmineVersion } from "@redmine-ts/sdk";
-import type { CatalogEntry } from "@redmine-ts/sdk/catalog";
 import pkg from "../package.json" with { type: "json" };
-import { catalogTools, DEFAULT_LIMIT, HEAVY_KEYS, MAX_LIMIT } from "./catalog-tools.ts";
+import { BY_METHOD, catalogTools, DEFAULT_LIMIT, HEAVY_KEYS, MAX_LIMIT } from "./catalog-tools.ts";
 import { ISSUE_TEMPLATE, readIssue } from "./resources.ts";
 import { isListed } from "./tools.ts";
-import type { Client, LocalFiles, Schema, ToolContext, ToolResult, ToolSpec } from "./tools.ts";
+import type {
+  Client,
+  LocalFiles,
+  Schema,
+  Tier,
+  ToolContext,
+  ToolResult,
+  ToolSpec,
+} from "./tools.ts";
 import { hasUserText, UNTRUSTED } from "./user-text.ts";
 import { ToolError } from "./workflow/define.ts";
 import { workflowTools } from "./workflow/index.ts";
 import { createLookups } from "./workflow/lookups.ts";
 
 /**
- * A fact one request's server saw: a round trip to Redmine and the status it got, if any, or a call
- * the access mode refused before sending.
+ * What a server saw: a request to Redmine, reported as it is sent, whose `status` is set once Redmine
+ * answers, or a call that the access mode refused before sending.
  */
 export type Observation =
-  | { readonly kind: "exchange"; readonly method: string; readonly status: number | undefined }
-  | { readonly kind: "refused"; readonly method: CatalogEntry["method"] };
-
-export type Observe = (observation: Observation) => void;
+  | { readonly kind: "exchange"; readonly method: string; status: number | undefined }
+  | { readonly kind: "refused"; readonly tier: Tier };
 
 export interface RedmineMcpOptions {
   /**
@@ -40,6 +45,8 @@ export interface RedmineMcpOptions {
    * not offered.
    */
   files?: LocalFiles;
+  /** Gets every request the server sends to Redmine and every call its access mode refuses. */
+  observe?: (observation: Observation) => void;
 }
 
 /** Compiled once per schema for the process, because HTTP serving builds a server per request. */
@@ -67,45 +74,13 @@ export function createRedmineMcpServer(
   config: RedmineConfig,
   options: RedmineMcpOptions = {},
 ): Server {
-  return build(config, options, undefined);
-}
-
-/**
- * The server for one HTTP request, which reports to `observe` every exchange with Redmine and every
- * call its access mode refuses.
- */
-export function createRequestServer(config: RedmineConfig, observe: Observe | undefined): Server {
-  return build(
-    observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
-    {},
-    observe,
-  );
-}
-
-function observed(base: typeof fetch | undefined, observe: Observe): typeof fetch {
-  const send = base ?? ((input, init) => globalThis.fetch(input, init));
-  return async (input, init) => {
-    const method = init?.method ?? "GET";
-    let status: number | undefined;
-    try {
-      const response = await send(input, init);
-      status = response.status;
-      return response;
-    } finally {
-      observe({ kind: "exchange", method, status });
-    }
-  };
-}
-
-function build(
-  config: RedmineConfig,
-  options: RedmineMcpOptions,
-  observe: Observe | undefined,
-): Server {
+  const { files, observe } = options;
   const access = config.access ?? "full";
-  const rm = createRedmine(config);
-  const context: ToolContext = { lookups: createLookups(rm), files: options.files };
-  const tools = [...workflowTools(access, options.files !== undefined), ...catalogTools];
+  const rm = createRedmine(
+    observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
+  );
+  const context: ToolContext = { lookups: createLookups(rm), files };
+  const tools = [...workflowTools(access, files !== undefined), ...catalogTools];
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const listed = tools.filter((tool) => isListed(tool, access, config.version)).map(definition);
 
@@ -140,19 +115,37 @@ function build(
   return server;
 }
 
+function observed(
+  base: typeof fetch | undefined,
+  observe: (observation: Observation) => void,
+): typeof fetch {
+  const send = base ?? ((input, init) => globalThis.fetch(input, init));
+  return async (input, init) => {
+    const exchange: Observation = {
+      kind: "exchange",
+      method: init?.method ?? "GET",
+      status: undefined,
+    };
+    observe(exchange);
+    const response = await send(input, init);
+    exchange.status = response.status;
+    return response;
+  };
+}
+
 async function call(
   tool: ToolSpec,
   rm: Client,
   args: Record<string, unknown>,
   context: ToolContext,
-  observe: Observe | undefined,
+  observe: RedmineMcpOptions["observe"],
 ): Promise<CallToolResult> {
   let result: ToolResult;
   try {
     result = await tool.run(rm, args, context);
   } catch (error) {
     if (RedmineError.is(error, "access_denied")) {
-      observe?.({ kind: "refused", method: error.data.method });
+      observe?.({ kind: "refused", tier: BY_METHOD[error.data.method].tier });
     }
     if (error instanceof RedmineError) return redmineFailure(tool, error);
     if (error instanceof ToolError) return failure(error.message, error.data);

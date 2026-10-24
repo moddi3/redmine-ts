@@ -14,18 +14,17 @@ import {
   validateOriginHeader,
   verifyBearerToken,
 } from "@modelcontextprotocol/server";
-import type { AuthInfo, OAuthTokenVerifier } from "@modelcontextprotocol/server";
+import type { AuthInfo } from "@modelcontextprotocol/server";
 import { createRedmine } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig } from "@redmine-ts/sdk";
-import { BY_METHOD } from "./catalog-tools.ts";
 import { accessFor, scopesFor, scopesNeeded } from "./oauth/scopes.ts";
 import type { Scope } from "./oauth/scopes.ts";
 import { createAuthorizationServer } from "./oauth/server.ts";
 import type { AuthorizationServer, RedmineOAuthOptions } from "./oauth/server.ts";
 import { comparablePath, CORS_MAX_AGE, publicDocument, publicPaths } from "./oauth/web.ts";
 import type { PublicPaths } from "./oauth/web.ts";
-import { createRequestServer } from "./server.ts";
-import type { Observation, Observe } from "./server.ts";
+import { createRedmineMcpServer } from "./server.ts";
+import type { Observation } from "./server.ts";
 import { allows, strictest } from "./tools.ts";
 
 export const API_KEY_HEADER = "X-Redmine-API-Key";
@@ -105,13 +104,18 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
   verifier?: BearerVerifier;
 }
 
-/** The credential and access mode one request's server is built with. */
-interface RequestAuth {
-  auth: BearerGrant["credential"];
-  access: Access;
-  /** Set on bearer requests only, whose status depends on what the request's server saw. */
-  observe?: Observe;
-}
+/**
+ * The credential and access mode one request's server is built with. A bearer request's status
+ * depends on what its server sees, so its server reports to `observe`.
+ */
+type RequestAuth =
+  | { readonly kind: "key"; readonly auth: { apiKey: string }; readonly access: Access }
+  | {
+      readonly kind: "bearer";
+      readonly auth: BearerGrant["credential"];
+      readonly access: Access;
+      readonly observe: (observation: Observation) => void;
+    };
 
 const ORIGIN_SCHEME = /^https?:\/\//i;
 
@@ -180,8 +184,11 @@ export function createRedmineMcpHandler(
   // fetch below hands the credential over in authInfo.extra, so every server the factory builds has one.
   const mcp = createMcpHandler(
     ({ authInfo }) => {
-      const { observe, ...redmine } = authInfo!.extra!.redmine as RequestAuth;
-      return createRequestServer({ ...config, ...redmine }, observe);
+      const redmine = authInfo?.extra?.redmine as RequestAuth;
+      return createRedmineMcpServer(
+        { ...config, auth: redmine.auth, access: redmine.access },
+        redmine.kind === "bearer" ? { observe: redmine.observe } : {},
+      );
     },
     { onerror: onError },
   );
@@ -203,7 +210,7 @@ export function createRedmineMcpHandler(
     const apiKey = request.headers.get(API_KEY_HEADER)?.trim();
     let response: Response;
     if (apiKey) {
-      const redmine: RequestAuth = { auth: { apiKey }, access };
+      const redmine: RequestAuth = { kind: "key", auth: { apiKey }, access };
       response = await mcp.fetch(request, {
         authInfo: { token: apiKey, clientId: "", scopes: [], extra: { redmine } },
       });
@@ -279,31 +286,10 @@ function bearerGate(
   const resource = new URL(paths.identifier);
   const resourceMetadataUrl = paths.origin + paths.resourceMetadata.at(-1)!;
   const scopes = scopesFor(access);
-  const tokens: OAuthTokenVerifier = {
-    async verifyAccessToken(token) {
-      const grant = await verifier.verify(token);
-      if (grant === undefined) {
-        throw new OAuthError(OAuthErrorCode.InvalidToken, "The token is invalid or has expired");
-      }
-      const granted = accessFor(grant.scopes);
-      const redmine: RequestAuth | undefined = granted && {
-        auth: grant.credential,
-        access: strictest(access, granted),
-      };
-      return {
-        token,
-        clientId: grant.clientId,
-        scopes: [...grant.scopes],
-        expiresAt: grant.expiresAt,
-        resource: new URL(grant.resource),
-        ...(redmine === undefined ? {} : { extra: { redmine } }),
-      };
-    },
-  };
   // Without any credential, the challenge names no error, as RFC 6750 asks.
   const missing = `Bearer resource_metadata="${resourceMetadataUrl}", scope="${scopes.join(" ")}"`;
   const challenge = { requiredScopes: scopes, resourceMetadataUrl };
-  async function authenticate(request: Request): Promise<AuthInfo | Response> {
+  async function authenticate(request: Request): Promise<Bearer | Response> {
     const authorization = request.headers.get("authorization");
     if (authorization === null) {
       return Response.json(
@@ -324,12 +310,27 @@ function bearerGate(
       return bearerAuthChallengeResponse(malformed, challenge);
     }
     try {
+      const grant = await verifier.verify(token);
+      if (grant === undefined) {
+        throw new OAuthError(OAuthErrorCode.InvalidToken, "The token is invalid or has expired");
+      }
       const authInfo = await verifyBearerToken(`Bearer ${token}`, {
-        verifier: tokens,
+        verifier: {
+          verifyAccessToken: async () => ({
+            token,
+            clientId: grant.clientId,
+            scopes: [...grant.scopes],
+            expiresAt: grant.expiresAt,
+            resource: new URL(grant.resource),
+          }),
+        },
         expectedResource: resource,
         resourceMetadataUrl,
       });
-      if (authInfo.extra !== undefined) return authInfo;
+      const granted = accessFor(grant.scopes);
+      if (granted !== undefined) {
+        return { authInfo, auth: grant.credential, access: strictest(access, granted) };
+      }
       const insufficient = new OAuthError(
         OAuthErrorCode.InsufficientScope,
         `The token grants none of ${scopes.join(", ")}`,
@@ -356,23 +357,23 @@ function bearerGate(
       bearer_methods_supported: ["header"],
       resource_name: "Redmine",
     },
-    /**
-     * Authenticates the request, runs `dispatch` with what its server needs, and answers 401 when
-     * Redmine refused the credential the token stands for, or 403 when a call needs a scope the
-     * token lacks and this server grants. A failure in the gate answers before `dispatch`.
-     */
     async serve(
       request: Request,
       dispatch: (authInfo: AuthInfo) => Promise<Response>,
     ): Promise<Response> {
-      const authInfo = await authenticate(request);
-      if (authInfo instanceof Response) return authInfo;
+      const bearer = await authenticate(request);
+      if (bearer instanceof Response) return bearer;
       const seen: Observation[] = [];
       const redmine: RequestAuth = {
-        ...(authInfo.extra!.redmine as RequestAuth),
+        kind: "bearer",
+        auth: bearer.auth,
+        access: bearer.access,
         observe: (observation) => void seen.push(observation),
       };
-      const response = await settled(request, await dispatch({ ...authInfo, extra: { redmine } }));
+      const response = await settled(
+        request,
+        await dispatch({ ...bearer.authInfo, extra: { redmine } }),
+      );
       const outcome = verdict(seen, access);
       if (outcome.kind === "pass") return response;
       if (outcome.kind === "invalid_token") {
@@ -393,6 +394,13 @@ function bearerGate(
   };
 }
 
+/** A request whose token the gate accepted, with the credential and mode its server is built with. */
+interface Bearer {
+  readonly authInfo: AuthInfo;
+  readonly auth: BearerGrant["credential"];
+  readonly access: Access;
+}
+
 type Verdict =
   | { readonly kind: "pass" }
   | { readonly kind: "invalid_token" }
@@ -401,10 +409,9 @@ type Verdict =
 const REVOKED = "Redmine no longer accepts this sign-in. Sign in again.";
 
 /**
- * The response once every answer in it is written, so its status can still change: an event stream
- * is read to its end. Nothing reaches the client before the handler returns. A subscriptions/listen
- * stream can stay open for good and never reaches Redmine, so it passes as it is; 2026-07-28, the only
- * revision with that method, requires the Mcp-Method header that names it.
+ * The response with every answer in it written, so its status can still change: the head reaches the
+ * client only when the handler returns. A subscriptions/listen stream is passed on as it is, because it
+ * may never end; 2026-07-28, the only revision with that method, requires the Mcp-Method header.
  */
 async function settled(request: Request, response: Response): Promise<Response> {
   if (request.headers.get("mcp-method") === "subscriptions/listen") return response;
@@ -413,8 +420,7 @@ async function settled(request: Request, response: Response): Promise<Response> 
   return new Response(await response.arrayBuffer(), response);
 }
 
-/** What the request's server saw means for the token, given `server`, this server's own mode. */
-function verdict(seen: readonly Observation[], server: Access): Verdict {
+function verdict(seen: readonly Observation[], serverAccess: Access): Verdict {
   const exchanges = seen.filter((observation) => observation.kind === "exchange");
   // The client retries a refused request after signing in again: a write Redmine applied would run twice.
   if (exchanges.some((exchange) => exchange.method !== "GET" && mayHaveApplied(exchange.status))) {
@@ -424,15 +430,15 @@ function verdict(seen: readonly Observation[], server: Access): Verdict {
   // A call this server's own mode refuses too is one no token can fix.
   const needed = seen
     .filter((observation) => observation.kind === "refused")
-    .map((refusal) => BY_METHOD[refusal.method].tier)
-    .filter((tier) => allows(server, tier))
+    .map((refusal) => refusal.tier)
+    .filter((tier) => allows(serverAccess, tier))
     .map(scopesNeeded);
   if (needed.length === 0) return { kind: "pass" };
   const scopes = needed.reduce((most, next) => (next.length > most.length ? next : most));
   return { kind: "insufficient_scope", scopes };
 }
 
-/** Redmine applies nothing it refuses with a 4xx; without an answer, it may have. */
+/** Redmine applies nothing it refuses with a 4xx; without an answer, or yet, it may have. */
 function mayHaveApplied(status: number | undefined): boolean {
   return status === undefined || status < 400 || status >= 500;
 }
