@@ -13,6 +13,13 @@ export interface Overlay {
    * The generator proves the sibling has that key.
    */
   scopedDuplicates: Readonly<Record<string, { sibling: string; key: string }>>;
+  /**
+   * The component schema of Redmine's attach-by-token list. Every JSON body field that references it is marked
+   * `body.uploads`, and the client uploads its `file` entries before it sends the record. The generator proves
+   * the component is an array of objects with a string `token`, that a body uses it only as a top-level field,
+   * and that a top-level field named `uploads` uses nothing else.
+   */
+  inlineUploads: string;
   /** Binary operations replaced by hand-written Extras. */
   extras: readonly string[];
   /** List operations that support keyset walks, and their id filter. */
@@ -76,6 +83,7 @@ export const overlay: Overlay = {
     createTimeEntryUnderProject: { sibling: "createTimeEntry", key: "project_id" },
     createTimeEntryUnderIssue: { sibling: "createTimeEntry", key: "issue_id" },
   },
+  inlineUploads: "uploads",
   extras: ["uploadAttachmentFile", "downloadAttachmentFile", "downloadThumbnail"],
   keyset: { getIssues: "issue_id" },
   clearAsEmpty: { updateIssue: ["assigned_to_id"] },

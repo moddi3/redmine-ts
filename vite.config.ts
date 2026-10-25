@@ -5,7 +5,7 @@ export default defineConfig({
     "*": "vp check --fix",
   },
   fmt: {
-    ignorePatterns: ["spec/redmine-openapi/**", "research.md", ".audit/arena/**"],
+    ignorePatterns: ["spec/redmine-openapi/**", ".audit/arena/**"],
   },
   lint: {
     ignorePatterns: [".audit/**"],

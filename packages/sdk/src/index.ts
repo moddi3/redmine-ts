@@ -12,7 +12,14 @@ export type {
 export { RedmineError } from "./core/errors.ts";
 export type { ErrorKind, RedmineErrorData } from "./core/errors.ts";
 export type { Cond, ListInput, Listing, Page } from "./core/listing.ts";
-export type { AttachmentFiles, BinarySource, Download, UploadRef } from "./core/files.ts";
+export type {
+  AttachmentFiles,
+  BinarySource,
+  Download,
+  InlineUpload,
+  UploadEntry,
+  UploadRef,
+} from "./core/files.ts";
 export type { Included } from "./core/op.ts";
 export { parseRedmineVersion } from "./core/version.ts";
 export { VERSIONS } from "./generated/versions.ts";

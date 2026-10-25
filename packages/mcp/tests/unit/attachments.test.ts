@@ -111,7 +111,11 @@ describe("attachments_upload", () => {
   it("says how to attach the upload", async () => {
     const { client } = await serve(ROUTES);
     const tool = (await client.listTools()).tools.find((t) => t.name === "attachments_upload");
-    expect(tool?.description).toContain("uploads array of issues_create or issues_update");
+    expect(tool?.description).toContain(
+      "uploads array of issues_create, issues_update, news_create, news_update or wiki_update",
+    );
+    expect(tool?.description).toContain("until an admin prunes it");
+    expect(tool?.description).not.toContain("discarded");
   });
 
   it.each([

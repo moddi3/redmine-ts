@@ -2,7 +2,7 @@
 // Component schemas become shared constants, so the file stays small while each schema is self-contained.
 
 import { CUSTOM_FIELD } from "../src/core/listing.ts";
-import type { FilterSpec } from "../src/core/op.ts";
+import { uploadKey, type FilterSpec } from "../src/core/op.ts";
 import type { Merged } from "./merge.ts";
 import type { OpModel } from "./operations.ts";
 import { refName, type Schema } from "./spec.ts";
@@ -218,6 +218,7 @@ export function catalogFile(ops: OpModel[], merged: Merged): string {
         until: d.until,
         stability: d.stability,
         inputSchema: input(op),
+        inlineUploads: uploadKey(d) ?? null,
         output: output(op),
       });
     });

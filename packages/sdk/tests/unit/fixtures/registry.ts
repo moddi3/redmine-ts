@@ -81,8 +81,55 @@ export const updateIssue = op({
   method: "PUT",
   path: "issues/{issue_id}.json",
   pathParams: ["issue_id"],
-  body: { kind: "json", envelope: "issue", siblings: [], clear: ["assigned_to_id"] },
+  body: {
+    kind: "json",
+    envelope: "issue",
+    siblings: [],
+    clear: ["assigned_to_id"],
+    uploads: "uploads",
+  },
   response: { kind: "empty" },
+  safety: "write",
+});
+
+export const createIssue = op({
+  id: "createIssue",
+  method: "POST",
+  path: "issues.json",
+  body: { kind: "json", envelope: "issue", siblings: [], uploads: "uploads" },
+  response: { kind: "item", unwrap: "issue" },
+  safety: "write",
+});
+
+export const createNews = op({
+  id: "createNews",
+  method: "POST",
+  path: "projects/{project_id}/news.json",
+  pathParams: ["project_id"],
+  body: { kind: "json", envelope: "news", siblings: [], uploads: "uploads" },
+  response: { kind: "empty" },
+  safety: "write",
+});
+
+export const updateWikiPage = op({
+  id: "updateWikiPage",
+  method: "PUT",
+  path: "projects/{project_id}/wiki/{wiki_page_title}.json",
+  pathParams: ["project_id", "wiki_page_title"],
+  body: { kind: "json", envelope: "wiki_page", siblings: [], uploads: "uploads" },
+  response: { kind: "item", unwrap: "wiki_page" },
+  safety: "write",
+});
+
+/** An upload-taking operation newer than the oldest version, like a future Documents API. */
+export const createDocument = op({
+  id: "createDocument",
+  method: "POST",
+  path: "projects/{project_id}/documents.json",
+  pathParams: ["project_id"],
+  body: { kind: "json", envelope: "document", siblings: [], uploads: "uploads" },
+  response: { kind: "item", unwrap: "document" },
+  since: "7.0",
   safety: "write",
 });
 
@@ -179,6 +226,10 @@ export const ops: Readonly<Record<string, AnyOp>> = {
   getTimeEntry,
   getTimeEntries,
   updateIssue,
+  createIssue,
+  createNews,
+  updateWikiPage,
+  createDocument,
   createUser,
   deleteIssue,
   removeUsersFromGroup,
@@ -191,7 +242,16 @@ export const ops: Readonly<Record<string, AnyOp>> = {
 };
 
 export const SLOTS: SlotTable = {
-  issues: { get: getIssue, list: getIssues, update: updateIssue, remove: deleteIssue },
+  issues: {
+    get: getIssue,
+    list: getIssues,
+    create: createIssue,
+    update: updateIssue,
+    remove: deleteIssue,
+  },
+  news: { create: createNews },
+  wiki: { update: updateWikiPage },
+  documents: { create: createDocument },
   users: { create: createUser },
   groups: { removeUsers: removeUsersFromGroup },
   timeEntries: { get: getTimeEntry, list: getTimeEntries },

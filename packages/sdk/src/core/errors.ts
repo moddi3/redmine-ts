@@ -4,6 +4,7 @@
 
 import type { RedmineVersion } from "../generated/versions.ts";
 import type { Access } from "./config.ts";
+import type { UploadEntry } from "./files.ts";
 import type { HttpMethod } from "./op.ts";
 
 export type RedmineErrorData =
@@ -60,6 +61,8 @@ export interface ErrorContext {
   /** X-Request-Id from Rails, for server log lookups. */
   request_id?: string;
   cause?: unknown;
+  /** See RedmineError.uploads. */
+  uploads?: UploadEntry[];
 }
 
 export class RedmineError<D extends RedmineErrorData = RedmineErrorData> extends Error {
@@ -67,12 +70,22 @@ export class RedmineError<D extends RedmineErrorData = RedmineErrorData> extends
   readonly data: D;
   readonly op: string | undefined;
   readonly request_id: string | undefined;
+  /**
+   * Set when a create or update with `file` entries in `uploads` fails after its checks passed: your entries in
+   * order, a fresh array, with each file Redmine acknowledged replaced by its UploadRef. Redmine keeps those
+   * uploads unattached until an admin prunes them, so pass this array back as `uploads` to retry without
+   * sending them again. An entry that still has `file` was not acknowledged, and Redmine may still have stored
+   * it if the response was lost. Left out of toJSON and of the enumerable properties, because a token lets any
+   * user who can edit some record attach the file and read it.
+   */
+  declare readonly uploads: UploadEntry[] | undefined;
 
   constructor(data: D, context: ErrorContext = {}) {
     super(describe(data, context.op), { cause: context.cause });
     this.data = data;
     this.op = context.op;
     this.request_id = context.request_id;
+    Object.defineProperty(this, "uploads", { value: context.uploads, enumerable: false });
   }
 
   get kind(): D["kind"] {
@@ -87,7 +100,7 @@ export class RedmineError<D extends RedmineErrorData = RedmineErrorData> extends
     return e instanceof RedmineError && e.data.kind === kind;
   }
 
-  /** `cause` is dropped: exotic fetch implementations may attach request details to it. */
+  /** `cause` is dropped: exotic fetch implementations may attach request details to it. `uploads` is dropped too. */
   toJSON(): {
     name: string;
     message: string;

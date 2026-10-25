@@ -33,6 +33,7 @@ if (process.argv.includes("--check")) {
     console.log(`  ${ns}: ${verbs.map(([verb, id]) => `${verb} (${id})`).join(", ")}`);
   }
   for (const { id, reason } of report.hidden) console.log(`  hidden ${id}: ${reason}`);
+  console.log(`inline uploads: ${report.inlineUploads.join(", ")}`);
   console.log("drift:");
   for (const { id, since } of drift.addedOps) console.log(`  added operation ${id} since ${since}`);
   for (const { id, until } of drift.removedOps)
