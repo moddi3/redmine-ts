@@ -6,6 +6,7 @@
 import {
   bearerAuthChallengeResponse,
   createMcpHandler,
+  isJsonContentType,
   isJSONRPCRequest,
   OAuthError,
   OAuthErrorCode,
@@ -17,6 +18,8 @@ import {
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { createRedmine } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig } from "@redmine-ts/sdk";
+import { createBodyBudget, RETRY_AFTER_SECONDS } from "./body-budget.ts";
+import type { BodyRefusal } from "./body-budget.ts";
 import { accessFor, scopesFor, scopesNeeded } from "./oauth/scopes.ts";
 import type { Scope } from "./oauth/scopes.ts";
 import { createAuthorizationServer } from "./oauth/server.ts";
@@ -106,6 +109,28 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
    * that points clients to the protected resource metadata.
    */
   verifier?: BearerVerifier;
+  /**
+   * The most bytes of buffer the handler holds at once for request bodies while they arrive, across
+   * requests, not counting each body's first 64 KiB, so small requests never meet it. A body's buffer
+   * doubles up to 1 MiB as it grows, then grows 1 MiB at a time, and ends at its exact size when its
+   * Content-Length is truthful, so a body at the 6.7 MiB limit is charged in full once it passes
+   * 6 MiB. Default 32 MiB, which lets four such bodies arrive at once. A body that needs room the
+   * others hold takes it from bodies that have not grown by 128 KiB in 5 seconds, which get 408; when
+   * that is not enough, it gets 503 with Retry-After, even partway through its body. A budget under
+   * about 6.7 MiB lowers the largest body accepted to the budget plus 64 KiB, and 0 answers 413 to any
+   * body over 64 KiB. It bounds bodies while they arrive, not the memory a tool call then takes to
+   * send an upload to Redmine.
+   */
+  maxBodyBytesInFlight?: number;
+  /**
+   * How long a request's body may take to arrive, in milliseconds, counted from when the handler
+   * starts reading it. A body still arriving then gets 408. The handler reads and drops the rest for
+   * 5 seconds and then stops reading it, and the server closes the connection after its own idle
+   * timeout, such as Node's keepAliveTimeout. Default 300000, Node's own request timeout, which Bun
+   * and Workers do not have. A body at the 6.7 MiB limit takes about 56 seconds at 1 Mbit/s. Response
+   * streams are not timed.
+   */
+  bodyTimeoutMs?: number;
 }
 
 /**
@@ -145,7 +170,12 @@ export function createRedmineMcpHandler(
   options: RedmineMcpHandlerOptions,
 ): (request: Request) => Promise<Response> {
   const { allowedOrigins = [], allowedHosts, onError, publicUrl, oauth, ...rest } = options;
-  const { verifier: external, ...config } = rest;
+  const {
+    verifier: external,
+    maxBodyBytesInFlight = 32 * 1024 * 1024,
+    bodyTimeoutMs = 300_000,
+    ...config
+  } = rest;
   // A bad baseUrl, version or limit throws here instead of failing every request.
   createRedmine(config);
   const access = config.access ?? "full";
@@ -207,6 +237,31 @@ export function createRedmineMcpHandler(
     paths === undefined || verifier === undefined
       ? undefined
       : bearerGate(verifier, paths, access, onError);
+  const bodies = createBodyBudget({
+    limit: maxBodyBytesInFlight,
+    timeoutMs: bodyTimeoutMs,
+    maxBody: MAX_BODY_BYTES,
+    free: UNAUTHENTICATED_BODY_BYTES,
+  });
+
+  /** Reads a JSON body once, within the budget, and hands the SDK the parsed message instead. */
+  async function serve(request: Request, authInfo: AuthInfo): Promise<Response> {
+    const json = isJsonContentType(request.headers.get("content-type"));
+    if (request.method !== "POST" || request.body === null || !json) {
+      return mcp.fetch(request, { authInfo });
+    }
+    const body = await bodies.read(request);
+    if (body.kind === "json") return mcp.fetch(request, { authInfo, parsedBody: body.value });
+    if (body.kind === "other") {
+      const { url, method, headers, signal } = request;
+      return mcp.fetch(new Request(url, { method, headers, signal, body: body.bytes }), {
+        authInfo,
+      });
+    }
+    const refusal = BODY_REFUSALS[body.refusal];
+    if (refusal.log) onError?.(new Error(refusal.log(body.limit)));
+    return jsonRpcError(refusal.status, refusal.message(body.limit), null, refusal);
+  }
 
   async function endpoint(request: Request): Promise<Response> {
     const origin = request.headers.get("origin");
@@ -226,14 +281,12 @@ export function createRedmineMcpHandler(
         request,
         () => checkApiKey(config, apiKey, { signal: request.signal, onError }),
         (admitted) =>
-          mcp.fetch(admitted, {
-            authInfo: { token: apiKey, clientId: "", scopes: [], extra: { redmine } },
-          }),
+          serve(admitted, { token: apiKey, clientId: "", scopes: [], extra: { redmine } }),
       );
     } else if (bearer === undefined) {
       response = await missingKey(request);
     } else {
-      response = await bearer.serve(request, (authInfo) => mcp.fetch(request, { authInfo }));
+      response = await bearer.serve(request, (authInfo) => serve(request, authInfo));
     }
     return cors === undefined ? response : withCors(response, cors);
   }
@@ -506,15 +559,53 @@ const UNAUTHENTICATED_BODY_WAIT_MS = 1000;
 const JSON_RPC_ENVELOPE_BYTES = 64 * 1024;
 const MAX_BODY_BYTES = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4 + JSON_RPC_ENVELOPE_BYTES;
 
+interface Refusal {
+  readonly status: number;
+  readonly code?: number;
+  readonly message: (limit: number) => string;
+  readonly log?: (limit: number) => string;
+  readonly retryAfter?: number;
+}
+
+const tooLarge = (limit: number): string =>
+  `Payload Too Large: Request body must not exceed ${limit} bytes`;
+
+const tooSlow = (ms: number): string =>
+  `The request body took longer than ${ms / 1000} seconds to arrive.`;
+
+const BODY_REFUSALS: Record<BodyRefusal, Refusal> = {
+  length: { status: 413, message: tooLarge },
+  too_large: { status: 413, message: tooLarge },
+  over_budget: {
+    status: 503,
+    message: () =>
+      "The server is holding as many large requests as it can at once. Try again in a few seconds.",
+    log: (limit) => `Refused a large request with 503: bodies in flight hold all ${limit} bytes`,
+    retryAfter: RETRY_AFTER_SECONDS,
+  },
+  stalled: {
+    status: 408,
+    message: () =>
+      "The request body stopped arriving while other requests needed the memory it held. Send it again.",
+    log: () => "Dropped a stalled request body with 408 to make room for another",
+  },
+  late: { status: 408, message: tooSlow, log: tooSlow },
+  unreadable: {
+    status: 400,
+    code: -32700,
+    message: () => "Parse error: the request body could not be read",
+  },
+};
+
 const KEY_REFUSALS = {
   refused: [401, `Redmine does not accept the API key in the ${API_KEY_HEADER} header.`],
   unreachable: [503, "Redmine did not answer when asked about the API key. Try again in a moment."],
 } as const satisfies Record<Exclude<KeyVerdict, "ok">, readonly [number, string]>;
 
 /**
- * The MCP SDK reads the whole body before it builds a server, so a body errored on a refusal makes
- * it answer 400 before any tool runs, and that 400 is replaced here. The source is never cancelled:
- * on Node that destroys the socket before the answer is written.
+ * The whole body is read before a server is built, so a body errored on a refusal answers 400 before
+ * any tool runs, and that 400 is replaced here. The source is never cancelled: on Node that destroys
+ * the socket before the answer is written.
  */
 async function admitKey(
   request: Request,
@@ -598,8 +689,15 @@ async function refuse(request: Request, status: number, message: string): Promis
   return jsonRpcError(status, message, await requestId(request));
 }
 
-function jsonRpcError(status: number, message: string, id: string | number | null): Response {
-  return Response.json({ jsonrpc: "2.0", error: { code: -32000, message }, id }, { status });
+function jsonRpcError(
+  status: number,
+  message: string,
+  id: string | number | null,
+  { code = -32000, retryAfter }: Partial<Refusal> = {},
+): Response {
+  const headers = new Headers();
+  if (retryAfter !== undefined) headers.set("Retry-After", String(retryAfter));
+  return Response.json({ jsonrpc: "2.0", error: { code, message }, id }, { status, headers });
 }
 
 /** No WWW-Authenticate: no scheme names a custom header, and a Bearer challenge sends clients to OAuth. */
