@@ -268,7 +268,9 @@ describe("a bearer request Redmine refuses", () => {
     );
     expect(response.status).toBe(401);
     expect(response.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
-    expect(response.headers.get("access-control-expose-headers")).toBe("WWW-Authenticate");
+    expect(response.headers.get("access-control-expose-headers")).toBe(
+      "WWW-Authenticate, Retry-After",
+    );
   });
 
   it("keeps Redmine's 403 a tool error: a token cannot grant what Redmine forbids", async () => {

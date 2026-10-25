@@ -273,7 +273,7 @@ describe("createRedmineMcpHandler", () => {
       expect(sse.headers.get("content-type")).toBe("text/event-stream");
       expect(corsHeaders(sse)).toEqual([
         ["access-control-allow-origin", app],
-        ["access-control-expose-headers", "WWW-Authenticate"],
+        ["access-control-expose-headers", "WWW-Authenticate, Retry-After"],
       ]);
       expect(sse.headers.get("vary")).toBe("Origin");
       expect(await sse.text()).toContain('"tools"');
@@ -692,7 +692,9 @@ describe("createRedmineMcpHandler with a verifier", () => {
     expect(preflight.headers.get("access-control-allow-headers")).toContain("Authorization");
     const challenged = await call({ origin: "https://app.example.com" });
     expect(challenged.status).toBe(401);
-    expect(challenged.headers.get("access-control-expose-headers")).toBe("WWW-Authenticate");
+    expect(challenged.headers.get("access-control-expose-headers")).toBe(
+      "WWW-Authenticate, Retry-After",
+    );
   });
 
   it("refuses a verifier without publicUrl, both kinds of server at once, and plain http", () => {

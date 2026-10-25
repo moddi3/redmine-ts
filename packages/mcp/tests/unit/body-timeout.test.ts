@@ -124,6 +124,16 @@ describe("a request body that does not arrive in time", () => {
     expect(response.status).toBe(408);
   }, 3000);
 
+  it.each(Object.entries(credentials))(
+    "gets 408 for a %s request that sends no body at all",
+    async (_, headers) => {
+      const { handle } = handler({ publicUrl, verifier, bodyTimeoutMs: 300 });
+      const response = await handle(post(headers, [], { end: false }));
+      expect(response.status).toBe(408);
+    },
+    3000,
+  );
+
   it("still gets 401 for a key Redmine refuses", async () => {
     const { handle } = handler({ bodyTimeoutMs: 300 });
     const response = await handle(
@@ -217,9 +227,12 @@ describe("a request body that arrives in time", () => {
   );
 });
 
-it.each([0, 0.5, -1, Number.NaN, 2 ** 31])("throws on bodyTimeoutMs %s when created", (value) => {
-  expect(() => handler({ bodyTimeoutMs: value })).toThrow(/bodyTimeoutMs/);
-});
+it.each([0, 0.5, -1, Number.NaN, 2 ** 31, null, "300"])(
+  "throws on bodyTimeoutMs %s when created",
+  (value) => {
+    expect(() => handler({ bodyTimeoutMs: value as number })).toThrow(/bodyTimeoutMs/);
+  },
+);
 
 it.each([1, 2 ** 31 - 1])("accepts bodyTimeoutMs %s", (value) => {
   expect(() => handler({ bodyTimeoutMs: value })).not.toThrow();
