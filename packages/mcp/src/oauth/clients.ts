@@ -107,30 +107,39 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
     for (const [id, flight] of flights) if (flight.until <= now) flights.delete(id);
     let flight = flights.get(clientId);
     if (flight === undefined) {
-      if (flights.size >= DOCUMENT_FETCHES) {
-        return cached !== undefined && cached.fetched + DOCUMENT_STALE_MS > now
-          ? cached.client
-          : BUSY;
-      }
-      const started = { outcome: load(clientId, url), until: now + FLIGHT_MS };
+      if (flights.size >= DOCUMENT_FETCHES) return recent(clientId);
       // A flight past its time may have been dropped and replaced by a newer one, which stays.
+      const current = () => flights.get(clientId) === started;
+      const started = { outcome: load(clientId, url, current), until: now + FLIGHT_MS };
       const land = () => {
-        if (flights.get(clientId) === started) flights.delete(clientId);
+        if (current()) flights.delete(clientId);
       };
       started.outcome.then(land, land);
       flights.set(clientId, started);
       flight = started;
     }
-    return settled(flight.outcome, flight.until - now);
+    return settled(flight.outcome, flight.until - now, () => recent(clientId));
+  }
+
+  /** The document fetched within DOCUMENT_STALE_MS, for when no fetch can answer now, or BUSY. */
+  function recent(clientId: string): Client | typeof BUSY {
+    const kept = documents.get(clientId);
+    return kept !== undefined && kept.fetched + DOCUMENT_STALE_MS > Date.now() ? kept.client : BUSY;
   }
 
   /**
    * Fetches and checks a document, and keeps a valid one. A failure keeps nothing, as draft 02 of
    * Client ID Metadata Documents forbids caching error responses and invalid documents (section 5.2).
    * It also drops the copy held before, so a busy server never serves a client whose document fails.
+   * Only the current flight writes, so a fetch that lands after its time leaves a newer document.
    */
-  async function load(clientId: string, url: URL): Promise<Client | string> {
+  async function load(
+    clientId: string,
+    url: URL,
+    current: () => boolean,
+  ): Promise<Client | string> {
     const outcome = await fetchAndCheck(clientId, url);
+    if (!current()) return outcome;
     if (typeof outcome === "string") {
       documents.delete(clientId);
     } else {
@@ -275,13 +284,20 @@ export function redirectMatches(registered: string, requested: string): boolean 
   );
 }
 
-/** A shared fetch's outcome, or a failure once its time is up, since a cancelled one never settles. */
-function settled(outcome: Promise<Client | string>, ms: number): Promise<Client | string> {
+/**
+ * A shared fetch's outcome, or `late()` once its time is up, since a cancelled fetch never settles.
+ * Its sharers then know nothing about the client, so they get no refusal.
+ */
+function settled(
+  outcome: Promise<Client | string>,
+  ms: number,
+  late: () => Client | typeof BUSY,
+): Promise<Client | string | typeof BUSY> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<string>((resolve) => {
-    timer = setTimeout(() => resolve(UNFETCHED), ms);
+  const lapsed = new Promise<Client | typeof BUSY>((resolve) => {
+    timer = setTimeout(() => resolve(late()), ms);
   });
-  return Promise.race([outcome, late]).finally(() => clearTimeout(timer));
+  return Promise.race([outcome, lapsed]).finally(() => clearTimeout(timer));
 }
 
 /** Sets `key` as the newest entry of a map that keeps at most `size`, dropping the oldest. */
