@@ -8,7 +8,7 @@
 import type { Access, RedmineVersion } from "@redmine-ts/sdk";
 import { z } from "zod";
 import type { BearerGrant, BearerVerifier } from "../http.ts";
-import { checkApiKey } from "../redmine-key.ts";
+import { checkApiKey, KEY_CHECK_TIMEOUT_MS } from "../redmine-key.ts";
 import type { KeyVerdict } from "../redmine-key.ts";
 import { allowsRedirect, BUSY, BUSY_RETRY_SECONDS, createClients } from "./clients.ts";
 import type { Client } from "./clients.ts";
@@ -147,6 +147,11 @@ const KEY_FAILURES_PER_HOUR = 10;
 const HOUR = 3600;
 /** Keys the consent form may be checking at Redmine at once, in this process. */
 const KEY_CHECKS_IN_FLIGHT = 4;
+/**
+ * A key check gives up within its timeout, unless the request that started it was cancelled, as
+ * Workers cancel the work of a request whose client disconnects. Its slot is then free after this long.
+ */
+const KEY_CHECK_MS = KEY_CHECK_TIMEOUT_MS + 1000;
 
 const OTHER_BROWSER =
   "This sign-in did not start in this browser, or the browser dropped its cookie. Start again from your client.";
@@ -280,7 +285,8 @@ export function createAuthorizationServer(
   const end = async (family: string) => {
     await families?.consume(`family:${family}`, REFRESH_TTL);
   };
-  let keyChecks = 0;
+  /** Key checks under way, each counted until it settles or its time is up. */
+  const keyChecks = new Set<{ until: number }>();
   const metadata = {
     issuer,
     authorization_endpoint: paths.origin + paths.authorize,
@@ -496,19 +502,22 @@ export function createAuthorizationServer(
         "Too many keys were tried from this browser in the last hour. Try again later.",
       );
     }
-    if (keyChecks >= KEY_CHECKS_IN_FLIGHT) {
+    const at = Date.now();
+    for (const lease of keyChecks) if (lease.until <= at) keyChecks.delete(lease);
+    if (keyChecks.size >= KEY_CHECKS_IN_FLIGHT) {
       return again(
         consent.attempts,
         503,
         "Many keys are being checked right now. Try again in a moment.",
       );
     }
-    keyChecks++;
+    const lease = { until: at + KEY_CHECK_MS };
+    keyChecks.add(lease);
     let check: KeyVerdict;
     try {
       check = await checkKeyAtRedmine(apiKey);
     } finally {
-      keyChecks--;
+      keyChecks.delete(lease);
     }
     if (check !== "ok") {
       if (families !== undefined) await countFailure(families, failures);

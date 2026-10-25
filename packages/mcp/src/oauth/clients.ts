@@ -44,14 +44,6 @@ const FLIGHT_MS = DOCUMENT_TIMEOUT_MS + 1000;
  * of unknown client_ids cannot lock out a client the server has seen.
  */
 const DOCUMENT_STALE_MS = 60 * 60_000;
-/**
- * A failed client_id is not fetched again for this long. Draft 02 of Client ID Metadata Documents
- * forbids caching error responses (section 5.2), so the failure is kept only long enough to stop one
- * client_id from being fetched in a loop. It is keyed by client_id, so a bad URL on a client's host
- * never blocks the client's own document.
- */
-const FAILURE_CACHE_MS = 30_000;
-const FAILURE_CACHE_SIZE = 256;
 const UNFETCHED = "its metadata document could not be fetched";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -101,7 +93,6 @@ export interface Clients {
 
 export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): Clients {
   const documents = new Map<string, { client: Client; fetched: number }>();
-  const failures = new Map<string, { reason: string; until: number }>();
   /** Fetches under way by client_id. Concurrent resolves of one client_id share its fetch. */
   const flights = new Map<string, { outcome: Promise<Client | string>; until: number }>();
   const admitted = (host: string) => allowedHosts === undefined || allowedHosts.includes(host);
@@ -113,8 +104,6 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
     const now = Date.now();
     const cached = documents.get(clientId);
     if (cached !== undefined && cached.fetched + DOCUMENT_CACHE_MS > now) return cached.client;
-    const failed = failures.get(clientId);
-    if (failed !== undefined && failed.until > now) return failed.reason;
     for (const [id, flight] of flights) if (flight.until <= now) flights.delete(id);
     let flight = flights.get(clientId);
     if (flight === undefined) {
@@ -135,15 +124,16 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
     return settled(flight.outcome, flight.until - now);
   }
 
-  /** Fetches and checks a document, and remembers a client for minutes or a failure for seconds. */
+  /**
+   * Fetches and checks a document, and keeps a valid one. A failure keeps nothing, as draft 02 of
+   * Client ID Metadata Documents forbids caching error responses and invalid documents (section 5.2).
+   * It also drops the copy held before, so a busy server never serves a client whose document fails.
+   */
   async function load(clientId: string, url: URL): Promise<Client | string> {
     const outcome = await fetchAndCheck(clientId, url);
     if (typeof outcome === "string") {
       documents.delete(clientId);
-      const failure = { reason: outcome, until: Date.now() + FAILURE_CACHE_MS };
-      remember(failures, clientId, failure, FAILURE_CACHE_SIZE);
     } else {
-      failures.delete(clientId);
       remember(documents, clientId, { client: outcome, fetched: Date.now() }, DOCUMENT_CACHE_SIZE);
     }
     return outcome;

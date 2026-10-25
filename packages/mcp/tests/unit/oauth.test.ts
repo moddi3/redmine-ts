@@ -1250,42 +1250,81 @@ describe("metadata document fetches", () => {
     expect(claudeFetches).toBe(2);
   });
 
-  it("remembers a failure for 30 seconds per client_id, so bad URLs on a host never block its real client", async () => {
-    const setupped = setup();
+  it("caches no failure or refusal, so bad URLs on a host never block its real client", async () => {
     const wrongId = "https://claude.ai/wrong-id";
-    setupped.documents.set(wrongId, {
-      client_id: "https://claude.ai/someone-else",
-      redirect_uris: [CLAUDE_REDIRECT],
-    });
-    vi.useFakeTimers({ toFake: ["Date"] });
-    const start = Date.now();
-    const flood = [
-      ...Array.from({ length: 300 }, (_, at) => `https://claude.ai/nope-${at}`),
-      wrongId,
-    ];
-    for (const clientId of flood) {
-      expect([clientId, (await authorizePage(setupped, clientId)).status]).toEqual([clientId, 400]);
-    }
+    const flood = Array.from({ length: 8 }, (_, at) => `https://claude.ai/nope-${at}`);
+    const documents = new Map<string, unknown>([
+      [CLAUDE, { client_id: CLAUDE, redirect_uris: [CLAUDE_REDIRECT] }],
+      [wrongId, { client_id: "https://claude.ai/someone-else", redirect_uris: [CLAUDE_REDIRECT] }],
+    ]);
+    const fetched: string[] = [];
+    let gate: Promise<void> | undefined;
+    const setupped = setup(
+      {},
+      {
+        fetchClientMetadata: async (input, init) => {
+          const url = new Request(input, init).url;
+          fetched.push(url);
+          await gate;
+          return documents.has(url)
+            ? Response.json(documents.get(url))
+            : new Response(null, { status: 404 });
+        },
+      },
+    );
+    const times = (url: string) => fetched.filter((one) => one === url).length;
+    let release!: () => void;
+    gate = new Promise((resolve) => (release = resolve));
+    const flooding = flood.map((clientId) => authorizePage(setupped, clientId));
+    await vi.waitFor(() => expect(fetched).toHaveLength(8));
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(503);
+    expect(times(CLAUDE)).toBe(0);
+    release();
+    gate = undefined;
+    for (const page of await Promise.all(flooding)) expect(page.status).toBe(400);
     expect((await authorizePage(setupped, CLAUDE)).status).toBe(200);
+    expect(times(CLAUDE)).toBe(1);
 
-    const times = (url: string) => setupped.fetched.filter((fetched) => fetched === url).length;
-    const last = "https://claude.ai/nope-299";
-    expect(await (await authorizePage(setupped, last)).text()).toContain("could not be fetched");
+    const failed = flood[0]!;
+    expect(await (await authorizePage(setupped, failed)).text()).toContain("could not be fetched");
     expect(await (await authorizePage(setupped, wrongId)).text()).toContain(
       "names another client_id",
     );
-    expect([times(last), times(wrongId)]).toEqual([1, 1]);
-    // The 256 newer failures pushed the oldest out, so remembering stays bounded.
-    const first = "https://claude.ai/nope-0";
-    expect((await authorizePage(setupped, first)).status).toBe(400);
-    expect(times(first)).toBe(2);
+    expect(await (await authorizePage(setupped, wrongId)).text()).toContain(
+      "names another client_id",
+    );
+    expect([times(failed), times(wrongId)]).toEqual([2, 2]);
+    documents.set(failed, { client_id: failed, redirect_uris: [CLAUDE_REDIRECT] });
+    expect((await authorizePage(setupped, failed)).status).toBe(200);
+    expect(times(failed)).toBe(3);
+  });
 
-    setupped.documents.set(last, { client_id: last, redirect_uris: [CLAUDE_REDIRECT] });
-    vi.setSystemTime(start + 29_000);
-    expect((await authorizePage(setupped, last)).status).toBe(400);
-    vi.setSystemTime(start + 31_000);
-    expect((await authorizePage(setupped, last)).status).toBe(200);
-    expect(times(last)).toBe(2);
+  it("drops a kept document whose next fetch fails, so a busy server does not serve it", async () => {
+    const held = heldDocuments();
+    let claudeStatus = 200;
+    const setupped = setup(
+      {},
+      {
+        fetchClientMetadata: (input, init) => {
+          if (new Request(input, init).url !== CLAUDE) return held.fetchClientMetadata(input, init);
+          return Promise.resolve(
+            claudeStatus === 200
+              ? Response.json({ client_id: CLAUDE, redirect_uris: [CLAUDE_REDIRECT] })
+              : new Response(null, { status: claudeStatus }),
+          );
+        },
+      },
+    );
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(200);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    claudeStatus = 404;
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(400);
+    const filling = ids("fill", 8).map((id) => authorizePage(setupped, id));
+    await vi.waitFor(() => expect(held.open()).toBe(8));
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(503);
+    held.release();
+    await Promise.all(filling);
   });
 
   it("frees the slot of a fetch that never settles, as a cancelled request's fetch on Workers", async () => {
@@ -1440,6 +1479,38 @@ describe("API key sign-in, the opt-in fallback", () => {
     // The busy page is a fresh page, so the person retries from it once Redmine is free.
     const retried = await pages[4]!.submit("jsmith-api-key", consentValue(busy));
     expect(retried.status).toBe(303);
+  });
+
+  it("frees the slot of a key check that never settles, as a cancelled request's check on Workers", async () => {
+    const redmine = fakeRedmine();
+    let stuck = 0;
+    const hanging: typeof fetch = (input, init) => {
+      if (new Request(input, init).headers.get("x-redmine-api-key") !== "stuck-key") {
+        return redmine.fetch(input, init);
+      }
+      stuck++;
+      return new Promise<Response>(() => {});
+    };
+    const { handle } = setup({ fetch: hanging }, {
+      redmineApp: undefined,
+      apiKeyLogin: true,
+    } as never);
+    const pages = await Promise.all(Array.from({ length: 5 }, () => consent(handle, redmine)));
+    for (const { submit } of pages.slice(0, 4)) void submit("stuck-key");
+    await vi.waitFor(() => expect(stuck).toBe(4));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    const last = pages[4]!;
+    let answer = await last.submit("jsmith-api-key");
+    expect(answer.status).toBe(503);
+    // At 8 seconds a live check has given up, so the stuck ones still count until the margin passes.
+    vi.setSystemTime(start + 8000);
+    answer = await last.submit("jsmith-api-key", consentValue(await answer.text()));
+    expect(answer.status).toBe(503);
+    vi.setSystemTime(start + 9000);
+    answer = await last.submit("jsmith-api-key", consentValue(await answer.text()));
+    expect(answer.status).toBe(303);
+    expect(redmine.apiCalls.filter((call) => call.key === "jsmith-api-key")).toHaveLength(1);
   });
 
   it("with a store, refuses a browser that failed ten keys within the hour", async () => {

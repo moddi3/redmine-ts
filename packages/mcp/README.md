@@ -221,7 +221,7 @@ On a public deployment, pass `--allow-client`. Without it, anyone who reaches th
 With or without the flag, the server bounds those fetches:
 
 - A fetch goes only to a public address, follows no redirect, and stops after 5 seconds or 5 KB.
-- A document that passes the checks is kept for 5 minutes. A `client_id` whose fetch failed is not fetched again for 30 seconds, and its sign-in page shows the same error until then. The draft forbids caching errors; this short hold departs from it to stop one URL from being fetched in a loop.
+- A document that passes the checks is kept for 5 minutes. A fetch that fails, or a document that fails a check, is not kept, as the Client ID Metadata Document draft requires, so the next sign-in of that `client_id` fetches it again. Such a failure also drops the document kept from an earlier fetch.
 - Sign-ins of the same client while its document is being fetched share that fetch.
 - One process, or one Worker isolate, fetches at most 8 documents at once. Beyond that, a sign-in that needs a fetch gets a 503 page with `Retry-After: 5` that asks the person to reload in a moment. Nothing about the client is remembered from that refusal.
 - A registered client, or one whose document is kept, signs in without a fetch, so the cap never touches it. While all 8 fetches are taken, a document fetched within the last hour, and among the last 256 fetched, still serves its client.
