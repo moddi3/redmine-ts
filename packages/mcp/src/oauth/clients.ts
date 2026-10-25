@@ -27,7 +27,38 @@ const DOCUMENT_MAX_BYTES = 5 * 1024;
 const DOCUMENT_TIMEOUT_MS = 5000;
 const DOCUMENT_CACHE_MS = 5 * 60_000;
 const DOCUMENT_CACHE_SIZE = 256;
+/**
+ * Documents one handler fetches at once, which is one process for the CLI and one isolate on Workers.
+ * Each document is fetched about once per DOCUMENT_CACHE_MS, so sign-ins rarely need two at a time.
+ * The cap bounds the sockets that unauthenticated authorize requests can make the server open.
+ */
+const DOCUMENT_FETCHES = 8;
+/**
+ * A fetch settles within its timeout, unless the request that started it was cancelled, as Workers
+ * cancel the work of a request whose client disconnects. Its slot is then free after this long, and
+ * requests that share it stop waiting.
+ */
+const FLIGHT_MS = DOCUMENT_TIMEOUT_MS + 1000;
+/**
+ * While every slot is taken, a document fetched within this time still serves its client, so a flood
+ * of unknown client_ids cannot lock out a client the server has seen.
+ */
+const DOCUMENT_STALE_MS = 60 * 60_000;
+/**
+ * A failed client_id is not fetched again for this long. Draft 02 of Client ID Metadata Documents
+ * forbids caching error responses (section 5.2), so the failure is kept only long enough to stop one
+ * client_id from being fetched in a loop. It is keyed by client_id, so a bad URL on a client's host
+ * never blocks the client's own document.
+ */
+const FAILURE_CACHE_MS = 30_000;
+const FAILURE_CACHE_SIZE = 256;
+const UNFETCHED = "its metadata document could not be fetched";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** What resolve answers when the client needs a fetch and every slot is taken. */
+export const BUSY: unique symbol = Symbol("busy");
+/** Most slots free within one fetch timeout. */
+export const BUSY_RETRY_SECONDS: number = DOCUMENT_TIMEOUT_MS / 1000;
 
 /** Names are shown on the consent page and sealed into registrations, so they stay short. */
 const NAME_MAX_LENGTH = 100;
@@ -62,22 +93,63 @@ export type Registered =
   | { ok: false; error: "invalid_client_metadata" | "invalid_redirect_uri"; description: string };
 
 export interface Clients {
-  /** The client a client_id names, or why it is refused. */
-  resolve(clientId: string): Promise<Client | string>;
+  /** The client a client_id names, why it is refused, or BUSY to try again in a moment. */
+  resolve(clientId: string): Promise<Client | string | typeof BUSY>;
   /** Dynamic Client Registration (RFC 7591) for clients without a metadata document. */
   register(metadata: unknown): Promise<Registered>;
 }
 
 export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): Clients {
-  const documents = new Map<string, { client: Client; until: number }>();
+  const documents = new Map<string, { client: Client; fetched: number }>();
+  const failures = new Map<string, { reason: string; until: number }>();
+  /** Fetches under way by client_id. Concurrent resolves of one client_id share its fetch. */
+  const flights = new Map<string, { outcome: Promise<Client | string>; until: number }>();
   const admitted = (host: string) => allowedHosts === undefined || allowedHosts.includes(host);
 
-  async function fetchDocument(clientId: string): Promise<Client | string> {
+  async function fetchDocument(clientId: string): Promise<Client | string | typeof BUSY> {
     const url = documentUrl(clientId);
     if (typeof url === "string") return url;
     if (!admitted(url.hostname)) return `${url.hostname} is not an allowed client host`;
+    const now = Date.now();
     const cached = documents.get(clientId);
-    if (cached !== undefined && cached.until > Date.now()) return cached.client;
+    if (cached !== undefined && cached.fetched + DOCUMENT_CACHE_MS > now) return cached.client;
+    const failed = failures.get(clientId);
+    if (failed !== undefined && failed.until > now) return failed.reason;
+    for (const [id, flight] of flights) if (flight.until <= now) flights.delete(id);
+    let flight = flights.get(clientId);
+    if (flight === undefined) {
+      if (flights.size >= DOCUMENT_FETCHES) {
+        return cached !== undefined && cached.fetched + DOCUMENT_STALE_MS > now
+          ? cached.client
+          : BUSY;
+      }
+      const started = { outcome: load(clientId, url), until: now + FLIGHT_MS };
+      // A flight past its time may have been dropped and replaced by a newer one, which stays.
+      const land = () => {
+        if (flights.get(clientId) === started) flights.delete(clientId);
+      };
+      started.outcome.then(land, land);
+      flights.set(clientId, started);
+      flight = started;
+    }
+    return settled(flight.outcome, flight.until - now);
+  }
+
+  /** Fetches and checks a document, and remembers a client for minutes or a failure for seconds. */
+  async function load(clientId: string, url: URL): Promise<Client | string> {
+    const outcome = await fetchAndCheck(clientId, url);
+    if (typeof outcome === "string") {
+      documents.delete(clientId);
+      const failure = { reason: outcome, until: Date.now() + FAILURE_CACHE_MS };
+      remember(failures, clientId, failure, FAILURE_CACHE_SIZE);
+    } else {
+      failures.delete(clientId);
+      remember(documents, clientId, { client: outcome, fetched: Date.now() }, DOCUMENT_CACHE_SIZE);
+    }
+    return outcome;
+  }
+
+  async function fetchAndCheck(clientId: string, url: URL): Promise<Client | string> {
     let response: Response;
     try {
       response = await fetch(url, {
@@ -86,14 +158,20 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
         signal: AbortSignal.timeout(DOCUMENT_TIMEOUT_MS),
       });
     } catch {
-      return "its metadata document could not be fetched";
+      return UNFETCHED;
     }
     // The status is not repeated: it would tell the caller what answers where the URL points.
     if (response.status !== 200) {
       await response.body?.cancel();
-      return "its metadata document could not be fetched";
+      return UNFETCHED;
     }
-    const text = await readText(response, DOCUMENT_MAX_BYTES);
+    let text: string | undefined;
+    try {
+      text = await readText(response, DOCUMENT_MAX_BYTES);
+    } catch {
+      // The timeout also ends a body that stalls after the headers.
+      return UNFETCHED;
+    }
     if (text === undefined) return `its metadata document is over ${DOCUMENT_MAX_BYTES} bytes`;
     let parsed: z.infer<typeof Document>;
     try {
@@ -109,19 +187,16 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
     if (!parsed.redirect_uris.every(isRedirectUri)) {
       return "its metadata document lists a redirect URI that is not https or loopback";
     }
-    const client: Client = {
+    return {
       id: clientId,
       name: parsed.client_name,
       documentHost: url.hostname,
       redirectUris: parsed.redirect_uris,
     };
-    if (documents.size >= DOCUMENT_CACHE_SIZE) documents.delete(documents.keys().next().value!);
-    documents.set(clientId, { client, until: Date.now() + DOCUMENT_CACHE_MS });
-    return client;
   }
 
   return {
-    async resolve(clientId: string): Promise<Client | string> {
+    async resolve(clientId: string): Promise<Client | string | typeof BUSY> {
       if (clientId.startsWith("https://")) return fetchDocument(clientId);
       const sealed = await sealer.open<Sealed>("registration", clientId);
       if (sealed === undefined) return "it is not a client this server registered or can fetch";
@@ -208,6 +283,22 @@ export function redirectMatches(registered: string, requested: string): boolean 
     b.username === "" &&
     b.password === ""
   );
+}
+
+/** A shared fetch's outcome, or a failure once its time is up, since a cancelled one never settles. */
+function settled(outcome: Promise<Client | string>, ms: number): Promise<Client | string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve(UNFETCHED), ms);
+  });
+  return Promise.race([outcome, late]).finally(() => clearTimeout(timer));
+}
+
+/** Sets `key` as the newest entry of a map that keeps at most `size`, dropping the oldest. */
+function remember<V>(map: Map<string, V>, key: string, value: V, size: number): void {
+  map.delete(key);
+  if (map.size >= size) map.delete(map.keys().next().value!);
+  map.set(key, value);
 }
 
 /** No method, or `none`: the client proves itself with PKCE alone. */

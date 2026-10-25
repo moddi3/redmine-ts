@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { BearerGrant, BearerVerifier } from "../http.ts";
 import { checkApiKey } from "../redmine-key.ts";
 import type { KeyVerdict } from "../redmine-key.ts";
-import { allowsRedirect, createClients } from "./clients.ts";
+import { allowsRedirect, BUSY, BUSY_RETRY_SECONDS, createClients } from "./clients.ts";
 import type { Client } from "./clients.ts";
 import { consentPage, errorPage } from "./pages.ts";
 import { grantedScopes, redmineScope, scopeNames, scopesFor } from "./scopes.ts";
@@ -60,7 +60,8 @@ interface OAuthSettings {
   redminePublicUrl?: string;
   /**
    * Hostnames clients must belong to: the host of a metadata document's URL, or of every redirect URI
-   * of a registered client. Default: any client.
+   * of a registered client. Each entry matches one name exactly, and a `*` throws when the server is
+   * created, as `--allow-client` refuses it. Default: any client.
    */
   allowedClientHosts?: readonly string[];
   /**
@@ -257,6 +258,10 @@ export function createAuthorizationServer(
       "oauth.fetchClientMetadata is required: pass publicFetch from @redmine-ts/mcp/node on Node, or on Workers the global fetch with the global_fetch_strictly_public flag",
     );
   }
+  // URL parsing keeps a `*` in a hostname, so a wildcard would pass as a name and match only itself.
+  if (options.allowedClientHosts?.some((host) => host.includes("*"))) {
+    throw new TypeError("oauth.allowedClientHosts does not support wildcards: list each hostname");
+  }
   const redminePublic = withSlash(new URL(options.redminePublicUrl ?? redmineUrl));
   const issuer = paths.identifier;
   const sealer = createSealer(secrets, issuer);
@@ -291,6 +296,10 @@ export function createAuthorizationServer(
     authorization_response_iss_parameter_supported: true,
   };
 
+  /** While every metadata fetch slot is taken. Nothing is known against the client, so it may retry. */
+  const busy = (message: string) =>
+    errorPage(503, message, { "Retry-After": String(BUSY_RETRY_SECONDS) });
+
   /** Every redirect back to the client says who answers, as RFC 9207 asks. */
   const back = (redirectUri: string, params: Record<string, string | undefined>, status = 302) =>
     redirect(redirectUri, { ...params, iss: issuer }, status);
@@ -318,6 +327,9 @@ export function createAuthorizationServer(
       );
     }
     const client = await clients.resolve(clientId);
+    if (client === BUSY) {
+      return busy("The server is busy checking other clients. Reload this page in a moment.");
+    }
     if (typeof client === "string") {
       return errorPage(400, `This server refuses the client: ${client}.`);
     }
@@ -464,6 +476,11 @@ export function createAuthorizationServer(
     // The page that answered is spent; the next try needs a new one, which carries the count.
     const again = async (attempts: number, status: number, keyError: string) => {
       const client = await clients.resolve(consent.client);
+      if (client === BUSY) {
+        return busy(
+          "The server is busy checking other clients, so this sign-in stops here. Start again from your client in a moment.",
+        );
+      }
       if (typeof client === "string") {
         return errorPage(400, `This server refuses the client: ${client}.`);
       }

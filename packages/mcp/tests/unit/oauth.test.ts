@@ -1110,6 +1110,228 @@ describe("built-in authorization server", () => {
     expect(create({}, { fetchClientMetadata: undefined })).toThrow(
       "oauth.fetchClientMetadata is required: pass publicFetch from @redmine-ts/mcp/node",
     );
+    for (const host of ["*.claude.ai", "*"]) {
+      expect(create({}, { allowedClientHosts: ["claude.ai", host] })).toThrow(
+        new TypeError("oauth.allowedClientHosts does not support wildcards: list each hostname"),
+      );
+    }
+  });
+});
+
+describe("metadata document fetches", () => {
+  /** A metadata server that answers only when the test releases it, and counts fetches in flight. */
+  function heldDocuments() {
+    const fetched: string[] = [];
+    const waiting: (() => void)[] = [];
+    let open = 0;
+    let peak = 0;
+    const fetchClientMetadata: typeof fetch = async (input, init) => {
+      const url = new Request(input, init).url;
+      fetched.push(url);
+      open++;
+      peak = Math.max(peak, open);
+      await new Promise<void>((resolve) => waiting.push(resolve));
+      open--;
+      return Response.json({ client_id: url, redirect_uris: [CLAUDE_REDIRECT] });
+    };
+    return {
+      fetchClientMetadata,
+      fetched,
+      open: () => open,
+      peak: () => peak,
+      release: () => {
+        for (const resume of waiting.splice(0)) resume();
+      },
+    };
+  }
+
+  function authorizePage({ handle, redmine }: Setup, clientId: string): Promise<Response> {
+    return browser(handle, ORIGIN, redmine).send(
+      authorizeUrl({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: CLAUDE_REDIRECT,
+        code_challenge: pkce().challenge,
+        code_challenge_method: "S256",
+      }),
+    );
+  }
+
+  const ids = (prefix: string, count: number) =>
+    Array.from({ length: count }, (_, at) => `https://${prefix}-${at}.example/meta.json`);
+
+  it("fetches at most 8 documents at once, and answers the rest 503 to retry", async () => {
+    const held = heldDocuments();
+    const setupped = setup({}, { fetchClientMetadata: held.fetchClientMetadata });
+    const clients = ids("client", 12);
+    const answers = new Map<string, Response>();
+    const pages = clients.map(async (id) => {
+      answers.set(id, await authorizePage(setupped, id));
+    });
+    await vi.waitFor(() => expect(answers.size).toBe(4));
+    expect(held.open()).toBe(8);
+    const refused = [...answers.keys()];
+    for (const page of answers.values()) {
+      expect(page.status).toBe(503);
+      expect(page.headers.get("retry-after")).toBe("5");
+      expect(await page.text()).toContain(
+        "The server is busy checking other clients. Reload this page in a moment.",
+      );
+    }
+    expect(held.fetched.filter((url) => refused.includes(url))).toEqual([]);
+    held.release();
+    await Promise.all(pages);
+    expect([...answers.values()].filter((page) => page.status === 200)).toHaveLength(8);
+    expect(held.peak()).toBe(8);
+
+    // A refusal for capacity says nothing about the client, so nothing about it is remembered.
+    const retried = authorizePage(setupped, refused[0]!);
+    await vi.waitFor(() => expect(held.open()).toBe(1));
+    held.release();
+    expect((await retried).status).toBe(200);
+    expect(held.fetched.filter((url) => url === refused[0])).toHaveLength(1);
+  });
+
+  it("shares one fetch between concurrent sign-ins of the same client", async () => {
+    const held = heldDocuments();
+    const setupped = setup({}, { fetchClientMetadata: held.fetchClientMetadata });
+    const client = ids("shared", 1)[0]!;
+    const pages = Array.from({ length: 20 }, () => authorizePage(setupped, client));
+    await vi.waitFor(() => expect(held.open()).toBe(1));
+    held.release();
+    expect((await Promise.all(pages)).map(({ status }) => status)).toEqual(Array(20).fill(200));
+    expect(held.fetched).toEqual([client]);
+  });
+
+  it("serves a cached client while every slot is taken, and one fetched within the hour", async () => {
+    const held = heldDocuments();
+    let claudeFetches = 0;
+    const setupped = setup(
+      {},
+      {
+        fetchClientMetadata: (input, init) => {
+          if (new Request(input, init).url !== CLAUDE) return held.fetchClientMetadata(input, init);
+          claudeFetches++;
+          return Promise.resolve(
+            Response.json({ client_id: CLAUDE, redirect_uris: [CLAUDE_REDIRECT] }),
+          );
+        },
+      },
+    );
+    const fill = async (prefix: string) => {
+      const pages = ids(prefix, 8).map((id) => authorizePage(setupped, id));
+      await vi.waitFor(() => expect(held.open()).toBe(8));
+      return pages;
+    };
+    const drain = async (pages: Promise<Response>[]) => {
+      held.release();
+      await Promise.all(pages);
+    };
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(200);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+
+    let filling = await fill("fresh");
+    expect((await authorizePage(setupped, ids("other", 1)[0]!)).status).toBe(503);
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(200);
+    await drain(filling);
+
+    vi.setSystemTime(start + 10 * 60_000);
+    filling = await fill("stale");
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(200);
+    await drain(filling);
+    expect(claudeFetches).toBe(1);
+
+    vi.setSystemTime(start + 61 * 60_000);
+    filling = await fill("old");
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(503);
+    await drain(filling);
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(200);
+    expect(claudeFetches).toBe(2);
+  });
+
+  it("remembers a failure for 30 seconds per client_id, so bad URLs on a host never block its real client", async () => {
+    const setupped = setup();
+    const wrongId = "https://claude.ai/wrong-id";
+    setupped.documents.set(wrongId, {
+      client_id: "https://claude.ai/someone-else",
+      redirect_uris: [CLAUDE_REDIRECT],
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    const flood = [
+      ...Array.from({ length: 300 }, (_, at) => `https://claude.ai/nope-${at}`),
+      wrongId,
+    ];
+    for (const clientId of flood) {
+      expect([clientId, (await authorizePage(setupped, clientId)).status]).toEqual([clientId, 400]);
+    }
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(200);
+
+    const times = (url: string) => setupped.fetched.filter((fetched) => fetched === url).length;
+    const last = "https://claude.ai/nope-299";
+    expect(await (await authorizePage(setupped, last)).text()).toContain("could not be fetched");
+    expect(await (await authorizePage(setupped, wrongId)).text()).toContain(
+      "names another client_id",
+    );
+    expect([times(last), times(wrongId)]).toEqual([1, 1]);
+    // The 256 newer failures pushed the oldest out, so remembering stays bounded.
+    const first = "https://claude.ai/nope-0";
+    expect((await authorizePage(setupped, first)).status).toBe(400);
+    expect(times(first)).toBe(2);
+
+    setupped.documents.set(last, { client_id: last, redirect_uris: [CLAUDE_REDIRECT] });
+    vi.setSystemTime(start + 29_000);
+    expect((await authorizePage(setupped, last)).status).toBe(400);
+    vi.setSystemTime(start + 31_000);
+    expect((await authorizePage(setupped, last)).status).toBe(200);
+    expect(times(last)).toBe(2);
+  });
+
+  it("frees the slot of a fetch that never settles, as a cancelled request's fetch on Workers", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const fetched: string[] = [];
+    const setupped = setup(
+      {},
+      {
+        fetchClientMetadata: (input, init) => {
+          fetched.push(new Request(input, init).url);
+          return new Promise<Response>(() => {});
+        },
+      },
+    );
+    const stuck = ids("stuck", 8).map((id) => authorizePage(setupped, id));
+    await vi.waitFor(() => expect(fetched).toHaveLength(8));
+    const next = ids("next", 1)[0]!;
+    expect((await authorizePage(setupped, next)).status).toBe(503);
+    await vi.advanceTimersByTimeAsync(6000);
+    for (const page of await Promise.all(stuck)) {
+      expect(page.status).toBe(400);
+      expect(await page.text()).toContain("its metadata document could not be fetched");
+    }
+    void authorizePage(setupped, next);
+    await vi.waitFor(() => expect(fetched).toContain(next));
+  });
+
+  it("answers 400 when a document's body breaks off, as the fetch timeout ends a stalled one", async () => {
+    const setupped = setup(
+      {},
+      {
+        fetchClientMetadata: async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("{"));
+                controller.error(new DOMException("The operation was aborted", "AbortError"));
+              },
+            }),
+          ),
+      },
+    );
+    const page = await authorizePage(setupped, "https://stalled.example/meta.json");
+    expect(page.status).toBe(400);
+    expect(await page.text()).toContain("its metadata document could not be fetched");
+    expect(setupped.errors).toEqual([]);
   });
 });
 
