@@ -602,6 +602,24 @@ describe("the buffer a body is charged for", () => {
     expect(capacity(await other.read)).toBe(free + 100 * KiB);
   });
 
+  it("grows the buffer 1 MiB at a time once it holds 1 MiB, so it never runs more than 1 MiB ahead of the body", async () => {
+    const limited = budget(8 * MiB, 16 * MiB);
+    const body = arriving(limited);
+    await body.send(512 * KiB, 8 * KiB);
+    expect(await fits(limited, 7 * MiB + free)).toBe(true);
+    expect(await fits(limited, 7 * MiB + free + 1)).toBe(false);
+    await body.send(1528 * KiB);
+    await body.send(8 * KiB);
+    expect(await fits(limited, 5 * MiB + free)).toBe(true);
+    expect(await fits(limited, 5 * MiB + free + 1)).toBe(false);
+    await body.send(MiB);
+    expect(await fits(limited, 4 * MiB + free)).toBe(true);
+    expect(await fits(limited, 4 * MiB + free + 1)).toBe(false);
+    await body.send(2 * MiB);
+    body.end();
+    expect(capacity(await body.read)).toBe(5 * MiB + 8 * KiB);
+  });
+
   it("does not size the buffer from the declared length before the bytes arrive", async () => {
     const limited = budget(MiB);
     const body = arriving(limited, MiB);

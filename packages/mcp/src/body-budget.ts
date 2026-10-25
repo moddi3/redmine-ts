@@ -9,6 +9,8 @@ const STALL_MS = 5000;
 const LINGER_MS = 5000;
 /** setTimeout fires at once for a longer delay. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
+/** Past this capacity a buffer grows by this much at a time instead of doubling. */
+const GROWTH_STEP = 1024 * 1024;
 
 /** About when a moving body that holds the budget has either grown or become stalled. */
 export const RETRY_AFTER_SECONDS: number = STALL_MS / 1000;
@@ -184,15 +186,18 @@ export function createBodyBudget({
 }
 
 /**
- * The buffer for `size` bytes. It at least doubles, so copying stays linear in the body, but stays
- * within `free` while the body does, so a body within `free` is never charged. It is capped at the
- * declared length, so a body that arrives as declared ends in a buffer of its exact size. It is not
- * sized from the declared length up front, since a client could declare 6.7 MiB, send 64 KiB and stop,
- * and the budget would turn others away for bytes that never come.
+ * The buffer for `size` bytes. It doubles up to GROWTH_STEP and then grows by GROWTH_STEP, so the
+ * buffer the budget charges for is never more than GROWTH_STEP ahead of the bytes received, at the
+ * cost of copying more of a large body. It stays within `free` while the body does, so a body within
+ * `free` is never charged. It is capped at the declared length, so a body that arrives as declared
+ * ends in a buffer of its exact size. It is not sized from the declared length up front, since a
+ * client could declare 6.7 MiB, send 64 KiB and stop, and the budget would turn others away for bytes
+ * that never come.
  */
 function capacity(current: number, size: number, ceiling: number, free: number): number {
-  const doubled = size <= free ? Math.min(current * 2, free) : current * 2;
-  return Math.min(ceiling, Math.max(size, doubled));
+  const grown =
+    size <= free ? Math.min(current * 2, free) : current + Math.min(current, GROWTH_STEP);
+  return Math.min(ceiling, Math.max(size, grown));
 }
 
 /**

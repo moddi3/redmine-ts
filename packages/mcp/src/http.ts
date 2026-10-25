@@ -112,13 +112,14 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
   /**
    * The most bytes of buffer the handler holds at once for request bodies while they arrive, across
    * requests, not counting each body's first 64 KiB, so small requests never meet it. A body's buffer
-   * doubles as it grows and ends at its exact size when its Content-Length is truthful, so a body at
-   * the 6.7 MiB limit is charged in full once it passes 4 MiB. Default 32 MiB, which lets four such
-   * bodies arrive at once. A body that needs room the others hold takes it from bodies that have not
-   * grown by 128 KiB in 5 seconds, which get 408; when that is not enough, it gets 503 with
-   * Retry-After, even partway through its body. A budget under about 6.7 MiB lowers the largest body
-   * accepted to the budget plus 64 KiB, and 0 answers 413 to any body over 64 KiB. It bounds bodies
-   * while they arrive, not the memory a tool call then takes to send an upload to Redmine.
+   * doubles up to 1 MiB as it grows, then grows 1 MiB at a time, and ends at its exact size when its
+   * Content-Length is truthful, so a body at the 6.7 MiB limit is charged in full once it passes
+   * 6 MiB. Default 32 MiB, which lets four such bodies arrive at once. A body that needs room the
+   * others hold takes it from bodies that have not grown by 128 KiB in 5 seconds, which get 408; when
+   * that is not enough, it gets 503 with Retry-After, even partway through its body. A budget under
+   * about 6.7 MiB lowers the largest body accepted to the budget plus 64 KiB, and 0 answers 413 to any
+   * body over 64 KiB. It bounds bodies while they arrive, not the memory a tool call then takes to
+   * send an upload to Redmine.
    */
   maxBodyBytesInFlight?: number;
   /**
