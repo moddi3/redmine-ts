@@ -1,6 +1,6 @@
 {
   "name": "@redmine-ts/mcp",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "MCP server for the Redmine REST API, with one typed tool per operation",
   "keywords": [
     "mcp",
