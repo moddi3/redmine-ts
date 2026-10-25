@@ -28,6 +28,7 @@ import type { KeyVerdict } from "./redmine-key.ts";
 import { createRedmineMcpServer } from "./server.ts";
 import type { Observation } from "./server.ts";
 import { allows, isApiPath, strictest } from "./tools.ts";
+import { MAX_UPLOAD_BYTES } from "./workflow/attachments.ts";
 
 export const API_KEY_HEADER = "X-Redmine-API-Key";
 
@@ -192,7 +193,7 @@ export function createRedmineMcpHandler(
         redmine.kind === "bearer" ? { observe: redmine.observe } : {},
       );
     },
-    { onerror: onError },
+    { onerror: onError, maxRequestBodySize: MAX_BODY_BYTES },
   );
   const bearer =
     paths === undefined || verifier === undefined
@@ -494,6 +495,8 @@ function withCors(response: Response, origin: string): Response {
 
 const UNAUTHENTICATED_BODY_BYTES = 64 * 1024;
 const UNAUTHENTICATED_BODY_WAIT_MS = 1000;
+const JSON_RPC_ENVELOPE_BYTES = 64 * 1024;
+const MAX_BODY_BYTES = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4 + JSON_RPC_ENVELOPE_BYTES;
 
 const KEY_REFUSALS = {
   refused: [401, `Redmine does not accept the API key in the ${API_KEY_HEADER} header.`],
