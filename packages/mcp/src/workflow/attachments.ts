@@ -9,7 +9,7 @@ import type { Annotations, LocalFiles, ToolSpec } from "../tools.ts";
 import { defineTool, invalidInput } from "./define.ts";
 
 /** Redmine's default attachment size limit. A larger upload is refused before it is sent. */
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES: number = 5 * 1024 * 1024;
 /** Images up to this size come back as image content. */
 const MAX_IMAGE_BYTES = 1024 * 1024;
 /** Text files up to this size come back as text. */
@@ -122,7 +122,10 @@ async function content(input: Sources, files: LocalFiles | undefined): Promise<U
     if (base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
       throw invalidInput("content_base64 is not valid base64");
     }
-    bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    // Uint8Array.from with a callback holds about 30 bytes per byte of the file; the loop holds one.
+    const binary = atob(base64);
+    bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
   } else {
     const file = await files!.open(input.path!);
     tooLarge(file.size);

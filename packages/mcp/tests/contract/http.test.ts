@@ -113,6 +113,98 @@ describeServers("Streamable HTTP", (server) => {
     expect(lastJson(result)).toMatchObject({ kind: "unauthorized", status: 401 });
   });
 
+  it("answers 401 with id null to a wrong key whose body is over 64 KiB", async () => {
+    // Node never reads the rest of a refused body, so a later request on a reused connection hangs.
+    const running = await start(server);
+    try {
+      const response = await fetch(running.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "X-Redmine-API-Key": "0000000000000000000000000000000000000000",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "users_current", arguments: {}, _meta: { pad: "x".repeat(4_000_000) } },
+        }),
+      });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({
+        id: null,
+        error: { message: expect.stringContaining("does not accept the API key") },
+      });
+    } finally {
+      running.child.kill();
+      await once(running.child, "exit");
+    }
+  });
+
+  it("attaches a 5 MiB file uploaded over HTTP with a user's key", async () => {
+    const client = await connect(full.url, server.userKey, "modern");
+    const file = Buffer.alloc(5 * 1024 * 1024, "redmine");
+    const upload = await client.callTool({
+      name: "attachments_upload",
+      arguments: { filename: "large.bin", content_base64: file.toString("base64") },
+    });
+    expect(upload.isError, texts(upload).join("\n")).toBeFalsy();
+    const issue = await client.callTool({
+      name: "issues_create",
+      arguments: {
+        project_id: server.projectIdentifier,
+        subject: `MCP 5 MiB upload ${Date.now().toString(36)}`,
+        uploads: [upload.structuredContent],
+      },
+    });
+    expect(issue.isError, texts(issue).join("\n")).toBeFalsy();
+    const issue_id = (issue.structuredContent as { id: number }).id;
+    created.push(issue_id);
+    const read = await client.callTool({
+      name: "issues_get",
+      arguments: { issue_id, include: ["attachments"] },
+    });
+    expect(read.structuredContent).toMatchObject({
+      attachments: [{ filename: "large.bin", filesize: 5 * 1024 * 1024 }],
+    });
+  });
+
+  it("answers 503 to a body over 64 KiB while Redmine is down, and still serves small requests", async () => {
+    const running = await start({ ...server, baseUrl: "http://127.0.0.1:1" });
+    try {
+      const post = (body: string) =>
+        fetch(running.url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "X-Redmine-API-Key": server.adminKey,
+          },
+          body,
+        });
+      const large = await post(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/list",
+          params: { pad: "x".repeat(100_000) },
+        }),
+      );
+      expect(large.status).toBe(503);
+      expect(await large.json()).toMatchObject({ id: null });
+      const small = await post(
+        JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+      );
+      expect(small.status).toBe(200);
+      await small.body?.cancel();
+      expect(running.stderr()).not.toContain(server.adminKey);
+    } finally {
+      running.child.kill();
+      await once(running.child, "exit");
+    }
+  });
+
   it("lists only reads with --read-only and refuses a forced write before sending", async () => {
     const client = await connect(readOnly.url, server.adminKey, "legacy");
     const { tools } = await client.listTools();

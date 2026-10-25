@@ -96,6 +96,18 @@ describe("attachments_upload", () => {
     expect(uploads(seen)[0]?.bytes).toEqual(PNG);
   });
 
+  it.each([
+    [256, "two padding characters"],
+    [257, "one padding character"],
+    [258, "no padding"],
+  ])("uploads every byte value unchanged from %d bytes of wrapped base64 with %s", async (size) => {
+    const { client, seen } = await serve(ROUTES);
+    const bytes = new Uint8Array(size).map((_, index) => index % 256);
+    const base64 = Buffer.from(bytes).toString("base64").replace(/.{76}/g, "$&\r\n");
+    await callOk(client, "attachments_upload", { filename: "all.bin", content_base64: base64 });
+    expect(uploads(seen)[0]?.bytes).toEqual(bytes);
+  });
+
   it("says how to attach the upload", async () => {
     const { client } = await serve(ROUTES);
     const tool = (await client.listTools()).tools.find((t) => t.name === "attachments_upload");

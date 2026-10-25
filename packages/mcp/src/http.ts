@@ -23,9 +23,12 @@ import { createAuthorizationServer } from "./oauth/server.ts";
 import type { AuthorizationServer, RedmineOAuthOptions } from "./oauth/server.ts";
 import { comparablePath, CORS_MAX_AGE, publicDocument, publicPaths } from "./oauth/web.ts";
 import type { PublicPaths } from "./oauth/web.ts";
+import { checkApiKey } from "./redmine-key.ts";
+import type { KeyVerdict } from "./redmine-key.ts";
 import { createRedmineMcpServer } from "./server.ts";
 import type { Observation } from "./server.ts";
 import { allows, isApiPath, strictest } from "./tools.ts";
+import { MAX_UPLOAD_BYTES } from "./workflow/attachments.ts";
 
 export const API_KEY_HEADER = "X-Redmine-API-Key";
 
@@ -190,7 +193,7 @@ export function createRedmineMcpHandler(
         redmine.kind === "bearer" ? { observe: redmine.observe } : {},
       );
     },
-    { onerror: onError },
+    { onerror: onError, maxRequestBodySize: MAX_BODY_BYTES },
   );
   const bearer =
     paths === undefined || verifier === undefined
@@ -211,9 +214,14 @@ export function createRedmineMcpHandler(
     let response: Response;
     if (apiKey) {
       const redmine: RequestAuth = { kind: "key", auth: { apiKey }, access };
-      response = await mcp.fetch(request, {
-        authInfo: { token: apiKey, clientId: "", scopes: [], extra: { redmine } },
-      });
+      response = await admitKey(
+        request,
+        () => checkApiKey(config, apiKey, { signal: request.signal, onError }),
+        (admitted) =>
+          mcp.fetch(admitted, {
+            authInfo: { token: apiKey, clientId: "", scopes: [], extra: { redmine } },
+          }),
+      );
     } else if (bearer === undefined) {
       response = await missingKey(request);
     } else {
@@ -485,18 +493,89 @@ function withCors(response: Response, origin: string): Response {
   return wrapped;
 }
 
-const ID_BODY_LIMIT = 64 * 1024;
-const ID_BODY_WAIT_MS = 1000;
+const UNAUTHENTICATED_BODY_BYTES = 64 * 1024;
+const UNAUTHENTICATED_BODY_WAIT_MS = 1000;
+const JSON_RPC_ENVELOPE_BYTES = 64 * 1024;
+const MAX_BODY_BYTES = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4 + JSON_RPC_ENVELOPE_BYTES;
+
+const KEY_REFUSALS = {
+  refused: [401, `Redmine does not accept the API key in the ${API_KEY_HEADER} header.`],
+  unreachable: [503, "Redmine did not answer when asked about the API key. Try again in a moment."],
+} as const satisfies Record<Exclude<KeyVerdict, "ok">, readonly [number, string]>;
+
+/**
+ * The MCP SDK reads the whole body before it builds a server, so a body errored on a refusal makes
+ * it answer 400 before any tool runs, and that 400 is replaced here. The source is never cancelled:
+ * on Node that destroys the socket before the answer is written.
+ */
+async function admitKey(
+  request: Request,
+  check: () => Promise<KeyVerdict>,
+  dispatch: (request: Request) => Promise<Response>,
+): Promise<Response> {
+  const source = request.body;
+  if (source === null) return dispatch(request);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let received = 0;
+  let asked: Promise<KeyVerdict> | undefined;
+  let verdict: KeyVerdict | undefined;
+  let answered = false;
+  let body!: ReadableStreamDefaultController<Uint8Array>;
+  const ask = (): Promise<KeyVerdict> | undefined =>
+    answered
+      ? asked
+      : (asked ??= check().then((answer) => {
+          verdict = answer;
+          if (answer !== "ok") body.error(new Error(`Redmine answered ${answer} for the API key`));
+          return answer;
+        }));
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start: (controller) => void (body = controller),
+      async pull() {
+        if (reader === undefined) {
+          reader = source.getReader();
+          timer = setTimeout(ask, UNAUTHENTICATED_BODY_WAIT_MS);
+        }
+        const chunk = await reader.read();
+        if (!chunk.done) received += chunk.value.byteLength;
+        if (asked !== undefined || received > UNAUTHENTICATED_BODY_BYTES) {
+          if ((await ask()) !== "ok") return;
+        }
+        if (chunk.done) {
+          clearTimeout(timer);
+          body.close();
+        } else {
+          body.enqueue(chunk.value);
+        }
+      },
+      cancel: (reason) => {
+        clearTimeout(timer);
+        return (reader ?? source).cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const response = await dispatch(
+    new Request(request, { method: request.method, body: stream, duplex: "half" }),
+  );
+  answered = true;
+  clearTimeout(timer);
+  if (verdict === undefined || verdict === "ok") return response;
+  const [status, message] = KEY_REFUSALS[verdict];
+  return jsonRpcError(status, message, null);
+}
 
 async function requestId(request: Request): Promise<string | number | null> {
   const length = Number(request.headers.get("content-length"));
-  if (!(length > 0 && length <= ID_BODY_LIMIT)) return null;
+  if (!(length > 0 && length <= UNAUTHENTICATED_BODY_BYTES)) return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), ID_BODY_WAIT_MS);
+    timer = setTimeout(() => resolve(null), UNAUTHENTICATED_BODY_WAIT_MS);
   });
   try {
-    const body = await Promise.race([readRequestBody(request, ID_BODY_LIMIT), late]);
+    const body = await Promise.race([readRequestBody(request, UNAUTHENTICATED_BODY_BYTES), late]);
     if (body === null || body.tooLarge) return null;
     const message: unknown = JSON.parse(body.text);
     return isJSONRPCRequest(message) ? message.id : null;
@@ -508,7 +587,10 @@ async function requestId(request: Request): Promise<string | number | null> {
 }
 
 async function refuse(request: Request, status: number, message: string): Promise<Response> {
-  const id = await requestId(request);
+  return jsonRpcError(status, message, await requestId(request));
+}
+
+function jsonRpcError(status: number, message: string, id: string | number | null): Response {
   return Response.json({ jsonrpc: "2.0", error: { code: -32000, message }, id }, { status });
 }
 

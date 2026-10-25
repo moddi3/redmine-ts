@@ -5,10 +5,11 @@
 // a per-process cache without one. The client's token never reaches Redmine; each request opens it to
 // the Redmine credential it seals.
 
-import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineVersion } from "@redmine-ts/sdk";
 import { z } from "zod";
 import type { BearerGrant, BearerVerifier } from "../http.ts";
+import { checkApiKey } from "../redmine-key.ts";
+import type { KeyVerdict } from "../redmine-key.ts";
 import { allowsRedirect, createClients } from "./clients.ts";
 import type { Client } from "./clients.ts";
 import { consentPage, errorPage } from "./pages.ts";
@@ -486,9 +487,9 @@ export function createAuthorizationServer(
       );
     }
     keyChecks++;
-    let check: Awaited<ReturnType<typeof checkApiKey>>;
+    let check: KeyVerdict;
     try {
-      check = await checkApiKey(apiKey);
+      check = await checkKeyAtRedmine(apiKey);
     } finally {
       keyChecks--;
     }
@@ -533,23 +534,8 @@ export function createAuthorizationServer(
     }
   }
 
-  /** Whether Redmine accepts `apiKey`, refuses it with 401, or did not answer. */
-  async function checkApiKey(apiKey: string): Promise<"ok" | "refused" | "unreachable"> {
-    const rm = createRedmine({
-      baseUrl: redmineUrl,
-      auth: { apiKey },
-      fetch: send,
-      timeoutMs: REDMINE_TIMEOUT_MS,
-      retry: false,
-    });
-    try {
-      await rm.users.current();
-      return "ok";
-    } catch (error) {
-      if (RedmineError.is(error, "unauthorized")) return "refused";
-      onError?.(error instanceof Error ? error : new Error(String(error)));
-      return "unreachable";
-    }
+  function checkKeyAtRedmine(apiKey: string): Promise<KeyVerdict> {
+    return checkApiKey({ baseUrl: redmineUrl, fetch: send }, apiKey, { onError });
   }
 
   /** Redmine sends the person back here, signed in or not. */
@@ -709,7 +695,7 @@ export function createAuthorizationServer(
   async function refreshUpstream(grant: RefreshGrant): Promise<Upstream | TokenError> {
     if ("apiKey" in grant) {
       if (app !== undefined) return METHOD_CHANGED;
-      const check = await checkApiKey(grant.apiKey);
+      const check = await checkKeyAtRedmine(grant.apiKey);
       if (check === "ok") return keyTokens(grant.apiKey);
       return check === "refused"
         ? invalidGrant("Redmine no longer accepts the API key")
