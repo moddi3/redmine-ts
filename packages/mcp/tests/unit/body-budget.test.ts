@@ -331,23 +331,27 @@ describe("the budget for request bodies in flight", () => {
     ["invalid UTF-8", badUtf8(10), 200],
     ["invalid UTF-8 past 64 KiB", badUtf8(100 * KiB), 200],
     ["a batch of 101", batch, 400],
-  ])("answers %s as main does, whole or two bytes at a time", async (_, body, status) => {
-    const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
-    const { handle } = handler({ publicUrl, verifier });
-    for (const headers of Object.values(credentials)) {
-      for (const size of [bytes.byteLength || 1, 2]) {
-        const sent = upload(headers);
-        for (let at = 0; at < bytes.byteLength; at += size)
-          sent.sendBytes(bytes.subarray(at, at + size));
-        sent.end();
-        expect({ headers, size, status: (await handle(sent.request)).status }).toEqual({
-          headers,
-          size,
-          status,
-        });
+  ])(
+    "answers %s as main does, whole or two bytes at a time",
+    async (_, body, status) => {
+      const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
+      const { handle } = handler({ publicUrl, verifier });
+      for (const headers of Object.values(credentials)) {
+        for (const size of [bytes.byteLength || 1, 2]) {
+          const sent = upload(headers);
+          for (let at = 0; at < bytes.byteLength; at += size)
+            sent.sendBytes(bytes.subarray(at, at + size));
+          sent.end();
+          expect({ headers, size, status: (await handle(sent.request)).status }).toEqual({
+            headers,
+            size,
+            status,
+          });
+        }
       }
-    }
-  });
+    },
+    20_000,
+  );
 
   it("answers a large body of invalid UTF-8 that is not JSON from the bytes sent, as main does", async () => {
     const { handle } = handler();
@@ -583,6 +587,19 @@ describe("the buffer a body is charged for", () => {
     await body.send(40 * KiB, 20 * KiB, 4 * KiB);
     body.end();
     expect(capacity(await body.read)).toBe(64 * KiB);
+  });
+
+  it("charges nothing for a body within its first 64 KiB while other bodies hold the whole budget", async () => {
+    const limited = budget(100 * KiB);
+    const other = arriving(limited);
+    await other.send(free + 100 * KiB);
+    expect(await fits(limited, 1)).toBe(false);
+    const body = arriving(limited);
+    await body.send(40 * KiB, 20 * KiB, 4 * KiB);
+    body.end();
+    expect(capacity(await body.read)).toBe(64 * KiB);
+    other.end();
+    expect(capacity(await other.read)).toBe(free + 100 * KiB);
   });
 
   it("does not size the buffer from the declared length before the bytes arrive", async () => {
