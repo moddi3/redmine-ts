@@ -24,8 +24,8 @@ export type BodyRefusal =
 
 export type BodyRead =
   | { readonly kind: "json"; readonly value: unknown }
-  /** Not JSON, so the MCP SDK answers it as it answers any broken body. */
-  | { readonly kind: "text"; readonly text: string }
+  /** Not JSON, so the MCP SDK reads these bytes, as received, and answers them as any broken body. */
+  | { readonly kind: "other"; readonly bytes: Uint8Array<ArrayBuffer> }
   /** `limit` is the number the answer names, in milliseconds for `late` and in bytes otherwise. */
   | { readonly kind: "refused"; readonly refusal: BodyRefusal; readonly limit: number };
 
@@ -34,7 +34,7 @@ export interface BodyBudget {
 }
 
 export interface BodyBudgetOptions {
-  /** Bytes all bodies in flight may hold at once, past each one's first `free` bytes. */
+  /** Bytes of buffer all bodies in flight may hold at once, past each one's first `free` bytes. */
   readonly limit: number;
   /** How long a body may take to arrive, from the first read. */
   readonly timeoutMs: number;
@@ -46,6 +46,7 @@ export interface BodyBudgetOptions {
 type Chunk = Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>>;
 
 interface Holder {
+  /** The body's buffer past `free`. */
   held: number;
   progressAt: number;
   /** Set before the body is woken, when another body took its room or its deadline passed. */
@@ -54,9 +55,10 @@ interface Holder {
 }
 
 /**
- * Charges each body's bytes past `free` against `limit`. A body that needs room the others hold gets
- * it from stalled bodies, longest stalled first, or is refused; an upload that keeps moving is never
- * dropped for one that stopped. Any body still arriving `timeoutMs` after its first read is refused.
+ * Charges each body's buffer past `free` against `limit`, before the buffer grows. A body that needs
+ * room the others hold gets it from stalled bodies, longest stalled first, or is refused; an upload
+ * that keeps moving is never dropped for one that stopped. Any body still arriving `timeoutMs` after
+ * its first read is refused.
  */
 export function createBodyBudget({
   limit,
@@ -118,8 +120,8 @@ export function createBodyBudget({
       const declared = Number(request.headers.get("content-length"));
       if (declared > largest) return refused("length");
       const reader = request.body!.getReader();
-      const lingering = (refusal: BodyRefusal, pending?: Promise<Chunk>): BodyRead => {
-        linger(reader, pending);
+      const lingering = (refusal: BodyRefusal): BodyRead => {
+        linger(reader);
         return refused(refusal);
       };
       const holder: Holder = { held: 0, progressAt: 0 };
@@ -139,21 +141,28 @@ export function createBodyBudget({
             holder.wake = () => resolve(undefined);
             next.then(resolve, reject);
           });
-          if (holder.ended) return lingering(holder.ended, chunk === undefined ? next : undefined);
+          if (holder.ended) return lingering(holder.ended);
           if (chunk === undefined || chunk.done) break;
           const size = received + chunk.value.byteLength;
           if (size > largest) return lingering("too_large");
-          const charge = size - free - holder.held;
-          if (charge > 0) {
-            const now = Date.now();
-            if (holder.held === 0 || size - mark >= PROGRESS_BYTES) {
-              holder.progressAt = now;
-              mark = size;
-            }
-            if (!acquire(holder, charge, now)) return lingering("over_budget");
+          if (size - mark >= PROGRESS_BYTES) {
+            holder.progressAt = Date.now();
+            mark = size;
           }
           if (size > bytes.length) {
-            bytes = grow(bytes, received, size, size <= declared ? declared : largest);
+            const room = capacity(bytes.length, size, size <= declared ? declared : largest, free);
+            const charge = room - free - holder.held;
+            if (charge > 0) {
+              const now = Date.now();
+              if (holder.held === 0) {
+                holder.progressAt = now;
+                mark = size;
+              }
+              if (!acquire(holder, charge, now)) return lingering("over_budget");
+            }
+            const grown = new Uint8Array(room);
+            grown.set(bytes.subarray(0, received));
+            bytes = grown;
           }
           bytes.set(chunk.value, received);
           received = size;
@@ -164,41 +173,37 @@ export function createBodyBudget({
         clearTimeout(timer);
         release(holder);
       }
-      const text = new TextDecoder().decode(bytes.subarray(0, received));
+      const body = bytes.subarray(0, received);
       try {
-        return { kind: "json", value: JSON.parse(text) };
+        return { kind: "json", value: JSON.parse(new TextDecoder().decode(body)) };
       } catch {
-        return { kind: "text", text };
+        return { kind: "other", bytes: body };
       }
     },
   };
 }
 
 /**
- * Room for `size` bytes, at least double the last, so copying stays linear in the body. Capped at the
- * declared length, so a body that arrives as declared ends in a buffer of its exact size. It is never
- * allocated up front, since a client could declare 6.7 MiB, send 64 KiB and stop, holding memory the
- * budget does not charge.
+ * The buffer for `size` bytes. It at least doubles, so copying stays linear in the body, but stays
+ * within `free` while the body does, so a body within `free` is never charged. It is capped at the
+ * declared length, so a body that arrives as declared ends in a buffer of its exact size. It is not
+ * sized from the declared length up front, since a client could declare 6.7 MiB, send 64 KiB and stop,
+ * and the budget would turn others away for bytes that never come.
  */
-function grow(
-  bytes: Uint8Array,
-  used: number,
-  size: number,
-  ceiling: number,
-): Uint8Array<ArrayBuffer> {
-  const grown = new Uint8Array(Math.min(ceiling, Math.max(size, bytes.length * 2)));
-  grown.set(bytes.subarray(0, used));
-  return grown;
+function capacity(current: number, size: number, ceiling: number, free: number): number {
+  const doubled = size <= free ? Math.min(current * 2, free) : current * 2;
+  return Math.min(ceiling, Math.max(size, doubled));
 }
 
 /**
- * Drops the rest of a refused body. The source is cancelled only once the answer has had time to go
- * out, since on Node that destroys the socket, and with it an answer not yet written.
+ * Reads and drops the rest of a refused body for LINGER_MS, so the client can finish sending and read
+ * the answer, then stops reading, so a client that keeps sending cannot keep the server reading.
+ * Cancelling at once would destroy the socket on Node before the answer is written.
  */
-function linger(reader: ReadableStreamDefaultReader<Uint8Array>, pending?: Promise<Chunk>): void {
+function linger(reader: ReadableStreamDefaultReader<Uint8Array>): void {
   const timer = setTimeout(() => void reader.cancel().catch(() => undefined), LINGER_MS);
   const drain = async (): Promise<void> => {
-    let chunk = await (pending ?? reader.read());
+    let chunk = await reader.read();
     while (!chunk.done) chunk = await reader.read();
   };
   const stop = (): void => clearTimeout(timer);

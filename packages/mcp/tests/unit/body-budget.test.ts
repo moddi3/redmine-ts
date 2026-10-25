@@ -1,9 +1,11 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { connect as tcp } from "node:net";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { createBodyBudget } from "../../src/body-budget.ts";
+import type { BodyBudget, BodyRead } from "../../src/body-budget.ts";
 import { createRedmineMcpHandler } from "../../src/index.ts";
 import type { BearerVerifier, RedmineMcpHandlerOptions } from "../../src/index.ts";
 import { toNodeListener } from "../../src/node-http.ts";
@@ -169,7 +171,13 @@ describe("the budget for request bodies in flight", () => {
     leaving.send(head + "x".repeat(200 * KiB));
     await sleep(50);
     leaving.leave();
-    expect((await left).status).toBe(400);
+    expect(await refusal(await left)).toMatchObject({
+      status: 400,
+      body: {
+        id: null,
+        error: { code: -32700, message: "Parse error: the request body could not be read" },
+      },
+    });
     expect((await handle(whole(toolsList(350 * KiB)))).status).toBe(200);
   });
 
@@ -341,21 +349,73 @@ describe("the budget for request bodies in flight", () => {
     }
   });
 
+  it("answers a large body of invalid UTF-8 that is not JSON from the bytes sent, as main does", async () => {
+    const { handle } = handler();
+    const sent = upload();
+    sent.sendBytes(new Uint8Array(3_000_000).fill(0xff));
+    sent.end();
+    const response = await handle(sent.request);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: -32700, message: "Parse error: Invalid JSON" },
+    });
+  });
+
+  it("holds 32 MiB of bodies in flight by default", async () => {
+    const { handle, errors } = handler();
+    const piece = new Uint8Array(7_000_000).fill(0x41);
+    const uploads = Array.from({ length: 5 }, () => upload());
+    const answers = uploads.map((sent) => handle(sent.request));
+    for (const sent of uploads) {
+      sent.sendBytes(piece);
+      await sleep(20);
+    }
+    expect((await answers[4]!).status).toBe(503);
+    expect(errors).toEqual([
+      `Refused a large request with 503: bodies in flight hold all ${32 * 1024 * KiB} bytes`,
+    ]);
+    for (const sent of uploads.slice(0, 4)) sent.leave();
+    await Promise.all(answers);
+  }, 10_000);
+
+  it("gives a body 300 seconds by default", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { handle } = handler({ publicUrl, verifier });
+      const sent = upload(credentials.bearer);
+      let answer: Response | undefined;
+      void handle(sent.request).then((response) => (answer = response));
+      sent.send(head);
+      await new Promise((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(answer).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answer?.status).toBe(408);
+      expect(await answer?.json()).toMatchObject({
+        error: { message: "The request body took longer than 300 seconds to arrive." },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe("on Node", () => {
     let close: (() => void) | undefined;
     afterEach(() => close?.());
 
-    async function listen(options: Partial<RedmineMcpHandlerOptions>) {
+    async function listen(options: Partial<RedmineMcpHandlerOptions>, keepAliveTimeout?: number) {
       const { handle } = handler(options);
       const server = createServer(toNodeListener(handle, () => undefined));
+      if (keepAliveTimeout !== undefined) server.keepAliveTimeout = keepAliveTimeout;
       server.listen(0, "127.0.0.1");
       await once(server, "listening");
       close = () => {
         server.closeAllConnections();
         server.close();
       };
-      return (head: string) => {
-        const socket = tcp((server.address() as AddressInfo).port, "127.0.0.1");
+      const port = (server.address() as AddressInfo).port;
+      const open = (head: string) => {
+        const socket = tcp(port, "127.0.0.1");
         const answers: string[] = [];
         socket.on("data", (data) => answers.push(String(data)));
         socket.on("error", () => undefined);
@@ -370,21 +430,48 @@ describe("the budget for request bodies in flight", () => {
         };
         return { socket, answered };
       };
+      return { port, open };
     }
-
-    const connection = async (head: string) => (await listen({ maxBodyBytesInFlight: 0 }))(head);
 
     const chunk = (text: string) => `${text.length.toString(16)}\r\n${text}\r\n`;
 
-    it("closes the connection at once after refusing a body by its declared length", async () => {
-      const { socket, answered } = await connection(`Content-Length: ${200 * KiB}\r\n`);
-      socket.write(head);
-      await once(socket, "close");
-      expect(await answered(1)).toMatch(/^HTTP\/1\.1 413 [^]*connection: close/i);
-    }, 3000);
+    /**
+     * Keeps sending 1 KiB every 250 ms after the answer, and resolves with how long the server took to
+     * close the connection. Node closes it once it has read nothing for keepAliveTimeout plus a second.
+     */
+    async function closedWhileSending(socket: Socket, piece: string): Promise<number> {
+      const answeredAt = Date.now();
+      const sending = setInterval(() => socket.write(piece), 250);
+      await new Promise((resolve) => socket.once("close", resolve));
+      clearInterval(sending);
+      return Date.now() - answeredAt;
+    }
+
+    it("answers 413 by declared length to a fetch() still sending the body, every time", async () => {
+      const { port } = await listen({});
+      const body = toolsList(20 * 1024 * KiB);
+      for (let run = 0; run < 10; run++) {
+        const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-11-25",
+            "x-redmine-api-key": "good-key",
+          },
+          body,
+        });
+        expect({ run, status: response.status, body: await response.json() }).toMatchObject({
+          run,
+          status: 413,
+          body: { id: null, error: { message: expect.stringContaining("Payload Too Large") } },
+        });
+      }
+    }, 30_000);
 
     it("reads the rest of a body refused mid-read, so the connection serves the next request", async () => {
-      const { socket, answered } = await connection("Transfer-Encoding: chunked\r\n");
+      const { open } = await listen({ maxBodyBytesInFlight: 0 });
+      const { socket, answered } = open("Transfer-Encoding: chunked\r\n");
       socket.write(chunk(head + "x".repeat(100 * KiB)));
       expect(await answered(1)).toMatch(/^HTTP\/1\.1 413 /);
       socket.write(chunk("x".repeat(100 * KiB)) + chunk(tail) + "0\r\n\r\n");
@@ -397,18 +484,18 @@ describe("the budget for request bodies in flight", () => {
       expect((await answered(2)).split("HTTP/1.1 ")[2]).toMatch(/^200 /);
     }, 3000);
 
-    it("closes the connection 5 seconds after a body refused mid-read stops arriving", async () => {
-      const { socket, answered } = await connection("Transfer-Encoding: chunked\r\n");
+    it("reads and drops a body refused with 413 for 5 seconds, then stops reading it", async () => {
+      const { open } = await listen({ maxBodyBytesInFlight: 0 }, 1000);
+      const { socket, answered } = open("Transfer-Encoding: chunked\r\n");
       socket.write(chunk(head + "x".repeat(100 * KiB)));
       expect(await answered(1)).toMatch(/^HTTP\/1\.1 413 /);
-      const refused = Date.now();
-      await once(socket, "close");
-      expect(Date.now() - refused).toBeGreaterThan(4500);
-      expect(Date.now() - refused).toBeLessThan(6500);
-    }, 8000);
+      const closed = await closedWhileSending(socket, chunk("x".repeat(KiB)));
+      expect(closed).toBeGreaterThan(4500);
+      expect(closed).toBeLessThan(8500);
+    }, 12_000);
 
-    it("closes the connection 5 seconds after a 503 when the rest of the body never comes", async () => {
-      const open = await listen({ maxBodyBytesInFlight: 100 * KiB });
+    it("reads and drops a body refused with 503 for 5 seconds, then stops reading it", async () => {
+      const { open } = await listen({ maxBodyBytesInFlight: 100 * KiB }, 1000);
       const holding = open(`Content-Length: ${160 * KiB}\r\n`);
       holding.socket.write(head + "x".repeat(154 * KiB));
       await sleep(100);
@@ -417,10 +504,153 @@ describe("the budget for request bodies in flight", () => {
       const answer = await answered(1);
       expect(answer).toMatch(/^HTTP\/1\.1 503 /);
       expect(answer.toLowerCase()).toContain("retry-after: 5");
-      const refused = Date.now();
-      await once(socket, "close");
-      expect(Date.now() - refused).toBeGreaterThan(4500);
-      expect(Date.now() - refused).toBeLessThan(6500);
-    }, 8000);
+      const closed = await closedWhileSending(socket, "x".repeat(KiB));
+      expect(closed).toBeGreaterThan(4500);
+      expect(closed).toBeLessThan(8500);
+    }, 12_000);
+  });
+});
+
+describe("the buffer a body is charged for", () => {
+  const MiB = 1024 * KiB;
+  const free = 64 * KiB;
+  const budget = (limit: number, maxBody = 8 * MiB) =>
+    createBodyBudget({ limit, timeoutMs: 60_000, maxBody, free });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  /** A body read by `budget`, sent in chunks of the sizes given to `send`. */
+  function arriving(budget: BodyBudget, declared?: number) {
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const request = new Request(publicUrl, {
+      method: "POST",
+      headers: declared === undefined ? {} : { "content-length": String(declared) },
+      body: new ReadableStream<Uint8Array>({ start: (controller) => void (body = controller) }),
+      duplex: "half",
+    });
+    return {
+      read: budget.read(request),
+      send: async (...sizes: number[]) => {
+        for (const size of sizes) body.enqueue(new Uint8Array(size));
+        await settle();
+      },
+      end: () => body.close(),
+    };
+  }
+
+  /** Whether a whole body charged `bytes` past its free 64 KiB gets in now. */
+  async function fits(budget: BodyBudget, bytes: number): Promise<boolean> {
+    const probe = arriving(budget);
+    await probe.send(free + bytes);
+    probe.end();
+    return (await probe.read).kind !== "refused";
+  }
+
+  const capacity = (read: BodyRead) => (read.kind === "other" ? read.bytes.buffer.byteLength : -1);
+
+  it("charges a body with a truthful Content-Length for a buffer of exactly that length", async () => {
+    const limited = budget(200 * KiB);
+    const body = arriving(limited, 150 * KiB);
+    await body.send(64 * KiB, 40 * KiB, 40 * KiB);
+    expect(await fits(limited, 114 * KiB)).toBe(true);
+    expect(await fits(limited, 114 * KiB + 1)).toBe(false);
+    await body.send(6 * KiB);
+    body.end();
+    expect(capacity(await body.read)).toBe(150 * KiB);
+  });
+
+  it("charges a body without a Content-Length for its buffer, which doubles as the body grows", async () => {
+    const limited = budget(300 * KiB);
+    const body = arriving(limited);
+    await body.send(64 * KiB, 8 * KiB);
+    expect(await fits(limited, 236 * KiB)).toBe(true);
+    expect(await fits(limited, 236 * KiB + 1)).toBe(false);
+    await body.send(64 * KiB);
+    expect(await fits(limited, 108 * KiB)).toBe(true);
+    expect(await fits(limited, 108 * KiB + 1)).toBe(false);
+    body.end();
+    expect(capacity(await body.read)).toBe(256 * KiB);
+  });
+
+  it("caps the buffer at the largest body", async () => {
+    const body = arriving(budget(MiB, 200 * KiB));
+    await body.send(64 * KiB, 8 * KiB, 64 * KiB);
+    body.end();
+    expect(capacity(await body.read)).toBe(200 * KiB);
+  });
+
+  it("charges nothing for a body within its first 64 KiB, however it is split", async () => {
+    const body = arriving(budget(0));
+    await body.send(40 * KiB, 20 * KiB, 4 * KiB);
+    body.end();
+    expect(capacity(await body.read)).toBe(64 * KiB);
+  });
+
+  it("does not size the buffer from the declared length before the bytes arrive", async () => {
+    const limited = budget(MiB);
+    const body = arriving(limited, MiB);
+    await body.send(70 * KiB);
+    expect(await fits(limited, MiB - 6 * KiB)).toBe(true);
+    expect(await fits(limited, MiB - 6 * KiB + 1)).toBe(false);
+  });
+
+  it("leaves no timer behind once a body has arrived", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const body = arriving(budget(MiB));
+      await body.send(100 * KiB);
+      body.end();
+      await body.read;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("when another body needs the room", () => {
+    let now = 0;
+    beforeEach(() => {
+      now = Date.now();
+      vi.spyOn(Date, "now").mockImplementation(() => now);
+    });
+
+    it("drops a body that grew less than 128 KiB in 5 seconds, and frees its room once", async () => {
+      const limited = budget(256 * KiB);
+      const slow = arriving(limited);
+      await slow.send(100 * KiB);
+      now += 3000;
+      await slow.send(100 * KiB);
+      now += 3000;
+      const next = arriving(limited);
+      await next.send(free + 200 * KiB);
+      expect(await slow.read).toMatchObject({ kind: "refused", refusal: "stalled" });
+      expect(await fits(limited, 56 * KiB)).toBe(true);
+      expect(await fits(limited, 56 * KiB + 1)).toBe(false);
+    });
+
+    it("keeps a body that grew 128 KiB within 5 seconds", async () => {
+      const limited = budget(256 * KiB);
+      const fast = arriving(limited);
+      await fast.send(100 * KiB);
+      now += 3000;
+      await fast.send(130 * KiB);
+      now += 3000;
+      expect(await fits(limited, 200 * KiB)).toBe(false);
+      fast.end();
+      expect((await fast.read).kind).toBe("other");
+    });
+
+    it("refuses with 503 a stalled body that needs more room, instead of dropping it for itself", async () => {
+      const limited = budget(256 * KiB);
+      const slow = arriving(limited);
+      await slow.send(100 * KiB);
+      now += 2000;
+      await slow.send(100 * KiB);
+      now += 1000;
+      await arriving(limited).send(free + 10 * KiB);
+      now += 2500;
+      await slow.send(10 * KiB);
+      slow.end();
+      expect(await slow.read).toMatchObject({ kind: "refused", refusal: "over_budget" });
+    });
   });
 });

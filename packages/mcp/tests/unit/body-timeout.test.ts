@@ -229,9 +229,11 @@ describe("over node:http", () => {
   let close: (() => Promise<void>) | undefined;
   afterEach(() => close?.());
 
-  it("answers 408, then closes the connection 5 seconds later when the rest never comes", async () => {
+  it("answers 408, then reads and drops the rest for 5 seconds and stops reading it", async () => {
     const { handle } = handler({ bodyTimeoutMs: 300 });
     const server = createServer(toNodeListener(handle, () => {}));
+    // Node closes a connection it has read nothing from for this long plus a second.
+    server.keepAliveTimeout = 1000;
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     close = () =>
@@ -254,18 +256,18 @@ describe("over node:http", () => {
         stalledUpload,
       ].join("\r\n"),
     );
-    let received = "";
-    let answeredAt = 0;
-    socket.on("data", (chunk: Buffer) => {
-      received += chunk.toString();
-      answeredAt ||= Date.now();
-    });
+    socket.on("error", () => undefined);
     const started = Date.now();
-    await once(socket, "close");
+    const [data] = await once(socket, "data");
+    const received = String(data);
+    const answeredAt = Date.now();
     expect(received).toMatch(/^HTTP\/1\.1 408 /);
     expect(received.toLowerCase()).not.toContain("connection: close");
     expect(answeredAt - started).toBeLessThan(1500);
+    const sending = setInterval(() => socket.write("A".repeat(1024)), 250);
+    await new Promise((resolve) => socket.once("close", resolve));
+    clearInterval(sending);
     expect(Date.now() - answeredAt).toBeGreaterThan(4500);
-    expect(Date.now() - answeredAt).toBeLessThan(6500);
-  }, 9000);
+    expect(Date.now() - answeredAt).toBeLessThan(8500);
+  }, 12_000);
 });

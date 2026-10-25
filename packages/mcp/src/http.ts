@@ -110,22 +110,24 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
    */
   verifier?: BearerVerifier;
   /**
-   * The most bytes of request bodies the handler holds at once while they arrive, across requests,
-   * not counting each body's first 64 KiB, so small requests never meet it. Default 32 MiB, which lets
-   * about four bodies at the 6.7 MiB limit arrive at once. A body that needs room the others hold takes
-   * it from bodies that have not grown by 128 KiB in 5 seconds, which get 408; when that is not enough,
-   * it gets 503 with Retry-After, even partway through its body. A budget under about 6.7 MiB lowers
-   * the largest body accepted to the budget plus 64 KiB, and 0 answers 413 to any body over 64 KiB.
-   * It bounds bodies while they arrive, not the memory a tool call then takes to send an upload to
-   * Redmine.
+   * The most bytes of buffer the handler holds at once for request bodies while they arrive, across
+   * requests, not counting each body's first 64 KiB, so small requests never meet it. A body's buffer
+   * doubles as it grows and ends at its exact size when its Content-Length is truthful, so a body at
+   * the 6.7 MiB limit is charged in full once it passes 4 MiB. Default 32 MiB, which lets four such
+   * bodies arrive at once. A body that needs room the others hold takes it from bodies that have not
+   * grown by 128 KiB in 5 seconds, which get 408; when that is not enough, it gets 503 with
+   * Retry-After, even partway through its body. A budget under about 6.7 MiB lowers the largest body
+   * accepted to the budget plus 64 KiB, and 0 answers 413 to any body over 64 KiB. It bounds bodies
+   * while they arrive, not the memory a tool call then takes to send an upload to Redmine.
    */
   maxBodyBytesInFlight?: number;
   /**
    * How long a request's body may take to arrive, in milliseconds, counted from when the handler
-   * starts reading it. A body still arriving then gets 408, and the connection closes 5 seconds
-   * later unless the client has sent the rest by then. Default 300000, Node's own request timeout,
-   * which Bun and Workers do not have. A body at the 6.7 MiB limit takes about 56 seconds at
-   * 1 Mbit/s. Response streams are not timed.
+   * starts reading it. A body still arriving then gets 408. The handler reads and drops the rest for
+   * 5 seconds and then stops reading it, and the server closes the connection after its own idle
+   * timeout, such as Node's keepAliveTimeout. Default 300000, Node's own request timeout, which Bun
+   * and Workers do not have. A body at the 6.7 MiB limit takes about 56 seconds at 1 Mbit/s. Response
+   * streams are not timed.
    */
   bodyTimeoutMs?: number;
 }
@@ -249,9 +251,9 @@ export function createRedmineMcpHandler(
     }
     const body = await bodies.read(request);
     if (body.kind === "json") return mcp.fetch(request, { authInfo, parsedBody: body.value });
-    if (body.kind === "text") {
+    if (body.kind === "other") {
       const { url, method, headers, signal } = request;
-      return mcp.fetch(new Request(url, { method, headers, signal, body: body.text }), {
+      return mcp.fetch(new Request(url, { method, headers, signal, body: body.bytes }), {
         authInfo,
       });
     }
@@ -561,11 +563,6 @@ interface Refusal {
   readonly code?: number;
   readonly message: (limit: number) => string;
   readonly log?: (limit: number) => string;
-  /**
-   * Closes the connection instead of reading the body to drop it, which for a key request would ask
-   * Redmine about a key whose request is already refused.
-   */
-  readonly close?: boolean;
   readonly retryAfter?: number;
 }
 
@@ -576,7 +573,7 @@ const tooSlow = (ms: number): string =>
   `The request body took longer than ${ms / 1000} seconds to arrive.`;
 
 const BODY_REFUSALS: Record<BodyRefusal, Refusal> = {
-  length: { status: 413, message: tooLarge, close: true },
+  length: { status: 413, message: tooLarge },
   too_large: { status: 413, message: tooLarge },
   over_budget: {
     status: 503,
@@ -695,10 +692,9 @@ function jsonRpcError(
   status: number,
   message: string,
   id: string | number | null,
-  { code = -32000, close = false, retryAfter }: Partial<Refusal> = {},
+  { code = -32000, retryAfter }: Partial<Refusal> = {},
 ): Response {
   const headers = new Headers();
-  if (close) headers.set("Connection", "close");
   if (retryAfter !== undefined) headers.set("Retry-After", String(retryAfter));
   return Response.json({ jsonrpc: "2.0", error: { code, message }, id }, { status, headers });
 }
