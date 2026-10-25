@@ -2,7 +2,7 @@ import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { RedmineConfig } from "@redmine-ts/sdk";
 
 /** claude.ai gives token calls 10 seconds, and a key check may sit in front of one. */
-const KEY_CHECK_TIMEOUT_MS = 8000;
+export const KEY_CHECK_TIMEOUT_MS = 8000;
 
 export type KeyVerdict = "ok" | "refused" | "unreachable";
 

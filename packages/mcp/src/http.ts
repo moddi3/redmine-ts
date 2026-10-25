@@ -75,13 +75,14 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
    * Origins a browser page may call the handler from. An entry is a hostname, matched as the MCP SDK
    * matches it: any scheme and port, or an origin such as `https://app.example.com`, matched exactly.
    * An allowed request gets the CORS headers a browser needs to read the response. Another Origin gets
-   * 403. A request without Origin, as non-browser clients send it, passes without CORS headers.
-   * Default: none.
+   * 403. A request without Origin, as non-browser clients send it, passes without CORS headers. A
+   * `*` throws when the handler is created, as `--allow-origin` refuses it. Default: none.
    */
   allowedOrigins?: readonly string[];
   /**
    * Hostnames the Host header may name, against DNS rebinding. Set it when listening on loopback, or
-   * when you know every name clients reach the handler by.
+   * when you know every name clients reach the handler by. Each entry matches one name exactly, and a
+   * `*` throws when the handler is created, as `--allow-host` refuses it.
    */
   allowedHosts?: readonly string[];
   /** Requests the MCP SDK rejects and failures outside a tool result. None of them carries the key. */
@@ -172,6 +173,13 @@ export function createRedmineMcpHandler(
       onError,
     });
   const verifier = external ?? authorizationServer?.verifier;
+  // URL parsing keeps a `*` in a hostname, so a wildcard would pass as a name and match only itself.
+  if (allowedOrigins.some((entry) => entry.includes("*"))) {
+    throw new TypeError("allowedOrigins does not support wildcards: list each hostname or origin");
+  }
+  if (allowedHosts?.some((entry) => entry.includes("*"))) {
+    throw new TypeError("allowedHosts does not support wildcards: list each hostname");
+  }
   const exactOrigins = new Set(allowedOrigins.filter((entry) => ORIGIN_SCHEME.test(entry)));
   for (const entry of exactOrigins) {
     if (!isOrigin(entry)) {

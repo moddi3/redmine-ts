@@ -339,6 +339,22 @@ describe("createRedmineMcpHandler", () => {
         ).toThrow("is not an origin");
       }
     });
+
+    it("throws on a wildcard in allowedOrigins or allowedHosts when created, as the flags refuse it", () => {
+      const create = (options: Partial<RedmineMcpHandlerOptions>) => () =>
+        createRedmineMcpHandler({ baseUrl: "http://redmine.test", ...options });
+      for (const entry of ["*.example.com", "https://*.example.com", "*"]) {
+        expect(create({ allowedOrigins: ["app.example.com", entry] })).toThrow(
+          new TypeError("allowedOrigins does not support wildcards: list each hostname or origin"),
+        );
+      }
+      expect(create({ allowedHosts: ["localhost", "*.example.com"] })).toThrow(
+        new TypeError("allowedHosts does not support wildcards: list each hostname"),
+      );
+      expect(
+        create({ allowedOrigins: ["https://app.example.com"], allowedHosts: [] }),
+      ).not.toThrow();
+    });
   });
 
   it("refuses with 403 a Host outside allowedHosts, as a DNS-rebound page sends it", async () => {

@@ -8,9 +8,9 @@
 import type { Access, RedmineVersion } from "@redmine-ts/sdk";
 import { z } from "zod";
 import type { BearerGrant, BearerVerifier } from "../http.ts";
-import { checkApiKey } from "../redmine-key.ts";
+import { checkApiKey, KEY_CHECK_TIMEOUT_MS } from "../redmine-key.ts";
 import type { KeyVerdict } from "../redmine-key.ts";
-import { allowsRedirect, createClients } from "./clients.ts";
+import { allowsRedirect, BUSY, BUSY_RETRY_SECONDS, createClients } from "./clients.ts";
 import type { Client } from "./clients.ts";
 import { consentPage, errorPage } from "./pages.ts";
 import { grantedScopes, redmineScope, scopeNames, scopesFor } from "./scopes.ts";
@@ -60,7 +60,8 @@ interface OAuthSettings {
   redminePublicUrl?: string;
   /**
    * Hostnames clients must belong to: the host of a metadata document's URL, or of every redirect URI
-   * of a registered client. Default: any client.
+   * of a registered client. Each entry matches one name exactly, and a `*` throws when the server is
+   * created, as `--allow-client` refuses it. Default: any client.
    */
   allowedClientHosts?: readonly string[];
   /**
@@ -146,6 +147,11 @@ const KEY_FAILURES_PER_HOUR = 10;
 const HOUR = 3600;
 /** Keys the consent form may be checking at Redmine at once, in this process. */
 const KEY_CHECKS_IN_FLIGHT = 4;
+/**
+ * A key check gives up within its timeout, unless the request that started it was cancelled, as
+ * Workers cancel the work of a request whose client disconnects. Its slot is then free after this long.
+ */
+const KEY_CHECK_MS = KEY_CHECK_TIMEOUT_MS + 1000;
 
 const OTHER_BROWSER =
   "This sign-in did not start in this browser, or the browser dropped its cookie. Start again from your client.";
@@ -257,6 +263,10 @@ export function createAuthorizationServer(
       "oauth.fetchClientMetadata is required: pass publicFetch from @redmine-ts/mcp/node on Node, or on Workers the global fetch with the global_fetch_strictly_public flag",
     );
   }
+  // URL parsing keeps a `*` in a hostname, so a wildcard would pass as a name and match only itself.
+  if (options.allowedClientHosts?.some((host) => host.includes("*"))) {
+    throw new TypeError("oauth.allowedClientHosts does not support wildcards: list each hostname");
+  }
   const redminePublic = withSlash(new URL(options.redminePublicUrl ?? redmineUrl));
   const issuer = paths.identifier;
   const sealer = createSealer(secrets, issuer);
@@ -275,7 +285,8 @@ export function createAuthorizationServer(
   const end = async (family: string) => {
     await families?.consume(`family:${family}`, REFRESH_TTL);
   };
-  let keyChecks = 0;
+  /** Key checks under way, each counted until it settles or its time is up. */
+  const keyChecks = new Set<{ until: number }>();
   const metadata = {
     issuer,
     authorization_endpoint: paths.origin + paths.authorize,
@@ -290,6 +301,13 @@ export function createAuthorizationServer(
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
   };
+
+  /**
+   * When no fetch can answer in time, because every slot is taken or the client's own fetch did not
+   * settle. Nothing is known against the client, so it may retry.
+   */
+  const busy = (message: string) =>
+    errorPage(503, message, { "Retry-After": String(BUSY_RETRY_SECONDS) });
 
   /** Every redirect back to the client says who answers, as RFC 9207 asks. */
   const back = (redirectUri: string, params: Record<string, string | undefined>, status = 302) =>
@@ -318,6 +336,9 @@ export function createAuthorizationServer(
       );
     }
     const client = await clients.resolve(clientId);
+    if (client === BUSY) {
+      return busy("The server is busy checking clients. Reload this page in a moment.");
+    }
     if (typeof client === "string") {
       return errorPage(400, `This server refuses the client: ${client}.`);
     }
@@ -464,6 +485,11 @@ export function createAuthorizationServer(
     // The page that answered is spent; the next try needs a new one, which carries the count.
     const again = async (attempts: number, status: number, keyError: string) => {
       const client = await clients.resolve(consent.client);
+      if (client === BUSY) {
+        return busy(
+          "The server is busy checking clients, so this sign-in stops here. Start again from your client in a moment.",
+        );
+      }
       if (typeof client === "string") {
         return errorPage(400, `This server refuses the client: ${client}.`);
       }
@@ -479,19 +505,22 @@ export function createAuthorizationServer(
         "Too many keys were tried from this browser in the last hour. Try again later.",
       );
     }
-    if (keyChecks >= KEY_CHECKS_IN_FLIGHT) {
+    const at = Date.now();
+    for (const lease of keyChecks) if (lease.until <= at) keyChecks.delete(lease);
+    if (keyChecks.size >= KEY_CHECKS_IN_FLIGHT) {
       return again(
         consent.attempts,
         503,
         "Many keys are being checked right now. Try again in a moment.",
       );
     }
-    keyChecks++;
+    const lease = { until: at + KEY_CHECK_MS };
+    keyChecks.add(lease);
     let check: KeyVerdict;
     try {
       check = await checkKeyAtRedmine(apiKey);
     } finally {
-      keyChecks--;
+      keyChecks.delete(lease);
     }
     if (check !== "ok") {
       if (families !== undefined) await countFailure(families, failures);

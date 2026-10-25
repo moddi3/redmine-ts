@@ -138,10 +138,14 @@ function keyField(field: NonNullable<ConsentView["apiKey"]>, redmineHost: string
     <p>Redmine shows it under <a href="${field.accountUrl}">My account</a>, API access key.</p>`;
 }
 
-export function errorPage(status: number, message: string): Response {
+export function errorPage(
+  status: number,
+  message: string,
+  headers?: Record<string, string>,
+): Response {
   const body = html`<h1>Sign-in failed</h1>
     <p class="error">${message}</p>`;
-  return page("Sign-in failed", body, [], { status });
+  return page("Sign-in failed", body, [], { status, headers });
 }
 
 function page(
