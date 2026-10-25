@@ -674,6 +674,21 @@ describe("the buffer a body is charged for", () => {
       expect((await fast.read).kind).toBe("other");
     });
 
+    it("refuses a body dropped for another even when its last bytes arrived in the same turn", async () => {
+      const limited = budget(256 * KiB);
+      const slow = arriving(limited);
+      await slow.send(free + 100 * KiB);
+      now += 6000;
+      const next = arriving(limited);
+      await next.send(free);
+      const sending = next.send(200 * KiB);
+      slow.end();
+      await sending;
+      expect(await slow.read).toMatchObject({ kind: "refused", refusal: "stalled" });
+      next.end();
+      expect(capacity(await next.read)).toBe(free + 200 * KiB);
+    });
+
     it("refuses with 503 a stalled body that needs more room, instead of dropping it for itself", async () => {
       const limited = budget(256 * KiB);
       const slow = arriving(limited);
