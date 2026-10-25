@@ -120,6 +120,14 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
    * Redmine.
    */
   maxBodyBytesInFlight?: number;
+  /**
+   * How long a request's body may take to arrive, in milliseconds, counted from when the handler
+   * starts reading it. A body still arriving then gets 408, and the connection closes 5 seconds
+   * later unless the client has sent the rest by then. Default 300000, Node's own request timeout,
+   * which Bun and Workers do not have. A body at the 6.7 MiB limit takes about 56 seconds at
+   * 1 Mbit/s. Response streams are not timed.
+   */
+  bodyTimeoutMs?: number;
 }
 
 /**
@@ -159,7 +167,12 @@ export function createRedmineMcpHandler(
   options: RedmineMcpHandlerOptions,
 ): (request: Request) => Promise<Response> {
   const { allowedOrigins = [], allowedHosts, onError, publicUrl, oauth, ...rest } = options;
-  const { verifier: external, maxBodyBytesInFlight = 32 * 1024 * 1024, ...config } = rest;
+  const {
+    verifier: external,
+    maxBodyBytesInFlight = 32 * 1024 * 1024,
+    bodyTimeoutMs = 300_000,
+    ...config
+  } = rest;
   // A bad baseUrl, version or limit throws here instead of failing every request.
   createRedmine(config);
   const access = config.access ?? "full";
@@ -223,6 +236,7 @@ export function createRedmineMcpHandler(
       : bearerGate(verifier, paths, access, onError);
   const bodies = createBodyBudget({
     limit: maxBodyBytesInFlight,
+    timeoutMs: bodyTimeoutMs,
     maxBody: MAX_BODY_BYTES,
     free: UNAUTHENTICATED_BODY_BYTES,
   });
@@ -558,6 +572,9 @@ interface Refusal {
 const tooLarge = (limit: number): string =>
   `Payload Too Large: Request body must not exceed ${limit} bytes`;
 
+const tooSlow = (ms: number): string =>
+  `The request body took longer than ${ms / 1000} seconds to arrive.`;
+
 const BODY_REFUSALS: Record<BodyRefusal, Refusal> = {
   length: { status: 413, message: tooLarge, close: true },
   too_large: { status: 413, message: tooLarge },
@@ -574,6 +591,7 @@ const BODY_REFUSALS: Record<BodyRefusal, Refusal> = {
       "The request body stopped arriving while other requests needed the memory it held. Send it again.",
     log: () => "Dropped a stalled request body with 408 to make room for another",
   },
+  late: { status: 408, message: tooSlow, log: tooSlow },
   unreadable: {
     status: 400,
     code: -32700,

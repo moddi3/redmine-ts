@@ -253,6 +253,25 @@ describe("the budget for request bodies in flight", () => {
     expect((await grown).status).toBe(200);
   });
 
+  it("answers 408 at the deadline to a stalled body nobody needs the room of, and frees what it held", async () => {
+    const { handle, errors } = handler({ maxBodyBytesInFlight: 300 * KiB, bodyTimeoutMs: 300 });
+    const stalled = upload();
+    const started = Date.now();
+    const dropped = handle(stalled.request);
+    stalled.send(head + "x".repeat(264 * KiB));
+    expect(await refusal(await dropped)).toMatchObject({
+      status: 408,
+      connection: null,
+      body: {
+        id: null,
+        error: { message: "The request body took longer than 0.3 seconds to arrive." },
+      },
+    });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+    expect(errors).toEqual(["The request body took longer than 0.3 seconds to arrive."]);
+    expect((await handle(whole(toolsList(350 * KiB)))).status).toBe(200);
+  });
+
   it.each([
     ["a budget of 32 KiB", { maxBodyBytesInFlight: 32 * KiB }, 96 * KiB],
     ["the default budget", {}, 7_056_044],
