@@ -1361,6 +1361,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outIssueSummary, $schema: DRAFT } },
   },
   {
@@ -1406,6 +1407,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "subject"],
       additionalProperties: false,
     },
+    inlineUploads: "uploads",
     output: { kind: "item", schema: { ...outIssueSummary, $schema: DRAFT }, optional: false },
   },
   {
@@ -1446,6 +1448,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outIssue, $schema: DRAFT }, optional: false },
   },
   {
@@ -1498,6 +1501,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id"],
       additionalProperties: false,
     },
+    inlineUploads: "uploads",
     output: { kind: "empty" },
   },
   {
@@ -1519,6 +1523,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -1541,6 +1546,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id", "user_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -1562,6 +1568,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id", "user_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -1671,6 +1678,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outProjectSummary, $schema: DRAFT } },
   },
   {
@@ -1737,6 +1745,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["name", "identifier"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outProject, $schema: DRAFT }, optional: false },
   },
   {
@@ -1775,6 +1784,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outProject, $schema: DRAFT }, optional: false },
   },
   {
@@ -1846,6 +1856,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -1867,6 +1878,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -1888,6 +1900,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -1909,6 +1922,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -1937,6 +1951,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outMembership, $schema: DRAFT } },
   },
   {
@@ -1962,6 +1977,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "user_id", "role_ids"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outMembership, $schema: DRAFT }, optional: false },
   },
   {
@@ -1983,6 +1999,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["membership_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outMembership, $schema: DRAFT }, optional: false },
   },
   {
@@ -2008,6 +2025,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["membership_id", "role_ids"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2029,6 +2047,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["membership_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2050,6 +2069,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2071,6 +2091,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2215,6 +2236,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outUserSummary, $schema: DRAFT } },
   },
   {
@@ -2282,6 +2304,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["login", "firstname", "lastname", "mail"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outUser, $schema: DRAFT }, optional: false },
   },
   {
@@ -2311,6 +2334,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["user_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outUser, $schema: DRAFT }, optional: false },
   },
   {
@@ -2385,6 +2409,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["user_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2406,6 +2431,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["user_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2433,6 +2459,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outUser, $schema: DRAFT }, optional: false },
   },
   {
@@ -2594,6 +2621,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outTimeEntry, $schema: DRAFT } },
   },
   {
@@ -2625,6 +2653,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["hours"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outTimeEntry, $schema: DRAFT }, optional: false },
   },
   {
@@ -2646,6 +2675,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["time_entry_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outTimeEntry, $schema: DRAFT }, optional: false },
   },
   {
@@ -2678,6 +2708,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["time_entry_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2699,6 +2730,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["time_entry_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2725,6 +2757,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outNews, $schema: DRAFT } },
   },
   {
@@ -2754,6 +2787,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["news_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outNews, $schema: DRAFT }, optional: false },
   },
   {
@@ -2781,6 +2815,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["news_id"],
       additionalProperties: false,
     },
+    inlineUploads: "uploads",
     output: { kind: "empty" },
   },
   {
@@ -2802,6 +2837,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["news_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2830,6 +2866,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outNews, $schema: DRAFT } },
   },
   {
@@ -2857,6 +2894,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "title", "description"],
       additionalProperties: false,
     },
+    inlineUploads: "uploads",
     output: { kind: "empty" },
   },
   {
@@ -2878,6 +2916,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outIssueRelation, $schema: DRAFT } },
   },
   {
@@ -2923,6 +2962,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_id", "issue_to_id", "relation_type"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outIssueRelation, $schema: DRAFT }, optional: false },
   },
   {
@@ -2944,6 +2984,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_relation_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outIssueRelation, $schema: DRAFT }, optional: false },
   },
   {
@@ -2965,6 +3006,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_relation_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -2986,6 +3028,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outVersionSummary, $schema: DRAFT } },
   },
   {
@@ -3030,6 +3073,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "name"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outVersion, $schema: DRAFT }, optional: false },
   },
   {
@@ -3051,6 +3095,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["version_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outVersion, $schema: DRAFT }, optional: false },
   },
   {
@@ -3095,6 +3140,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["version_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3116,6 +3162,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["version_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3138,6 +3185,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outWikiPageSummary, $schema: DRAFT } },
   },
   {
@@ -3168,6 +3216,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "wiki_page_title"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT }, optional: false },
   },
   {
@@ -3223,6 +3272,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "wiki_page_title", "text"],
       additionalProperties: false,
     },
+    inlineUploads: "uploads",
     output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT }, optional: true },
   },
   {
@@ -3247,6 +3297,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "wiki_page_title"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3279,6 +3330,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "wiki_page_title", "version_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outWikiPage, $schema: DRAFT }, optional: false },
   },
   {
@@ -3305,6 +3357,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outQuery, $schema: DRAFT } },
   },
   {
@@ -3326,6 +3379,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["attachment_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outAttachment, $schema: DRAFT }, optional: false },
   },
   {
@@ -3352,6 +3406,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["attachment_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3373,6 +3428,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["attachment_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3388,6 +3444,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     until: null,
     stability: "alpha",
     inputSchema: { $schema: DRAFT, type: "object", properties: {}, additionalProperties: false },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outIssueStatus, $schema: DRAFT } },
   },
   {
@@ -3403,6 +3460,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     until: null,
     stability: "alpha",
     inputSchema: { $schema: DRAFT, type: "object", properties: {}, additionalProperties: false },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outTracker, $schema: DRAFT } },
   },
   {
@@ -3424,6 +3482,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outIssueCategory, $schema: DRAFT } },
   },
   {
@@ -3449,6 +3508,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "name"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outIssueCategory, $schema: DRAFT }, optional: false },
   },
   {
@@ -3464,6 +3524,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     until: null,
     stability: "alpha",
     inputSchema: { $schema: DRAFT, type: "object", properties: {}, additionalProperties: false },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outIssuePriority, $schema: DRAFT } },
   },
   {
@@ -3479,6 +3540,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     until: null,
     stability: "alpha",
     inputSchema: { $schema: DRAFT, type: "object", properties: {}, additionalProperties: false },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outTimeEntryActivity, $schema: DRAFT } },
   },
   {
@@ -3494,6 +3556,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     until: null,
     stability: "alpha",
     inputSchema: { $schema: DRAFT, type: "object", properties: {}, additionalProperties: false },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outDocumentCategory, $schema: DRAFT } },
   },
   {
@@ -3515,6 +3578,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_category_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outIssueCategory, $schema: DRAFT }, optional: false },
   },
   {
@@ -3540,6 +3604,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_category_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3568,6 +3633,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["issue_category_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3583,6 +3649,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     until: null,
     stability: "alpha",
     inputSchema: { $schema: DRAFT, type: "object", properties: {}, additionalProperties: false },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outIdName, $schema: DRAFT } },
   },
   {
@@ -3604,6 +3671,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["role_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outRole, $schema: DRAFT }, optional: false },
   },
   {
@@ -3631,6 +3699,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outGroupSummary, $schema: DRAFT } },
   },
   {
@@ -3664,6 +3733,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outGroup, $schema: DRAFT }, optional: false },
   },
   {
@@ -3693,6 +3763,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["group_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "item", schema: { ...outGroup, $schema: DRAFT }, optional: false },
   },
   {
@@ -3721,6 +3792,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["group_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3742,6 +3814,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["group_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3763,6 +3836,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["group_id", "user_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3787,6 +3861,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["group_id", "user_ids"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3808,6 +3883,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["group_id", "user_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -3823,6 +3899,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     until: null,
     stability: "alpha",
     inputSchema: { $schema: DRAFT, type: "object", properties: {}, additionalProperties: false },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outCustomField, $schema: DRAFT } },
   },
   {
@@ -3924,6 +4001,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["q"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outSearch, $schema: DRAFT } },
   },
   {
@@ -4020,6 +4098,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "q"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outSearch, $schema: DRAFT } },
   },
   {
@@ -4041,6 +4120,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "list", schema: { ...outFile, $schema: DRAFT } },
   },
   {
@@ -4070,6 +4150,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "token"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -4085,6 +4166,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     until: null,
     stability: "alpha",
     inputSchema: { $schema: DRAFT, type: "object", properties: {}, additionalProperties: false },
+    inlineUploads: null,
     output: {
       kind: "item",
       schema: {
@@ -4158,6 +4240,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       },
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -4188,6 +4271,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["journal_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -4214,6 +4298,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "repository_id", "revision", "issue_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
   {
@@ -4240,6 +4325,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       required: ["project_id", "repository_id", "revision", "issue_id"],
       additionalProperties: false,
     },
+    inlineUploads: null,
     output: { kind: "empty" },
   },
 ];

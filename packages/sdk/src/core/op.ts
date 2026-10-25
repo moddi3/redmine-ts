@@ -41,6 +41,8 @@ export type RequestBody =
       readonly siblings: readonly string[];
       /** Fields Redmine ignores as `null` but clears as `""`: a `null` input value goes on the wire as `""`. */
       readonly clear?: readonly string[];
+      /** The input key of Redmine's attach-by-token list, set on every body that has one. Read it through `uploadKey`. */
+      readonly uploads?: string;
     }
   /** Raw application/octet-stream taken from `input[key]`. Any other content type is a 406. */
   | { readonly kind: "binary"; readonly key: string }
@@ -98,6 +100,11 @@ export interface Op<Id extends string = string, In = unknown, Ret = unknown> {
 export type AnyOp = Op<string, any, any>;
 export type InputOf<O> = O extends Op<string, infer I, unknown> ? I : never;
 export type ReturnOf<O> = O extends Op<string, infer _In, infer R> ? R : never;
+
+/** The input key whose entries may carry `file` bytes for the call to upload first, when the body has one. */
+export function uploadKey(op: { readonly body: RequestBody }): string | undefined {
+  return op.body?.kind === "json" ? op.body.uploads : undefined;
+}
 
 /** Generated namespaces: `rm.issues.get` dispatches `ops.getIssue`. Every method is `(input, options?)`. */
 export type SlotTable = Readonly<Record<string, Readonly<Record<string, AnyOp>>>>;

@@ -1,6 +1,6 @@
 // Generated from spec/redmine-openapi/*.yaml by `vp run gen`. Do not edit.
 
-import type { BinarySource, Download } from "../core/files.ts";
+import type { BinarySource, Download, UploadEntry } from "../core/files.ts";
 import type { Cond, ListInput, Listing } from "../core/listing.ts";
 import type { Op } from "../core/op.ts";
 import type {
@@ -118,7 +118,6 @@ import type {
   TimeEntry,
   TimeEntryActivity,
   Tracker,
-  Uploads,
   User,
   UserSummary,
   Version,
@@ -500,7 +499,12 @@ export interface CreateIssueUnderProjectInput {
   watcher_user_ids?: number[];
   is_private?: boolean;
   estimated_hours?: number | null;
-  uploads?: Uploads;
+  /**
+   * Files to attach, in order. An entry is an UploadRef from `attachments.upload`, or
+   * `{ file, filename, content_type?, description? }`, which the call uploads first, one file at a time.
+   * After a failure, `RedmineError.uploads` holds the entries to retry with.
+   */
+  uploads?: UploadEntry[];
 }
 
 export interface GetTimeEntriesByProjectWhere {
@@ -914,7 +918,7 @@ export const createIssue: Op<"createIssue", CreateIssueInput, Promise<IssueSumma
   query: {},
   filters: {},
   customFieldFilters: false,
-  body: { kind: "json", envelope: "issue", siblings: [] },
+  body: { kind: "json", envelope: "issue", siblings: [], uploads: "uploads" },
   response: { kind: "item", unwrap: "issue" },
   includes: [],
   since: "6.1",
@@ -956,7 +960,13 @@ export const updateIssue: Op<"updateIssue", UpdateIssueInput, Promise<void>> = {
   query: {},
   filters: {},
   customFieldFilters: false,
-  body: { kind: "json", envelope: "issue", siblings: [], clear: ["assigned_to_id"] },
+  body: {
+    kind: "json",
+    envelope: "issue",
+    siblings: [],
+    clear: ["assigned_to_id"],
+    uploads: "uploads",
+  },
   response: { kind: "empty" },
   includes: [],
   since: "6.1",
@@ -1211,7 +1221,7 @@ export const createIssueUnderProject: Op<
   query: {},
   filters: {},
   customFieldFilters: false,
-  body: { kind: "json", envelope: "issue", siblings: [] },
+  body: { kind: "json", envelope: "issue", siblings: [], uploads: "uploads" },
   response: { kind: "item", unwrap: "issue" },
   includes: [],
   since: "6.1",
@@ -1983,7 +1993,7 @@ export const updateNews: Op<"updateNews", UpdateNewsInput, Promise<void>> = {
   query: {},
   filters: {},
   customFieldFilters: false,
-  body: { kind: "json", envelope: "news", siblings: [] },
+  body: { kind: "json", envelope: "news", siblings: [], uploads: "uploads" },
   response: { kind: "empty" },
   includes: [],
   since: "6.1",
@@ -2038,7 +2048,7 @@ export const createNews: Op<"createNews", CreateNewsInput, Promise<void>> = {
   query: {},
   filters: {},
   customFieldFilters: false,
-  body: { kind: "json", envelope: "news", siblings: [] },
+  body: { kind: "json", envelope: "news", siblings: [], uploads: "uploads" },
   response: { kind: "empty" },
   includes: [],
   since: "6.1",
@@ -2266,7 +2276,7 @@ export const updateWikiPage: Op<
   query: {},
   filters: {},
   customFieldFilters: false,
-  body: { kind: "json", envelope: "wiki_page", siblings: [] },
+  body: { kind: "json", envelope: "wiki_page", siblings: [], uploads: "uploads" },
   response: { kind: "item", unwrap: "wiki_page" },
   includes: [],
   since: "6.1",

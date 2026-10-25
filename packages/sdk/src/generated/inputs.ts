@@ -1,7 +1,8 @@
 // Generated from spec/redmine-openapi/*.yaml by `vp run gen`. Do not edit.
 
+import type { UploadEntry } from "../core/files.ts";
 import type { Cond, ListInput } from "../core/listing.ts";
-import type { CustomFieldValues, CustomFields, Pref, Uploads } from "./schemas.ts";
+import type { CustomFieldValues, CustomFields, Pref } from "./schemas.ts";
 
 export type GetIssuesInclude = "attachments" | "relations";
 
@@ -383,7 +384,12 @@ export interface CreateIssueInput {
   watcher_user_ids?: number[];
   is_private?: boolean;
   estimated_hours?: number | null;
-  uploads?: Uploads;
+  /**
+   * Files to attach, in order. An entry is an UploadRef from `attachments.upload`, or
+   * `{ file, filename, content_type?, description? }`, which the call uploads first, one file at a time.
+   * After a failure, `RedmineError.uploads` holds the entries to retry with.
+   */
+  uploads?: UploadEntry[];
 }
 
 export type GetIssueInclude =
@@ -433,7 +439,12 @@ export interface UpdateIssueInput {
    * IDs of existing attachments to remove from this issue.
    */
   deleted_attachment_ids?: number[];
-  uploads?: Uploads;
+  /**
+   * Files to attach, in order. An entry is an UploadRef from `attachments.upload`, or
+   * `{ file, filename, content_type?, description? }`, which the call uploads first, one file at a time.
+   * After a failure, `RedmineError.uploads` holds the entries to retry with.
+   */
+  uploads?: UploadEntry[];
 }
 
 export interface DeleteIssueInput {
@@ -1096,7 +1107,12 @@ export interface UpdateNewsInput {
   title?: string;
   summary?: string;
   description?: string;
-  uploads?: Uploads;
+  /**
+   * Files to attach, in order. An entry is an UploadRef from `attachments.upload`, or
+   * `{ file, filename, content_type?, description? }`, which the call uploads first, one file at a time.
+   * After a failure, `RedmineError.uploads` holds the entries to retry with.
+   */
+  uploads?: UploadEntry[];
 }
 
 export interface DeleteNewsInput {
@@ -1112,7 +1128,12 @@ export interface CreateNewsInput {
   title: string;
   summary?: string;
   description: string;
-  uploads?: Uploads;
+  /**
+   * Files to attach, in order. An entry is an UploadRef from `attachments.upload`, or
+   * `{ file, filename, content_type?, description? }`, which the call uploads first, one file at a time.
+   * After a failure, `RedmineError.uploads` holds the entries to retry with.
+   */
+  uploads?: UploadEntry[];
 }
 
 export interface GetIssueRelationsInput extends ListInput<never> {
@@ -1250,7 +1271,12 @@ export interface UpdateWikiPageInput {
    */
   is_start_page?: boolean;
   deleted_attachment_ids?: number[];
-  uploads?: Uploads;
+  /**
+   * Files to attach, in order. An entry is an UploadRef from `attachments.upload`, or
+   * `{ file, filename, content_type?, description? }`, which the call uploads first, one file at a time.
+   * After a failure, `RedmineError.uploads` holds the entries to retry with.
+   */
+  uploads?: UploadEntry[];
 }
 
 export interface DeleteWikiPageInput {

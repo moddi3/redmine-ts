@@ -57,5 +57,13 @@ export interface CatalogEntry {
   readonly stability: Stability;
   /** The method's flat input object, exactly: unknown keys are refused, `required` matches the TypeScript input. */
   readonly inputSchema: JsonSchema;
+  /**
+   * The input key whose entries may also be `{ file, filename, content_type?, description? }`, with `file` as
+   * bytes that the call uploads before it sends the record. `inputSchema` describes only the JSON form,
+   * `{ token, filename, ... }`, because JSON has no binary type: a tool layer that carries bytes, as base64
+   * text or a path, adds its own form and passes `file` as a Blob or Uint8Array. Null when the method takes no
+   * upload entries.
+   */
+  readonly inlineUploads: string | null;
   readonly output: CatalogOutput;
 }

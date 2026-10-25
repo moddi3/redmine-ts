@@ -6,9 +6,9 @@ import type { Access, AllowedMethods, CallOptions, RedmineConfig } from "./core/
 import { createEngine } from "./core/engine.ts";
 import type { Engine } from "./core/engine.ts";
 import { RedmineError } from "./core/errors.ts";
-import { createAttachmentFiles } from "./core/files.ts";
+import { createAttachmentFiles, createUploadingCall } from "./core/files.ts";
 import type { AttachmentFiles } from "./core/files.ts";
-import type { AnyOp, HttpMethod } from "./core/op.ts";
+import { uploadKey, type AnyOp, type HttpMethod } from "./core/op.ts";
 import { invalidInput, isRecord, own } from "./core/util.ts";
 import { ops } from "./generated/ops.ts";
 import type { HttpMethods, Resources } from "./generated/resources.ts";
@@ -49,6 +49,22 @@ type ExtraHttpMethods = Classified<
 
 /** `M`, checked to give every method of every namespace in `T` an HTTP method. */
 type Classified<T, M extends { [N in keyof T]: { [K in keyof T[N]]: HttpMethod } }> = M;
+
+/**
+ * The modes in table `T` that allow PUT or PATCH but not POST. A create or update with files in `uploads` also
+ * sends POST uploads.json, while HttpMethods and the catalog name only the record's method, so the client type
+ * is exact only while this is empty.
+ */
+export type WritesWithoutPost<T> = {
+  [A in keyof T]: [Extract<T[A], "PUT" | "PATCH">] extends [never]
+    ? never
+    : "POST" extends T[A]
+      ? never
+      : A;
+}[keyof T];
+export const inlineUploadsFitAccess: [WritesWithoutPost<AllowedMethods>] extends [never]
+  ? true
+  : never = true;
 
 /** A hand-written method named like a generated one would be a second way to do one task. Fails the build. */
 type Shadowed<G, E> = {
@@ -124,6 +140,7 @@ export function createRedmine<
 >(config: RedmineConfig<V, A>): Redmine<V, A> {
   const resolved = resolveConfig(config);
   const engine = createEngine(resolved);
+  const uploading = createUploadingCall(engine, ops.uploadAttachmentFile);
 
   const build = (defaults: CallOptions): Redmine<V, A> => {
     const merge = (options?: CallOptions): CallOptions => ({ ...defaults, ...options });
@@ -132,7 +149,10 @@ export function createRedmine<
       namespaces[namespace] = Object.fromEntries(
         Object.entries(verbs).map(([verb, op]) => [
           verb,
-          (input: unknown, options?: CallOptions) => engine.call(op, input ?? {}, merge(options)),
+          uploadKey(op) === undefined
+            ? (input: unknown, options?: CallOptions) =>
+                engine.call(op, input ?? {}, merge(options))
+            : (input: unknown, options?: CallOptions) => uploading(op, input ?? {}, merge(options)),
         ]),
       );
     }

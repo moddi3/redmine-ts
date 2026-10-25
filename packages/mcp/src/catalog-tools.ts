@@ -156,7 +156,7 @@ function toolFor(entry: CatalogEntry): ToolSpec {
     return namespaces[entry.namespace]![entry.verb]!(input);
   };
   const common = {
-    name: `${snake(entry.namespace)}_${snake(entry.verb)}`,
+    name: toolName(entry),
     title: entry.title,
     description: describeTool(entry),
     annotations,
@@ -381,6 +381,10 @@ function clip(text: string, max: number): string {
   const cut = flat.slice(0, max);
   const sentence = cut.lastIndexOf(". ");
   return sentence > 0 ? cut.slice(0, sentence + 1) : `${cut.trimEnd()}...`;
+}
+
+export function toolName(entry: Pick<CatalogEntry, "namespace" | "verb">): string {
+  return `${snake(entry.namespace)}_${snake(entry.verb)}`;
 }
 
 function snake(name: string): string {

@@ -60,6 +60,27 @@ describe("catalog", () => {
     expect(entry("issues.get").since).toBe("6.1");
   });
 
+  test("inlineUploads marks the five methods that take files in uploads, whose schema keeps the JSON form", () => {
+    const marked = catalog.filter((e) => e.inlineUploads !== null);
+    const five = ["issues.create", "issues.update", "news.create", "news.update", "wiki.update"];
+
+    expect(marked.map((e) => `${e.namespace}.${e.verb}`).toSorted()).toEqual(five);
+    for (const e of marked) {
+      const uploads = e.inputSchema.properties?.[e.inlineUploads!];
+      expect(uploads?.type, e.id).toBe("array");
+      expect(uploads?.items?.additionalProperties, e.id).toBe(false);
+      expect(Object.keys(uploads?.items?.properties ?? {}).toSorted(), e.id).toEqual([
+        "content_type",
+        "description",
+        "filename",
+        "token",
+      ]);
+    }
+    expect(entry("attachments.upload").description).toContain(
+      "`uploads` of issues.create, issues.update, news.create, news.update or wiki.update.",
+    );
+  });
+
   test("issues.list `where.status_id` takes the words and documented operators, not text ones", () => {
     const input = entry("issues.list").inputSchema;
     const accepts = (status_id: unknown) => check(input, { where: { status_id } }).length === 0;
