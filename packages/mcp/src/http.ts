@@ -544,12 +544,13 @@ function preflight(origin: string): Response {
 
 /**
  * Re-wraps the response over the same body, so an SSE stream still reaches the client event by event.
- * A page reads WWW-Authenticate to find the authorization server.
+ * A page reads WWW-Authenticate to find the authorization server, and Retry-After to know when to
+ * send a body the budget refused again.
  */
 function withCors(response: Response, origin: string): Response {
   const wrapped = new Response(response.body, response);
   wrapped.headers.set("Access-Control-Allow-Origin", origin);
-  wrapped.headers.set("Access-Control-Expose-Headers", "WWW-Authenticate");
+  wrapped.headers.set("Access-Control-Expose-Headers", "WWW-Authenticate, Retry-After");
   wrapped.headers.append("Vary", "Origin");
   return wrapped;
 }

@@ -211,6 +211,34 @@ describe("the budget for request bodies in flight", () => {
   it("refuses a budget that is not a number of bytes when created", () => {
     expect(() => handler({ maxBodyBytesInFlight: -1 })).toThrow(RangeError);
     expect(() => handler({ maxBodyBytesInFlight: Number.NaN })).toThrow(RangeError);
+    for (const value of [null, "1000"]) {
+      expect(() => handler({ maxBodyBytesInFlight: value as unknown as number })).toThrow(
+        RangeError,
+      );
+    }
+  });
+
+  it("answers a body of JSON null 400, as the MCP SDK does", async () => {
+    const { handle } = handler();
+    const response = await handle(whole("null"));
+    expect(response.status).toBe(400);
+  });
+
+  it("answers a JSON POST without a body 400, as the MCP SDK does", async () => {
+    const { handle } = handler();
+    const response = await handle(
+      new Request(publicUrl, {
+        method: "POST",
+        headers: {
+          host: "localhost:3737",
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-11-25",
+          "x-redmine-api-key": "good-key",
+        },
+      }),
+    );
+    expect(response.status).toBe(400);
   });
 
   it.each(Object.entries(credentials))(
@@ -672,6 +700,23 @@ describe("the buffer a body is charged for", () => {
       expect(await fits(limited, 200 * KiB)).toBe(false);
       fast.end();
       expect((await fast.read).kind).toBe("other");
+    });
+
+    it("drops a body that trickles after a burst, once its last 128 KiB of growth is 5 s old", async () => {
+      const limited = budget(600 * KiB);
+      const trickler = arriving(limited);
+      await trickler.send(200 * KiB);
+      now += 1000;
+      await trickler.send(130 * KiB);
+      for (let step = 0; step < 3; step++) {
+        now += 3000;
+        await trickler.send(1);
+      }
+      const next = arriving(limited);
+      await next.send(free + 400 * KiB);
+      expect(await trickler.read).toMatchObject({ kind: "refused", refusal: "stalled" });
+      next.end();
+      expect((await next.read).kind).toBe("other");
     });
 
     it("refuses a body dropped for another even when its last bytes arrived in the same turn", async () => {

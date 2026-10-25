@@ -68,10 +68,10 @@ export function createBodyBudget({
   maxBody,
   free,
 }: BodyBudgetOptions): BodyBudget {
-  if (!(limit >= 0)) {
+  if (typeof limit !== "number" || !(limit >= 0)) {
     throw new RangeError(`maxBodyBytesInFlight must be a number of bytes, got ${String(limit)}`);
   }
-  if (!(timeoutMs >= 1 && timeoutMs <= MAX_TIMER_MS)) {
+  if (typeof timeoutMs !== "number" || !(timeoutMs >= 1 && timeoutMs <= MAX_TIMER_MS)) {
     throw new RangeError(
       `bodyTimeoutMs must be a number of milliseconds from 1 to ${MAX_TIMER_MS}, got ${String(timeoutMs)}`,
     );
