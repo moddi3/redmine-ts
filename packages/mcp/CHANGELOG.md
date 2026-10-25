@@ -1,5 +1,15 @@
 # @redmine-ts/mcp
 
+## 0.3.1
+
+### Patch Changes
+
+- ee5d737: The `attachments_upload` description names every tool that takes its reference in `uploads`, including `news_create`, `news_update` and `wiki_update`, and no longer says Redmine discards an unattached upload. Redmine keeps it until an admin prunes it.
+- 0e4dd48: A request with an `X-Redmine-API-Key` header now has its key checked with Redmine (`GET /users/current.json`) before the server reads more than 64 KiB of the body or waits more than a second for it. A key that Redmine refuses gets 401, and a check that Redmine does not answer gets 503, both with a `null` id. Before, any value of the header, even a made-up one, made the server read up to 4 MiB and wait for a stalled body until Node's 300-second request timeout. Smaller requests that arrive at once are unchanged and cost no extra call. `attachments_upload` decodes `content_base64` in a loop that holds one copy of the file, instead of about 30 bytes per byte.
+- 36409bd: `attachments_upload` takes its advertised 5 MB over HTTP too. A request whose key Redmine accepted, or whose OAuth token is valid, may now carry about 6.7 MiB, which fits a 5 MB file in base64 and the JSON-RPC envelope around it. Before, the 4 MiB limit stopped base64 files at about 3 MB with a 413. A `content_text` near 5 MB can still exceed the limit once JSON escapes its line breaks, quotes, and control characters, so send such a file as `content_base64`.
+- Updated dependencies [ee5d737]
+  - @redmine-ts/sdk@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
