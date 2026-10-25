@@ -47,7 +47,10 @@ const DOCUMENT_STALE_MS = 60 * 60_000;
 const UNFETCHED = "its metadata document could not be fetched";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-/** What resolve answers when the client needs a fetch and every slot is taken. */
+/**
+ * What resolve answers when the client needs a fetch that cannot answer in time, because every slot is
+ * taken or its own fetch did not settle, and no document fetched within DOCUMENT_STALE_MS can serve it.
+ */
 export const BUSY: unique symbol = Symbol("busy");
 /** Most slots free within one fetch timeout. */
 export const BUSY_RETRY_SECONDS: number = DOCUMENT_TIMEOUT_MS / 1000;

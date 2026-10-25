@@ -1110,7 +1110,7 @@ describe("built-in authorization server", () => {
     expect(create({}, { fetchClientMetadata: undefined })).toThrow(
       "oauth.fetchClientMetadata is required: pass publicFetch from @redmine-ts/mcp/node",
     );
-    for (const host of ["*.claude.ai", "*"]) {
+    for (const host of ["*.claude.ai", "claude.*", "*"]) {
       expect(create({}, { allowedClientHosts: ["claude.ai", host] })).toThrow(
         new TypeError("oauth.allowedClientHosts does not support wildcards: list each hostname"),
       );
@@ -1175,7 +1175,7 @@ describe("metadata document fetches", () => {
       expect(page.status).toBe(503);
       expect(page.headers.get("retry-after")).toBe("5");
       expect(await page.text()).toContain(
-        "The server is busy checking other clients. Reload this page in a moment.",
+        "The server is busy checking clients. Reload this page in a moment.",
       );
     }
     expect(held.fetched.filter((url) => refused.includes(url))).toEqual([]);
@@ -1632,7 +1632,7 @@ describe("API key sign-in, the opt-in fallback", () => {
     expect(answer.status).toBe(503);
     expect(answer.headers.get("retry-after")).toBe("5");
     expect(await answer.text()).toContain(
-      "The server is busy checking other clients, so this sign-in stops here.",
+      "The server is busy checking clients, so this sign-in stops here.",
     );
     held.release();
     await Promise.all(filling);

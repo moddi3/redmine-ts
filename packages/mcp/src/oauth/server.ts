@@ -302,7 +302,10 @@ export function createAuthorizationServer(
     authorization_response_iss_parameter_supported: true,
   };
 
-  /** While every metadata fetch slot is taken. Nothing is known against the client, so it may retry. */
+  /**
+   * When no fetch can answer in time, because every slot is taken or the client's own fetch did not
+   * settle. Nothing is known against the client, so it may retry.
+   */
   const busy = (message: string) =>
     errorPage(503, message, { "Retry-After": String(BUSY_RETRY_SECONDS) });
 
@@ -334,7 +337,7 @@ export function createAuthorizationServer(
     }
     const client = await clients.resolve(clientId);
     if (client === BUSY) {
-      return busy("The server is busy checking other clients. Reload this page in a moment.");
+      return busy("The server is busy checking clients. Reload this page in a moment.");
     }
     if (typeof client === "string") {
       return errorPage(400, `This server refuses the client: ${client}.`);
@@ -484,7 +487,7 @@ export function createAuthorizationServer(
       const client = await clients.resolve(consent.client);
       if (client === BUSY) {
         return busy(
-          "The server is busy checking other clients, so this sign-in stops here. Start again from your client in a moment.",
+          "The server is busy checking clients, so this sign-in stops here. Start again from your client in a moment.",
         );
       }
       if (typeof client === "string") {
