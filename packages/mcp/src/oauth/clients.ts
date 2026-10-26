@@ -24,13 +24,13 @@ export interface ClientsOptions {
 
 /** Documents are small; the draft suggests 5 KB as the cap. */
 const DOCUMENT_MAX_BYTES = 5 * 1024;
-const DOCUMENT_TIMEOUT_MS = 5000;
-const DOCUMENT_CACHE_MS = 5 * 60_000;
-const DOCUMENT_CACHE_SIZE = 256;
+const FETCH_TIMEOUT_MS = 5000;
+const CACHE_MS = 5 * 60_000;
+const CACHE_SIZE = 256;
 /**
  * Documents one handler fetches at once, which is one process for the CLI and one isolate on Workers.
- * Each document is fetched about once per DOCUMENT_CACHE_MS, so sign-ins rarely need two at a time.
- * The cap bounds the sockets that unauthenticated authorize requests can make the server open.
+ * Each document is fetched about once per CACHE_MS, so sign-ins rarely need two at a time. The cap
+ * bounds the sockets that unauthenticated authorize requests can make the server open.
  */
 const DOCUMENT_FETCHES = 8;
 /**
@@ -38,7 +38,7 @@ const DOCUMENT_FETCHES = 8;
  * cancel the work of a request whose client disconnects. Its slot is then free after this long, and
  * requests that share it stop waiting.
  */
-const FLIGHT_MS = DOCUMENT_TIMEOUT_MS + 1000;
+const FLIGHT_MS = FETCH_TIMEOUT_MS + 1000;
 /**
  * While every slot is taken, a document fetched within this time still serves its client, so a flood
  * of unknown client_ids cannot lock out a client the server has seen.
@@ -53,7 +53,7 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
  */
 export const BUSY: unique symbol = Symbol("busy");
 /** Most slots free within one fetch timeout. */
-export const BUSY_RETRY_SECONDS: number = DOCUMENT_TIMEOUT_MS / 1000;
+export const BUSY_RETRY_SECONDS: number = FETCH_TIMEOUT_MS / 1000;
 
 /** Names are shown on the consent page and sealed into registrations, so they stay short. */
 const NAME_MAX_LENGTH = 100;
@@ -96,32 +96,21 @@ export interface Clients {
 
 export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): Clients {
   const documents = new Map<string, { client: Client; fetched: number }>();
-  /** Fetches under way by client_id. Concurrent resolves of one client_id share its fetch. */
-  const flights = new Map<string, { outcome: Promise<Client | string>; until: number }>();
+  /** Document fetches under way by client_id. */
+  const documentFlights = createFlights<Client | string>(DOCUMENT_FETCHES);
   const admitted = (host: string) => allowedHosts === undefined || allowedHosts.includes(host);
 
   async function fetchDocument(clientId: string): Promise<Client | string | typeof BUSY> {
     const url = documentUrl(clientId);
     if (typeof url === "string") return url;
     if (!admitted(url.hostname)) return `${url.hostname} is not an allowed client host`;
-    const now = Date.now();
     const cached = documents.get(clientId);
-    if (cached !== undefined && cached.fetched + DOCUMENT_CACHE_MS > now) return cached.client;
-    for (const [id, flight] of flights) if (flight.until <= now) flights.delete(id);
-    let flight = flights.get(clientId);
-    if (flight === undefined) {
-      if (flights.size >= DOCUMENT_FETCHES) return recent(clientId);
-      // A flight past its time may have been dropped and replaced by a newer one, which stays.
-      const current = () => flights.get(clientId) === started;
-      const started = { outcome: load(clientId, url, current), until: now + FLIGHT_MS };
-      const land = () => {
-        if (current()) flights.delete(clientId);
-      };
-      started.outcome.then(land, land);
-      flights.set(clientId, started);
-      flight = started;
-    }
-    return settled(flight.outcome, flight.until - now, () => recent(clientId));
+    if (cached !== undefined && cached.fetched + CACHE_MS > Date.now()) return cached.client;
+    return documentFlights(
+      clientId,
+      (current) => load(clientId, url, current),
+      () => recent(clientId),
+    );
   }
 
   /** The document fetched within DOCUMENT_STALE_MS, for when no fetch can answer now, or BUSY. */
@@ -146,38 +135,50 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
     if (typeof outcome === "string") {
       documents.delete(clientId);
     } else {
-      remember(documents, clientId, { client: outcome, fetched: Date.now() }, DOCUMENT_CACHE_SIZE);
+      remember(documents, clientId, { client: outcome, fetched: Date.now() }, CACHE_SIZE);
     }
     return outcome;
   }
 
-  async function fetchAndCheck(clientId: string, url: URL): Promise<Client | string> {
+  /**
+   * GETs a URL a client named: without following redirects, within the timeout, and at most
+   * `maxBytes` of it. The status is not repeated: it would tell the caller what answers there.
+   */
+  async function download(
+    url: URL,
+    maxBytes: number,
+  ): Promise<{ text: string } | "unfetched" | "oversize"> {
     let response: Response;
     try {
       response = await fetch(url, {
         headers: { accept: "application/json" },
         redirect: "manual",
-        signal: AbortSignal.timeout(DOCUMENT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
     } catch {
-      return UNFETCHED;
+      return "unfetched";
     }
-    // The status is not repeated: it would tell the caller what answers where the URL points.
     if (response.status !== 200) {
       await response.body?.cancel();
-      return UNFETCHED;
+      return "unfetched";
     }
     let text: string | undefined;
     try {
-      text = await readText(response, DOCUMENT_MAX_BYTES);
+      text = await readText(response, maxBytes);
     } catch {
       // The timeout also ends a body that stalls after the headers.
-      return UNFETCHED;
+      return "unfetched";
     }
-    if (text === undefined) return `its metadata document is over ${DOCUMENT_MAX_BYTES} bytes`;
+    return text === undefined ? "oversize" : { text };
+  }
+
+  async function fetchAndCheck(clientId: string, url: URL): Promise<Client | string> {
+    const body = await download(url, DOCUMENT_MAX_BYTES);
+    if (body === "unfetched") return UNFETCHED;
+    if (body === "oversize") return `its metadata document is over ${DOCUMENT_MAX_BYTES} bytes`;
     let parsed: z.infer<typeof Document>;
     try {
-      parsed = Document.parse(JSON.parse(text));
+      parsed = Document.parse(JSON.parse(body.text));
     } catch {
       return "its metadata document is not valid client metadata";
     }
@@ -288,16 +289,45 @@ export function redirectMatches(registered: string, requested: string): boolean 
 }
 
 /**
+ * Starts a fetch for a key, or shares the one under way, with at most `cap` under way at once. A
+ * caller gets `late()` when every slot is taken, or when the shared fetch is not done in its time.
+ * `start` is told whether its flight is still the key's current one, once it has awaited something.
+ */
+type Flights<T> = <L>(
+  key: string,
+  start: (current: () => boolean) => Promise<T>,
+  late: () => L,
+) => Promise<T | L>;
+
+function createFlights<T>(cap: number): Flights<T> {
+  const flights = new Map<string, { outcome: Promise<T>; until: number }>();
+  return async (key, start, late) => {
+    const now = Date.now();
+    for (const [id, flight] of flights) if (flight.until <= now) flights.delete(id);
+    let flight = flights.get(key);
+    if (flight === undefined) {
+      if (flights.size >= cap) return late();
+      // A flight past its time may have been dropped and replaced by a newer one, which stays.
+      const current = () => flights.get(key) === started;
+      const started = { outcome: start(current), until: now + FLIGHT_MS };
+      const land = () => {
+        if (current()) flights.delete(key);
+      };
+      started.outcome.then(land, land);
+      flights.set(key, started);
+      flight = started;
+    }
+    return settled(flight.outcome, flight.until - now, late);
+  };
+}
+
+/**
  * A shared fetch's outcome, or `late()` once its time is up, since a cancelled fetch never settles.
  * Its sharers then know nothing about the client, so they get no refusal.
  */
-function settled(
-  outcome: Promise<Client | string>,
-  ms: number,
-  late: () => Client | typeof BUSY,
-): Promise<Client | string | typeof BUSY> {
+function settled<T, L>(outcome: Promise<T>, ms: number, late: () => L): Promise<T | L> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const lapsed = new Promise<Client | typeof BUSY>((resolve) => {
+  const lapsed = new Promise<L>((resolve) => {
     timer = setTimeout(() => resolve(late()), ms);
   });
   return Promise.race([outcome, lapsed]).finally(() => clearTimeout(timer));
