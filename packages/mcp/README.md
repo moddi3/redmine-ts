@@ -1,6 +1,32 @@
 # @redmine-ts/mcp
 
-An MCP server for the Redmine REST API. It exposes one tool per operation of [`@redmine-ts/sdk`](../sdk), 86 in all, plus 6 workflow tools for the common jobs, such as reading an issue with its history in one call, and a `redmine://issues/{id}` resource. It serves them over stdio or Streamable HTTP. Every tool has a JSON Schema for its input and its output, and annotations that tell the client whether it reads, writes, or deletes.
+[![npm](https://img.shields.io/npm/v/@redmine-ts/mcp)](https://www.npmjs.com/package/@redmine-ts/mcp)
+
+Let ChatGPT, Claude, and your coding agents work in Redmine as you.
+
+`@redmine-ts/mcp` is an MCP server with 92 tools for the Redmine REST API, over stdio or Streamable HTTP. Agents on your machine use your API key. claude.ai and ChatGPT sign you in through Redmine's own OAuth, so each call runs with your Redmine permissions and Redmine records each change under your name.
+
+- **Tested with claude.ai and ChatGPT.** On 2026-10-26 both signed in to Redmine 7.0 through this server, ran tool calls, and refreshed their tokens. ChatGPT proves who it is with a signed JWT, which the server checks at the token endpoint.
+- **A typed tool for every SDK operation.** 86 tools come from [`@redmine-ts/sdk`](https://www.npmjs.com/package/@redmine-ts/sdk), each with a JSON Schema for its input and its output, and hints that tell the client whether it reads, writes, or deletes.
+- **Workflow tools for the common jobs.** `issue_context` returns an issue with the statuses it can move to, its relations, and its journals as readable changes, in one call. `issues_transition` changes a status by name and lists the allowed ones when the workflow refuses.
+- **Access modes the SDK enforces.** `--read-only` lists 43 tools and sends only `GET`. `--no-delete` lists 76 and never sends `DELETE`. A hidden tool called anyway gets an error, and Redmine sees nothing.
+- **One server for a team.** With `--http`, each request brings its own API key or OAuth token. The server needs no database, because it seals codes and tokens with one secret.
+- **Node, Bun, and Cloudflare Workers.** `npx` runs the CLI on Node 22 or later. `createRedmineMcpHandler` is the same server as a web-standard request handler.
+
+## Quick start
+
+Copy your API key from Redmine, under **My account**, **API access key**. Then add the server to Claude Code:
+
+```sh
+claude mcp add redmine \
+  --env REDMINE_URL=https://tracker.example.com \
+  --env REDMINE_API_KEY=your-key \
+  -- npx -y @redmine-ts/mcp --no-delete
+```
+
+Then ask Claude what is assigned to you in Redmine. `--no-delete` leaves every tool that deletes out of the list. Leave it out only when the agent needs to delete.
+
+## Add the server to a client
 
 It needs Node 22 or later. `npx` runs it without an install, and a global install puts the command `redmine-mcp` on your `PATH`:
 
@@ -8,8 +34,6 @@ It needs Node 22 or later. `npx` runs it without an install, and a global instal
 REDMINE_URL=https://tracker.example.com REDMINE_API_KEY=... npx -y @redmine-ts/mcp --help
 npm install -g @redmine-ts/mcp && redmine-mcp --help
 ```
-
-## Add the server to a client
 
 Each client starts `redmine-mcp` itself and talks to it over stdio. Put your API key in the client's config, not in a shared file. You find the key in Redmine under **My account**, **API access key**.
 
@@ -51,6 +75,117 @@ Cursor, in `.cursor/mcp.json` or `~/.cursor/mcp.json`:
 The server name, `redmine` above, is the prefix clients put in front of the tool names, so the tools themselves carry no `redmine_` prefix.
 
 Tool schemas are JSON Schema draft 2020-12 with one `type` per schema. A value that may be `null` is an `anyOf` with a `{ "type": "null" }` branch, not `"type": ["string", "null"]`, so clients that map tool schemas onto a dialect with one type per schema, such as Gemini's function declarations, can read them.
+
+## Connect claude.ai and ChatGPT
+
+claude.ai and ChatGPT reach MCP servers over the internet and sign in with OAuth, so they cannot send an API key. Run the server with OAuth at a public https URL, as [OAuth](#oauth) describes, and give each client that URL:
+
+- In claude.ai, add a custom connector with the URL, and keep the sign-in options it detects.
+- In ChatGPT, turn on developer mode and create a connector with the URL and OAuth.
+
+Each person then allows the client on the server's consent page, signs in to Redmine, and approves Redmine's own consent page. From then on, every tool call acts as that person.
+
+## Workflow tools
+
+Six hand-written tools cover what an agent does most, in fewer calls than the generated tools need. They are listed first, and they share the generated tools' validation, error results, and the warning on user-written text.
+
+| Tool                   | Kind  | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `issue_context`        | read  | One issue with everything needed to work on it: the full description, the statuses it can move to, relations read from this issue (`{relation: "blocked by", issue_id: 12}`), subtasks with their status, attachment metadata, watchers, and the newest journals as readable changes.                                                                                                                                                            |
+| `reference_data`       | read  | Statuses, trackers, priorities, time entry activities, the current user, and custom field definitions for an admin key. With `project_id`, also the project's trackers, categories, versions, members with roles, issue custom fields, and modules.                                                                                                                                                                                              |
+| `issues_transition`    | write | Changes the status by id or by name, checked against the workflow first. A refusal lists the allowed statuses by id and name.                                                                                                                                                                                                                                                                                                                    |
+| `attachments_upload`   | write | Uploads a file from `content_text`, `content_base64`, or, with a files directory, `path`, and returns the reference to pass in `uploads` of `issues_create`, `issues_update`, `news_create`, `news_update`, or `wiki_update`. At most 5 MB, Redmine's default limit. Over HTTP, a `content_text` near 5 MB can exceed the request limit once JSON escapes its line breaks, quotes, and control characters. Send such a file as `content_base64`. |
+| `attachments_download` | read  | Returns an image up to 1 MB as image content, a text file up to 100 KB as text, or a thumbnail. Any other file returns its metadata and a note.                                                                                                                                                                                                                                                                                                  |
+| `raw_request`          | read  | Sends one request to any REST path, for plugin endpoints and fields the typed tools miss. Listed in every mode; the access mode decides which methods it sends, and its hints and description say so.                                                                                                                                                                                                                                            |
+
+`issue_context` turns each journal detail into `{field, from, to}` with names, such as `{"field": "Status", "from": "New", "to": "In Progress"}`. It names statuses, trackers, and priorities from lists cached for 5 minutes, and assignees, categories, versions, and projects from the issue's project, fetched only when a journal needs them. A lookup the key may not read leaves the raw id. Descriptions and notes longer than 4000 characters are cut with a marker that says to call `issues_get` for the full text, and the result says how many older journals it left out.
+
+### Files
+
+To attach a file, call `attachments_upload`, then pass the reference in `uploads` of the create or update tool. The generated tools take references in `uploads`, never file content, so their schemas stay small and each file travels in its own request. Over `--http`, a request body may be up to about 6.7 MiB, enough for a 5 MiB file as `content_base64` (see [Security defaults](#security-defaults)). Redmine keeps an upload that no record takes until an admin prunes it, so upload only what you attach.
+
+`REDMINE_MCP_FILES_DIR` names the one local directory the server may use. With it, `attachments_upload` accepts `path`, a file in that directory, and `attachments_save` is listed: it saves an attachment there under a name that never replaces an existing file, such as `build (1).log`, and returns the absolute path.
+
+A path must resolve inside the directory after symlinks are followed, so `../secret` and a symlink that points outside are refused before anything is read or sent. `attachments_save` only reads from Redmine, so `read-only` mode lists it too, but it writes the local file, so its `readOnlyHint` is `false`.
+
+### The issue resource
+
+The server offers the resource template `redmine://issues/{id}`. Reading `redmine://issues/123` returns issue 123 as Markdown, built from the same data as `issue_context`, with the warning about user-written text on the first line and user-written text quoted. An unknown URI or a missing issue is an MCP error.
+
+## Generated tools
+
+Each tool is named `<resource>_<verb>` in snake case, after the SDK method it calls. `rm.issues.list` becomes `issues_list`, `rm.timeEntries.create` becomes `time_entries_create`, and `rm.issues.addWatcher` becomes `issues_add_watcher`. The list is in the SDK's catalog order, so it is the same on every start.
+
+Every tool has a `title` and all four hints, set from its HTTP method:
+
+| Method           | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+| ---------------- | -------------- | ----------------- | ---------------- | --------------- |
+| `GET`            | `true`         | `false`           | `true`           | `false`         |
+| `POST`           | `false`        | `false`           | `false`          | `false`         |
+| `PUT` or `PATCH` | `false`        | `true`            | `true`           | `false`         |
+| `DELETE`         | `false`        | `true`            | `true`           | `false`         |
+
+An update counts as destructive because it overwrites data that exists. `openWorldHint` is `false` because the tools reach only your Redmine instance.
+
+Inputs take ids, not names. `reference_data` maps the common names to ids in one call. A tool's description also names the list tool for each id it takes.
+
+### Filters
+
+List tools filter with `where`, keyed by Redmine's filter names, such as `status_id`, `assigned_to_id`, or `cf_12`. A value or an array of values means equals:
+
+```json
+{ "where": { "status_id": "open", "assigned_to_id": "me", "tracker_id": [1, 2] } }
+```
+
+An object with one operator picks another comparison: `{ "not": 3 }`, `{ "gte": "2026-10-01" }`, `{ "lte": 5 }`, `{ "between": [1, 10] }`, `{ "contains": "crash" }`, `{ "any": true }`, or `{ "none": true }`. Each filter accepts only the operators Redmine documents for it, and its description in the input schema lists them. `{ "raw": "<t-30" }` sends Redmine's own syntax unchanged, for relative dates and other rare cases. An unknown filter or an operator the filter does not take is refused before any request, with the forms the filter accepts.
+
+### Pages
+
+A list tool returns one page:
+
+```json
+{ "items": [], "total_count": 312, "offset": 0, "limit": 25, "next_offset": 25 }
+```
+
+`limit` is 25 by default and at most 100. To read the next page, call the tool again with `offset` set to `next_offset`. `next_offset` is `null` on the last page. Lists that Redmine returns whole, such as `issue_statuses_list`, are paged the same way.
+
+Items in a page leave out the long fields `description`, `notes`, `text`, `comments`, `journals`, and `changesets`. Pass `detailed: true` to keep them, or call the `get` tool for one record.
+
+### Results
+
+A tool that returns a record, such as `issues_get` or `issues_create`, returns the record as Redmine sends it. A tool with nothing to return, such as `issues_update` or `issues_delete`, returns `{ "ok": true }`.
+
+Every result carries the object twice: as `structuredContent`, and as compact JSON in a text block. The tool's `outputSchema` describes it, and the server checks each result against that schema before it answers. `attachments_download` adds the image as an image block after the JSON.
+
+### Errors
+
+A failed Redmine request comes back as a tool result with `isError: true`, never as a protocol error. Over OAuth, a sign-in that Redmine refuses gets HTTP 401 instead, and a call beyond the token's scope gets HTTP 403. Three cases keep the error result, as [What holds either way](#what-holds-either-way) describes: a call that the server's own mode refuses, a request in which Redmine may have applied a write, and a Redmine 401 on a path outside its REST formats (`.json` and `.xml`). The first text block says what went wrong and what to do. The last text block is the SDK's error as JSON, with a `kind` such as `validation`, `not_found`, `conflict`, `access_denied`, or `unsupported_version`.
+
+- A 422 carries Redmine's own messages, such as `Subject cannot be blank`, in the user's language.
+- A 404 says to check the ids.
+- Input that does not match the schema is refused before any request. For a bad filter, the message lists the forms the filter accepts.
+
+## Access modes
+
+The access mode decides which tools the server lists and which requests the SDK sends. When you give more than one setting, for example `REDMINE_MCP_ACCESS=no-delete` and `--read-only`, the strictest one wins.
+
+| Mode        | Lists                                                    | Sends                          |
+| ----------- | -------------------------------------------------------- | ------------------------------ |
+| `full`      | All 92 tools.                                            | Every method.                  |
+| `no-delete` | 76 tools. The `DELETE` tools are gone.                   | `GET`, `POST`, `PUT`, `PATCH`. |
+| `read-only` | 43 tools: the reads, and `raw_request` limited to `GET`. | `GET` only.                    |
+
+With `REDMINE_MCP_FILES_DIR` set, each mode lists one more tool, `attachments_save`.
+
+A client can still call a tool the mode hides, for example from a tool list it cached earlier. The server then answers with an error that names the mode, and the SDK sends nothing to Redmine.
+
+The mode limits what the server does. It does not limit the API key. A key that belongs to an admin can still do everything outside this server, so give the server a key of a user whose Redmine role allows only what the agent needs.
+
+## Version handling
+
+Redmine does not report its version over the API, so you declare it with `REDMINE_VERSION`. With a declared version, the server hides tools the version lacks. On `6.1` that is `groups_remove_users`, which Redmine added in 7.0, so a 6.1 server lists 91 tools in `full` mode. A call to a hidden tool returns an error that names the version the tool needs.
+
+Without `REDMINE_VERSION`, the server lists every tool. A tool newer than your server then fails with a 404, and the error says that the server may be older than the operation.
 
 ## Serve over HTTP
 
@@ -104,20 +239,14 @@ Cursor, in `.cursor/mcp.json` or `~/.cursor/mcp.json`, with the key read from th
 ### Security defaults
 
 - The server listens on `127.0.0.1`. To listen anywhere else, pass the address with `--host`.
-- On a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, the address itself, the host of `REDMINE_MCP_PUBLIC_URL`, or a hostname that `--allow-host` lists. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it. A rebound page can also reach a server on another private address, such as `0.0.0.0` in a container, but there the server cannot know every name its clients use. So on any other address the server checks `Host` against the same list only when `--allow-host` is given.
-- A request with an `Origin` header gets 403 unless `--allow-origin` lists it. Browsers send `Origin`; command-line and desktop clients do not, so they pass. See [Browser clients and CORS](#browser-clients-and-cors).
-- Before Redmine accepts a key, the server reads at most 64 KiB of the body and waits at most a second for it. A request with the `X-Redmine-API-Key` header passes its body to the MCP server until the body grows past 64 KiB or is still arriving after a second. Then the server asks Redmine for `GET /users/current.json` with that key, once, and reads nothing more until Redmine answers. A key Redmine refuses gets 401. `initialize`, `tools/list` and most tool calls are smaller and arrive at once, so they cost no extra call. `initialize` and `tools/list` never reach Redmine, so they succeed with any key, and a tool call with a wrong key still shows Redmine's 401 as the tool's error result.
-- That check makes large and slow requests depend on Redmine. When Redmine does not answer that request within 8 seconds, or answers it with an error other than 401, a request with a body over 64 KiB or one still arriving after a second gets 503, even a `tools/list` that needs nothing from Redmine. Each 503 writes one line to stderr, and a refused key writes none, so a client that keeps sending large bodies during an outage makes the server log one line per request.
-- A key that Redmine accepts, or a valid OAuth token, may send a body of up to about 6.7 MiB, enough for a 5 MB `attachments_upload` in base64. The server reads each body once, as bytes, into a buffer of one to two bytes per byte received, however the client splits the body into packets. Node adds its own cost per packet: with 50 connections each sending one byte every 2 ms, live heap was about 6 bytes per byte received on Node and about 1 on Bun.
-- Bodies that are still arriving share a budget of 32 MiB, which the `maxBodyBytesInFlight` option of `createRedmineMcpHandler` changes. The budget charges the buffer each body is read into. A buffer doubles as its body grows up to 1 MiB and then grows 1 MiB at a time, so it is never more than 1 MiB ahead of what has arrived. It ends at the body's exact size when the `Content-Length` is truthful, so a body at the limit is charged in full once it passes 6 MiB. The first 64 KiB of each body are not charged, so small requests never meet the budget. A body that needs room the others hold takes it from bodies that have not grown by 128 KiB in the last 5 seconds, longest stalled first, and those get 408, so an upload slower than 25.6 KiB/s can be dropped while the budget is full. When every other body is still growing, the request gets 503 with `Retry-After: 5`, even partway through its body. So the default lets four bodies at the limit arrive at once. Five 5 MB uploads sent together at 1 MiB/s each got four 200s and one 503, which a Node client got after sending 6 MiB of its body. Six got four 200s and two 503s, after 5 and 6 MiB. Over loopback at full speed, five and six all succeeded, since each body arrived in a fraction of a second.
-- The budget does not cover the first 64 KiB of each body or the state of each connection. 1,000 connections that had each sent 64 KiB and stopped held 84 MB of live memory on Node, of which 63 MB were their buffers, and the previous release held 154 MB. Cap the connections of one client in a proxy, such as with nginx's `limit_conn`, to bound that.
-- Every body must also arrive within 300 seconds of when the server begins reading it. That is Node's own request timeout, which Bun and Workers do not have. The `bodyTimeoutMs` option changes it, and a body still arriving then gets 408. A 6.7 MiB upload must arrive at about 23 KiB/s or faster to make it.
-- After a 408, 503 or 413 partway through a body, the server reads and drops the rest of it for 5 seconds, so a client still sending gets the answer instead of a reset. Then it stops reading. The server does not close the connection itself. The runtime closes it once it has read nothing for its idle timeout. On Node with the default `keepAliveTimeout` of 5 seconds, the connection closed 6 seconds after the answer when the client sent nothing more, and 11 seconds after it when the client kept sending 1 KiB a second. With a `keepAliveTimeout` of 600 seconds, both stayed open until Node's 300-second request timeout ended them, 328 to 330 seconds after the answer. Bun's `node:http` closed them after 6 and 10 seconds by default, and at 298 to 330 seconds with a `keepAliveTimeout` of 600 seconds. `Bun.serve` closed both after 12 seconds with its default `idleTimeout`, and after 32 seconds with an `idleTimeout` of 30. On Workers the connection ends with the answer, so nothing is read and dropped. On Node, about 250 such open connections held 3 to 4 MB of live memory in all, and none of their bodies. A body refused by its declared length is not read at all, as before. Each of these 408s and 503s writes one line to stderr.
-- In a test with 60 uploads stopped at 95% of the limit, a Node server on the previous release held 794 MB of live heap (V8's heap and external memory after a full collection) and had answered none of them 310 seconds later. Now four of them filled the budget and the other 56 got 503 within 2 seconds. Live heap stayed at most 29 MB above idle until the four bodies still stalled got 408 at 300 seconds, and then went back to idle. A 1 MiB upload from another user fit beside them and succeeded. On Bun the previous release held 778 MB, and now 29 MB above idle. In a second test, a 6.7 MiB upload sent at 128 KiB/s while four stalled bodies filled the budget dropped one of them once it passed 5 MiB, and succeeded after 55 seconds.
-- The budget bounds bodies while they arrive, not the memory a request takes afterwards to parse its message, decode the file and send it to Redmine. Five concurrent 5 MB uploads took a Node server from 94 MB to 370 to 371 MB of RSS in two runs.
-- The budget does not tell users apart. A body that grows by at least 128 KiB every 5 seconds, 25.6 KiB/s, is never dropped as stalled, so about 10 such bodies, 2.1 Mbit/s in all, can hold the budget. Each is charged for its buffer, which runs up to 1 MiB ahead of what it has sent, so they hold it once they pass about 3 MiB each. In two five-minute tests where one key kept 10 bodies growing at 26 KiB/s, 8 and 11 of another user's 15 uploads of 6.7 MiB got 503, and 19 and 12 of its 60 uploads of 1 MiB did. On a server with open registration or OAuth sign-ins, cap the connections of one client address in a proxy, such as with nginx's `limit_conn`, which bounds how many bodies one client keeps growing.
-- A `maxBodyBytesInFlight` under about 6.7 MiB lowers the largest body accepted to the budget plus 64 KiB, and a larger body gets 413. A budget of 0 answers 413 to any body over 64 KiB.
-- On Workers, one isolate has 128 MB. In workerd, three concurrent 5 MB uploads peaked at 56 to 80 MB of isolate memory, four at 111 to 141 MB, and five at 58 to 141 MB, against 86 to 92, 119 to 132 and 202 to 204 MB on the previous release. Those peaks come from 3 to 5 samples per run, so the true peaks may be higher, and they were measured before the budget charged each body's buffer and grew it 1 MiB at a time. Keep large uploads to about three at a time per isolate.
+- On a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, the address itself, the host of `REDMINE_MCP_PUBLIC_URL`, or a hostname that `--allow-host` lists. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it. On any other address, such as `0.0.0.0` in a container, the server cannot know every name its clients use, so it checks `Host` only when `--allow-host` is given.
+- A request with an `Origin` header gets 403 unless `--allow-origin` lists it. Browsers send `Origin`. Command-line and desktop clients do not, so they pass. See [Browser clients and CORS](#browser-clients-and-cors).
+- Before Redmine accepts a key, the server reads at most 64 KiB of the body and waits at most a second for it. Past either, it checks the key with one `GET /users/current.json` and reads nothing more until Redmine answers. A key Redmine refuses gets 401. When Redmine does not answer the check within 8 seconds, or answers with an error other than 401, the request gets 503, even a `tools/list`. `initialize`, `tools/list` and most tool calls are smaller and arrive at once, so they cost no extra call.
+- A key that Redmine accepts, or a valid OAuth token, may send a body of up to about 6.7 MiB, enough for a 5 MiB `attachments_upload` in base64.
+- Bodies that are still arriving share a budget of 32 MiB, which the `maxBodyBytesInFlight` option of `createRedmineMcpHandler` changes. The default lets four bodies at the limit arrive at once. A body that needs room takes it from bodies that have not grown by 128 KiB in the last 5 seconds, and those get 408. When every other body is still growing, the request gets 503 with `Retry-After: 5`.
+- Every body must arrive within 300 seconds of when the server begins reading it, or it gets 408. The `bodyTimeoutMs` option changes the time. A 6.7 MiB upload must arrive at about 23 KiB/s or faster.
+- The budget does not tell users apart, and it does not cover the first 64 KiB of each body or the connections themselves. On a server with open registration or OAuth sign-ins, cap the connections of one client address in a proxy, such as with nginx's `limit_conn`.
+- On Cloudflare Workers, one isolate has 128 MB. Keep large uploads to about three at a time per isolate.
 - A client whose JSON encoder escapes `/`, as PHP's `json_encode` does by default, makes a 5 MB base64 upload about 109 KB longer, which goes over the limit and gets 413. Send such files a little smaller, or turn the escaping off.
 - The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so for remote use put a proxy that terminates TLS in front of the server and keep the server on loopback. Caddy passes the client's `Host` to the server unless told otherwise. Rewrite it as below, or keep it and start the server with `--allow-host mcp.example.com`:
 
@@ -128,6 +257,8 @@ mcp.example.com {
 	}
 }
 ```
+
+[HTTP server limits and the measurements behind them](https://github.com/moddi3/redmine-ts/blob/main/packages/mcp/docs/limits.md) explains each limit and what it costs: memory under stalled uploads, the connection after a refusal, and the peaks measured on Workers.
 
 ### Browser clients and CORS
 
@@ -237,10 +368,9 @@ With or without the flag, the server bounds those fetches:
 - Sign-ins of the same client while its document is being fetched share that fetch.
 - One process, or one Worker isolate, fetches at most 8 documents at once. Beyond that, a sign-in that needs a fetch gets a 503 page with `Retry-After: 5` that asks the person to reload in a moment. Nothing about the client is remembered from that refusal. A fetch that has not settled after 6 seconds, as when Workers cancel the request that started it, no longer counts, and the sign-ins waiting on it get the same 503 page.
 - A registered client, or one whose document is kept, signs in without a fetch, so the cap never touches it. While all 8 fetches are taken, or once a fetch has not settled after 6 seconds, a document fetched within the last hour, and among the last 256 fetched, still serves its client instead of the 503 page.
-
 - The server fetches a key set only at the token endpoint, for a code or refresh token it sealed for a client whose document declared `private_key_jwt`. A key set that passes the checks is kept for 5 minutes, and a fetch that fails is not kept. An assertion whose `kid` the kept set lacks fetches the set again, at most once a minute, so random `kid`s cannot make the server fetch more. One process fetches at most 4 key sets at once, apart from the 8 documents. Beyond that, the token request gets 503 `temporarily_unavailable` with `Retry-After: 5`.
 
-A caller can still keep the 8 fetches busy. A client the server has not fetched within the hour then gets the 503 page until they stop. Meanwhile a redirect URI that a client removed from its document can still start a sign-in for up to an hour after the server last fetched that document, instead of 5 minutes. Section 8.4 of the draft asks servers to consider such changes. With `--allow-client`, the fetches go only to the hosts you listed, so a caller cannot hold each one for 5 seconds with a slow server of their own. That holds while the runtime finishes the fetch of a request whose client disconnects. Cloudflare's documentation says Workers may cancel that work instead. If they do, a caller who opens the sign-in page and disconnects holds a slot for 6 seconds even with the flag. Repeating that about every 6 seconds for a known client keeps its kept document from being refreshed, so its sign-ins wait up to 6 seconds and get that document until it is an hour old, then the 503 page. To limit how often one address can open the sign-in page, rate-limit `GET` on the authorize path, `/mcp/oauth/authorize` for `https://mcp.example.com/mcp`, at the proxy.
+A caller can still keep the 8 document fetches busy, and a client the server has not fetched within the hour then gets the 503 page until they stop. With `--allow-client`, the fetches go only to the hosts you listed. To limit how often one address can open the sign-in page, rate-limit `GET` on the authorize path, `/mcp/oauth/authorize` for `https://mcp.example.com/mcp`, at the proxy. [HTTP server limits](https://github.com/moddi3/redmine-ts/blob/main/packages/mcp/docs/limits.md#metadata-document-and-key-set-fetches) covers the rest, such as Workers that cancel a fetch when its client disconnects.
 
 The server speaks plain HTTP, so put it behind a proxy that terminates TLS, as in [Same-origin deployment](#same-origin-deployment). On a loopback address it accepts the public URL's host in `Host` as well as `localhost`, so a proxy may pass the client's `Host` through.
 
@@ -248,13 +378,13 @@ The server speaks plain HTTP, so put it behind a proxy that terminates TLS, as i
 
 Give the client the public URL. Every client below finds the rest from the server's 401.
 
-| Client                                      | How it identifies itself                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| claude.ai, Claude Desktop and mobile        | Its metadata document at `claude.ai`, with redirect URI `https://claude.ai/api/mcp/auth_callback`.                                                                                                                                                                                                                                                                                                        |
-| ChatGPT                                     | Its metadata document at `chatgpt.com`, which declares `private_key_jwt` with the key set at `https://chatgpt.com/oauth/jwks.json`. See [Clients with keys](#clients-with-keys). On 2026-10-26, with `client_id_metadata_document_supported` removed from the server's metadata, ChatGPT used Dynamic Client Registration instead and completed a sign-in. The server returns `iss`, which ChatGPT needs. |
-| Claude Code, Codex                          | Their metadata documents, with a loopback redirect URI on a random port, which the server allows.                                                                                                                                                                                                                                                                                                         |
-| VS Code                                     | Its metadata document at `vscode.dev`.                                                                                                                                                                                                                                                                                                                                                                    |
-| Cursor and other clients without a document | Dynamic Client Registration. The client ID the server returns is the registration, sealed.                                                                                                                                                                                                                                                                                                                |
+| Client                                      | How it identifies itself                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| claude.ai, Claude Desktop and mobile        | Its metadata document, `https://claude.ai/oauth/mcp-oauth-client-metadata`, with redirect URI `https://claude.ai/api/mcp/auth_callback`. It signs in as a public client with PKCE. Tested on 2026-10-26: sign-in, tool calls, and a refresh.                                                                                                                                                                           |
+| ChatGPT                                     | Its metadata document, `https://chatgpt.com/oauth/client.json`, which declares `private_key_jwt` with the key set at `https://chatgpt.com/oauth/jwks.json`, so each token request carries a signed JWT. See [Clients with keys](#clients-with-keys). Tested on 2026-10-26: sign-in, tool calls, and a refresh. Its JWT uses RS256 and sets `aud` to the token endpoint. The server returns `iss`, which ChatGPT needs. |
+| Claude Code, Codex                          | Their metadata documents, with a loopback redirect URI on a random port, which the server allows.                                                                                                                                                                                                                                                                                                                      |
+| VS Code                                     | Its metadata document at `vscode.dev`.                                                                                                                                                                                                                                                                                                                                                                                 |
+| Cursor and other clients without a document | Dynamic Client Registration. The client ID the server returns is the registration, sealed.                                                                                                                                                                                                                                                                                                                             |
 
 Clients that can send headers, such as Claude Code, Codex, Cursor, and VS Code, may keep using `X-Redmine-API-Key` instead. A request with both uses the key. A token goes in `Authorization: Bearer <token>`, alone.
 
@@ -486,108 +616,6 @@ The server reads its settings once at startup. A missing or invalid value stops 
 | `--help`                            | Prints the settings and exits.                                                                                                                     |
 
 `--port`, `--host`, `--allow-origin`, `--allow-host`, `--api-key-login` and `--allow-client` need `--http`. `--allow-origin`, `--allow-host` and `--allow-client` match each name exactly, so a value with `*` stops the server at startup. Their options in [`createRedmineMcpHandler`](#embed-the-server), `allowedOrigins`, `allowedHosts` and `oauth.allowedClientHosts`, throw a `TypeError` for an entry with `*` when the handler is created.
-
-## Access modes
-
-The access mode decides which tools the server lists and which requests the SDK sends. When you give more than one setting, for example `REDMINE_MCP_ACCESS=no-delete` and `--read-only`, the strictest one wins.
-
-| Mode        | Lists                                                    | Sends                          |
-| ----------- | -------------------------------------------------------- | ------------------------------ |
-| `full`      | All 92 tools.                                            | Every method.                  |
-| `no-delete` | 76 tools. The `DELETE` tools are gone.                   | `GET`, `POST`, `PUT`, `PATCH`. |
-| `read-only` | 43 tools: the reads, and `raw_request` limited to `GET`. | `GET` only.                    |
-
-With `REDMINE_MCP_FILES_DIR` set, each mode lists one more tool, `attachments_save`.
-
-A client can still call a tool the mode hides, for example from a tool list it cached earlier. The server then answers with an error that names the mode, and the SDK sends nothing to Redmine.
-
-The mode limits what the server does. It does not limit the API key. A key that belongs to an admin can still do everything outside this server, so give the server a key of a user whose Redmine role allows only what the agent needs.
-
-## Version handling
-
-Redmine does not report its version over the API, so you declare it with `REDMINE_VERSION`. With a declared version, the server hides tools the version lacks. On `6.1` that is `groups_remove_users`, which Redmine added in 7.0, so a 6.1 server lists 91 tools in `full` mode. A call to a hidden tool returns an error that names the version the tool needs.
-
-Without `REDMINE_VERSION`, the server lists every tool. A tool newer than your server then fails with a 404, and the error says that the server may be older than the operation.
-
-## Workflow tools
-
-Six hand-written tools cover what an agent does most, in fewer calls than the generated tools need. They are listed first, and they share the generated tools' validation, error results, and the warning on user-written text.
-
-| Tool                   | Kind  | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `issue_context`        | read  | One issue with everything needed to work on it: the full description, the statuses it can move to, relations read from this issue (`{relation: "blocked by", issue_id: 12}`), subtasks with their status, attachment metadata, watchers, and the newest journals as readable changes.                                                                                                                                                            |
-| `reference_data`       | read  | Statuses, trackers, priorities, time entry activities, the current user, and custom field definitions for an admin key. With `project_id`, also the project's trackers, categories, versions, members with roles, issue custom fields, and modules.                                                                                                                                                                                              |
-| `issues_transition`    | write | Changes the status by id or by name, checked against the workflow first. A refusal lists the allowed statuses by id and name.                                                                                                                                                                                                                                                                                                                    |
-| `attachments_upload`   | write | Uploads a file from `content_text`, `content_base64`, or, with a files directory, `path`, and returns the reference to pass in `uploads` of `issues_create`, `issues_update`, `news_create`, `news_update`, or `wiki_update`. At most 5 MB, Redmine's default limit. Over HTTP, a `content_text` near 5 MB can exceed the request limit once JSON escapes its line breaks, quotes, and control characters. Send such a file as `content_base64`. |
-| `attachments_download` | read  | Returns an image up to 1 MB as image content, a text file up to 100 KB as text, or a thumbnail. Any other file returns its metadata and a note.                                                                                                                                                                                                                                                                                                  |
-| `raw_request`          | read  | Sends one request to any REST path, for plugin endpoints and fields the typed tools miss. Listed in every mode; the access mode decides which methods it sends, and its hints and description say so.                                                                                                                                                                                                                                            |
-
-`issue_context` turns each journal detail into `{field, from, to}` with names, such as `{"field": "Status", "from": "New", "to": "In Progress"}`. It names statuses, trackers, and priorities from lists cached for 5 minutes, and assignees, categories, versions, and projects from the issue's project, fetched only when a journal needs them. A lookup the key may not read leaves the raw id. Descriptions and notes longer than 4000 characters are cut with a marker that says to call `issues_get` for the full text, and the result says how many older journals it left out.
-
-### Files
-
-To attach a file, call `attachments_upload`, then pass the reference in `uploads` of the create or update tool. The generated tools take references in `uploads`, never file content, so their schemas stay small and each file travels in its own request. Over `--http`, one request body is at most 4 MiB. Redmine keeps an upload that no record takes until an admin prunes it, so upload only what you attach.
-
-`REDMINE_MCP_FILES_DIR` names the one local directory the server may use. With it, `attachments_upload` accepts `path`, a file in that directory, and `attachments_save` is listed: it saves an attachment there under a name that never replaces an existing file, such as `build (1).log`, and returns the absolute path.
-
-A path must resolve inside the directory after symlinks are followed, so `../secret` and a symlink that points outside are refused before anything is read or sent. `attachments_save` only reads from Redmine, so `read-only` mode lists it too, but it writes the local file, so its `readOnlyHint` is `false`.
-
-### The issue resource
-
-The server offers the resource template `redmine://issues/{id}`. Reading `redmine://issues/123` returns issue 123 as Markdown, built from the same data as `issue_context`, with the warning about user-written text on the first line and user-written text quoted. An unknown URI or a missing issue is an MCP error.
-
-## Generated tools
-
-Each tool is named `<resource>_<verb>` in snake case, after the SDK method it calls. `rm.issues.list` becomes `issues_list`, `rm.timeEntries.create` becomes `time_entries_create`, and `rm.issues.addWatcher` becomes `issues_add_watcher`. The list is in the SDK's catalog order, so it is the same on every start.
-
-Every tool has a `title` and all four hints, set from its HTTP method:
-
-| Method           | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
-| ---------------- | -------------- | ----------------- | ---------------- | --------------- |
-| `GET`            | `true`         | `false`           | `true`           | `false`         |
-| `POST`           | `false`        | `false`           | `false`          | `false`         |
-| `PUT` or `PATCH` | `false`        | `true`            | `true`           | `false`         |
-| `DELETE`         | `false`        | `true`            | `true`           | `false`         |
-
-An update counts as destructive because it overwrites data that exists. `openWorldHint` is `false` because the tools reach only your Redmine instance.
-
-Inputs take ids, not names. `reference_data` maps the common names to ids in one call. A tool's description also names the list tool for each id it takes.
-
-### Filters
-
-List tools filter with `where`, keyed by Redmine's filter names, such as `status_id`, `assigned_to_id`, or `cf_12`. A value or an array of values means equals:
-
-```json
-{ "where": { "status_id": "open", "assigned_to_id": "me", "tracker_id": [1, 2] } }
-```
-
-An object with one operator picks another comparison: `{ "not": 3 }`, `{ "gte": "2026-10-01" }`, `{ "lte": 5 }`, `{ "between": [1, 10] }`, `{ "contains": "crash" }`, `{ "any": true }`, or `{ "none": true }`. Each filter accepts only the operators Redmine documents for it, and its description in the input schema lists them. `{ "raw": "<t-30" }` sends Redmine's own syntax unchanged, for relative dates and other rare cases. An unknown filter or an operator the filter does not take is refused before any request, with the forms the filter accepts.
-
-### Pages
-
-A list tool returns one page:
-
-```json
-{ "items": [], "total_count": 312, "offset": 0, "limit": 25, "next_offset": 25 }
-```
-
-`limit` is 25 by default and at most 100. To read the next page, call the tool again with `offset` set to `next_offset`. `next_offset` is `null` on the last page. Lists that Redmine returns whole, such as `issue_statuses_list`, are paged the same way.
-
-Items in a page leave out the long fields `description`, `notes`, `text`, `comments`, `journals`, and `changesets`. Pass `detailed: true` to keep them, or call the `get` tool for one record.
-
-### Results
-
-A tool that returns a record, such as `issues_get` or `issues_create`, returns the record as Redmine sends it. A tool with nothing to return, such as `issues_update` or `issues_delete`, returns `{ "ok": true }`.
-
-Every result carries the object twice: as `structuredContent`, and as compact JSON in a text block. The tool's `outputSchema` describes it, and the server checks each result against that schema before it answers. `attachments_download` adds the image as an image block after the JSON.
-
-### Errors
-
-A failed Redmine request comes back as a tool result with `isError: true`, never as a protocol error. Over OAuth, a sign-in that Redmine refuses gets HTTP 401 instead, and a call beyond the token's scope gets HTTP 403. Three cases keep the error result, as [What holds either way](#what-holds-either-way) describes: a call that the server's own mode refuses, a request in which Redmine may have applied a write, and a Redmine 401 on a path outside its REST formats (`.json` and `.xml`). The first text block says what went wrong and what to do. The last text block is the SDK's error as JSON, with a `kind` such as `validation`, `not_found`, `conflict`, `access_denied`, or `unsupported_version`.
-
-- A 422 carries Redmine's own messages, such as `Subject cannot be blank`, in the user's language.
-- A 404 says to check the ids.
-- Input that does not match the schema is refused before any request. For a bad filter, the message lists the forms the filter accepts.
 
 ## Safety
 

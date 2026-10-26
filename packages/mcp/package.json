@@ -1,10 +1,13 @@
 {
   "name": "@redmine-ts/mcp",
   "version": "0.3.2",
-  "description": "MCP server for the Redmine REST API, with one typed tool per operation",
+  "description": "MCP server that lets ChatGPT, Claude, and coding agents work in Redmine, with typed tools and sign-in through Redmine's own OAuth",
   "keywords": [
+    "chatgpt",
+    "claude",
     "mcp",
     "model-context-protocol",
+    "oauth",
     "redmine"
   ],
   "homepage": "https://github.com/moddi3/redmine-ts/tree/main/packages/mcp#readme",
