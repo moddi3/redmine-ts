@@ -1,16 +1,17 @@
 # redmine-ts
 
 [![CI](https://github.com/moddi3/redmine-ts/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moddi3/redmine-ts/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@redmine-ts/sdk)](https://www.npmjs.com/package/@redmine-ts/sdk)
+[![sdk on npm](https://img.shields.io/npm/v/@redmine-ts/sdk?label=%40redmine-ts%2Fsdk)](https://www.npmjs.com/package/@redmine-ts/sdk)
+[![mcp on npm](https://img.shields.io/npm/v/@redmine-ts/mcp?label=%40redmine-ts%2Fmcp)](https://www.npmjs.com/package/@redmine-ts/mcp)
 
-TypeScript tooling for the Redmine REST API.
+A typed TypeScript client for Redmine, and an MCP server that lets ChatGPT, Claude, and your coding agents work in Redmine as you.
 
-| Package                           | Path           | What it is                                                                                          |
-| --------------------------------- | -------------- | --------------------------------------------------------------------------------------------------- |
-| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | Typed, zero-dependency Redmine client for Node and Bun, and for browsers through a proxy.           |
-| [`@redmine-ts/mcp`](packages/mcp) | `packages/mcp` | MCP server with one typed tool per SDK operation and workflow tools, over stdio or Streamable HTTP. |
+| Package                           | Path           | What it is                                                                                                                                               |
+| --------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | A typed, zero-dependency client for the Redmine REST API, for Redmine 6.1 and 7.0. It runs on Node 22 or later and Bun, and in browsers through a proxy. |
+| [`@redmine-ts/mcp`](packages/mcp) | `packages/mcp` | An MCP server with 92 tools over stdio or Streamable HTTP. claude.ai and ChatGPT sign people in through Redmine's own OAuth.                             |
 
-The MCP server builds its tools from the SDK's `@redmine-ts/sdk/catalog` entrypoint, which describes each method's input and output as JSON Schema, with its `since` version and its HTTP method. An agent toolkit with a small set of triage tools is planned on the same base.
+The MCP server builds its tools from the SDK's `@redmine-ts/sdk/catalog` entrypoint, which describes each method's input and output as JSON Schema, with its `since` version and its HTTP method. CI runs the contract tests of both packages against real Redmine 6.1 and 7.0 servers in Docker, as [Run real Redmine servers](#run-real-redmine-servers) describes.
 
 ## Built on redmine-openapi
 
@@ -82,7 +83,7 @@ Dropping a version that reached end of life is a major release.
 ## Release and plan
 
 - [docs/releasing.md](docs/releasing.md) explains how a change gets a changeset, how the Version Packages pull request and the npm publish work, and what CI and the weekly workflow check.
-- [docs/roadmap.md](docs/roadmap.md) lists the work that is deferred, such as the MCP server package, and marks what comes next.
+- [docs/roadmap.md](docs/roadmap.md) lists planned work, such as Redmine 7.1 support and smaller MCP tool schemas, and marks what comes next.
 
 ## Where the design lives
 
