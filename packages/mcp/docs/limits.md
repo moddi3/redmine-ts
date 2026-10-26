@@ -26,7 +26,7 @@ A `maxBodyBytesInFlight` under about 6.7 MiB lowers the largest body accepted to
 
 ### What the budget saved
 
-In a test with 60 uploads stopped at 95% of the limit, a Node server on the release before the budget held 794 MB of live heap (V8's heap and external memory after a full collection) and had answered none of them 310 seconds later. With the budget, four of them filled it and the other 56 got 503 within 2 seconds. Live heap stayed at most 29 MB above idle until the four bodies still stalled got 408 at 300 seconds, and then went back to idle. A 1 MiB upload from another user fit beside them and succeeded. On Bun the earlier release held 778 MB, and the budget 29 MB above idle. In a second test, a 6.7 MiB upload sent at 128 KiB/s while four stalled bodies filled the budget dropped one of them once it passed 5 MiB, and succeeded after 55 seconds.
+In a test with 60 uploads stopped at 95% of the limit, a Node server on the release before the budget held 794 MB of live heap (V8's heap and external memory after a full collection) and had answered none of them 310 seconds later. With the budget, four of them filled it and the other 56 got 503 within 2 seconds. Live heap stayed at most 29 MB above idle until the four bodies still stalled got 408 at 300 seconds, and then went back to idle. A 1 MiB upload from another user fit beside them and succeeded. On Bun the release before the budget held 778 MB, and the budget 29 MB above idle. In a second test, a 6.7 MiB upload sent at 128 KiB/s while four stalled bodies filled the budget dropped one of them once it passed 5 MiB, and succeeded after 55 seconds.
 
 ### What the budget does not cover
 
@@ -61,7 +61,7 @@ One isolate has 128 MB. In workerd, three concurrent 5 MB uploads peaked at 56 t
 
 ## Metadata document and key set fetches
 
-With OAuth on, a sign-in can make the server fetch a Client ID Metadata Document, and a token request of a client with keys can make it fetch a key set. The [OAuth section](../README.md#run-the-server) of the README lists the bounds: public addresses only, no redirects, 5 seconds, 5 KB for a document and 16 KiB for a key set, 8 document fetches and 4 key set fetches at once per process or isolate.
+With OAuth on, a sign-in can make the server fetch a Client ID Metadata Document, and a token request of a client with keys can make it fetch a key set. The [OAuth section](../README.md#run-the-server) of the README lists the bounds. A fetch goes only to a public address, follows no redirect, and stops after 5 seconds, or after 5 KB for a document and 16 KiB for a key set. One process or isolate runs at most 8 document fetches and 4 key set fetches at once.
 
 A caller can still keep the 8 document fetches busy. A client the server has not fetched within the hour then gets the 503 page until they stop. Meanwhile a redirect URI that a client removed from its document can still start a sign-in for up to an hour after the server last fetched that document, instead of 5 minutes. Section 8.4 of the draft asks servers to consider such changes.
 

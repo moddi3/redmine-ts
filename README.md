@@ -6,10 +6,10 @@
 
 A typed TypeScript client for Redmine, and an MCP server that lets ChatGPT, Claude, and your coding agents work in Redmine as you.
 
-| Package                           | Path           | What it is                                                                                                                                               |
-| --------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | A typed, zero-dependency client for the Redmine REST API, for Redmine 6.1 and 7.0. It runs on Node 22 or later and Bun, and in browsers through a proxy. |
-| [`@redmine-ts/mcp`](packages/mcp) | `packages/mcp` | An MCP server with 92 tools over stdio or Streamable HTTP. claude.ai and ChatGPT sign people in through Redmine's own OAuth.                             |
+| Package                           | Path           | What it is                                                                                                                                                       |
+| --------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@redmine-ts/sdk`](packages/sdk) | `packages/sdk` | A typed, zero-dependency client for the Redmine REST API, for Redmine 6.1 and 7.0. It runs on Node 22 or later and Bun. Browsers need a proxy, and are untested. |
+| [`@redmine-ts/mcp`](packages/mcp) | `packages/mcp` | An MCP server with 92 tools over stdio or Streamable HTTP. claude.ai and ChatGPT sign people in through Redmine's own OAuth.                                     |
 
 The MCP server builds its tools from the SDK's `@redmine-ts/sdk/catalog` entrypoint, which describes each method's input and output as JSON Schema, with its `since` version and its HTTP method. CI runs the contract tests of both packages against real Redmine 6.1 and 7.0 servers in Docker, as [Run real Redmine servers](#run-real-redmine-servers) describes.
 
