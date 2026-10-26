@@ -6,13 +6,6 @@ Let ChatGPT, Claude, and your coding agents work in Redmine as you.
 
 `@redmine-ts/mcp` is an MCP server with 92 tools for the Redmine REST API, over stdio or Streamable HTTP. Agents on your machine use your API key. claude.ai and ChatGPT sign you in through Redmine's own OAuth, so each call runs with your Redmine permissions and Redmine records each change under your name.
 
-- **Tested with claude.ai and ChatGPT.** On 2026-10-26 both signed in to Redmine 7.0 through this server, ran tool calls, and refreshed their tokens. ChatGPT proves who it is with a signed JWT, which the server checks at the token endpoint.
-- **A typed tool for every SDK operation.** 86 tools come from [`@redmine-ts/sdk`](https://www.npmjs.com/package/@redmine-ts/sdk), each with a JSON Schema for its input and its output, and hints that tell the client whether it reads, writes, or deletes.
-- **Workflow tools for the common jobs.** `issue_context` returns an issue with the statuses it can move to, its relations, and its journals as readable changes, in one call. `issues_transition` changes a status by name and lists the allowed ones when the workflow refuses.
-- **Access modes the SDK enforces.** `--read-only` lists 43 tools and sends only `GET`. `--no-delete` lists 76 and never sends `DELETE`. A hidden tool called anyway gets an error, and Redmine sees nothing.
-- **One server for a team.** With `--http`, each request brings its own API key or OAuth token. The server needs no database, because it seals codes and tokens with one secret.
-- **Node, Bun, and Cloudflare Workers.** `npx` runs the CLI on Node 22 or later. `createRedmineMcpHandler` is the same server as a web-standard request handler. CI runs it on Node and Bun, and it was checked on Workers in workerd.
-
 ## Quick start
 
 Copy your API key from Redmine, under **My account**, **API access key**. Then add the server to Claude Code:
@@ -25,6 +18,15 @@ claude mcp add redmine \
 ```
 
 Then ask Claude what is assigned to you in Redmine. `--no-delete` leaves every tool that deletes out of the list. Leave it out only when the agent needs to delete.
+
+## Why use it
+
+- **Tested with claude.ai and ChatGPT.** On 2026-10-26 both signed in to Redmine 7.0 through this server, ran tool calls, and refreshed their tokens. ChatGPT proves who it is with a signed JWT, which the server checks at the token endpoint.
+- **A typed tool for every SDK operation.** 86 tools come from [`@redmine-ts/sdk`](https://www.npmjs.com/package/@redmine-ts/sdk), each with a JSON Schema for its input and its output, and hints that tell the client whether it reads, writes, or deletes.
+- **Workflow tools for the common jobs.** `issue_context` returns an issue with the statuses it can move to, its relations, and its journals as readable changes, in one call. `issues_transition` changes a status by name and lists the allowed ones when the workflow refuses.
+- **Access modes the SDK enforces.** `--read-only` lists 43 tools and sends only `GET`. `--no-delete` lists 76 and never sends `DELETE`. A hidden tool called anyway gets an error, and Redmine sees nothing.
+- **One server for a team.** With `--http`, each request brings its own API key or OAuth token. The server needs no database, because it seals codes and tokens with one secret.
+- **Node, Bun, and Cloudflare Workers.** `npx` runs the CLI on Node 22 or later. `createRedmineMcpHandler` is the same server as a web-standard request handler. CI runs it on Node and Bun, and it was checked on Workers in workerd.
 
 ## Add the server to a client
 
