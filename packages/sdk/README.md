@@ -1,8 +1,8 @@
 # @redmine-ts/sdk
 
-A typed TypeScript client for the [Redmine](https://www.redmine.org) REST API, for Redmine 6.1 and 7.0. It has no runtime dependencies and talks to the server through the platform `fetch`. Its types and operations are generated from the community [Redmine OpenAPI spec](https://github.com/d-yoshi/redmine-openapi).
+[![npm](https://img.shields.io/npm/v/@redmine-ts/sdk)](https://www.npmjs.com/package/@redmine-ts/sdk)
 
-Use it to script a Redmine instance, sync it with another system, or build tools and agents on top of it. It handles the parts of the Redmine API that hand-rolled clients usually get wrong: base URLs under a subpath, empty `PUT` and `DELETE` responses, localized `422` errors, offsets that drift while paging, two-step uploads, and impersonation.
+A typed TypeScript client for the [Redmine](https://www.redmine.org) REST API, for Redmine 6.1 and 7.0, with no runtime dependencies. Use it to script a Redmine instance, sync it with another system, or build tools and agents on top of it.
 
 ## Install
 
@@ -39,6 +39,18 @@ for await (const open of rm.issues.list({
 ```
 
 `createRedmine` validates the config and sends nothing. The client keeps the `/redmine` subpath of `baseUrl` in every request URL. It sends the API key only in the `X-Redmine-API-Key` header, never in the URL. The other `auth` forms are `{ basic: { login, password } }` and `{ bearer }`, where `bearer` is a token string or an object with `token()` and an optional `refresh()`. After a 401, concurrent requests share one `refresh()` call, and each request is sent once more.
+
+## Why use it
+
+Redmine ignores a filter it does not know, so a typo in a filter name returns the unfiltered list. Redmine also ignores the switch-user header on a key that is not an admin's, and saves the write under the key's own user. This client refuses an unknown filter before any request, and checks that a key is an admin's before it acts as another user. The client also handles the other parts of the API that hand-rolled clients get wrong: base URLs under a subpath, empty `PUT` and `DELETE` responses, localized `422` errors, offsets that drift while paging, and two-step uploads.
+
+- **Mistakes fail to compile.** A filter operator the field does not take is a type error. So are a method newer than the server version you declare and a write on a client you declare read-only. See [Filter lists with `where`](#filter-lists-with-where), [Declare the server version](#declare-the-server-version), and [Restrict the client to reads](#restrict-the-client-to-reads).
+- **A retry never adds anything twice.** The client retries `GET` and `DELETE` after a timeout, a network error, or a 502, 503, or 504. It retries `POST`, `PUT`, and `PATCH` only after a 429, so a `PUT` with `notes` that timed out cannot add its journal entry twice.
+- **Keyset paging for issues.** `paging: "keyset"` walks issues by id, so issues created or deleted during the walk do not shift the pages. Any walk that gets the same page twice stops with an error instead of a loop.
+- **Uploads you can retry.** One call uploads the files in `uploads` and attaches them. When it fails after its checks, `error.uploads` holds the references Redmine already acknowledged, so a retry skips those files.
+- **A catalog for tool layers.** `@redmine-ts/sdk/catalog` describes every method as JSON Schema. [`@redmine-ts/mcp`](https://www.npmjs.com/package/@redmine-ts/mcp) builds its tools from it.
+
+Its types and operations are generated from the community [Redmine OpenAPI spec](https://github.com/d-yoshi/redmine-openapi), and CI runs contract tests against real Redmine 6.1 and 7.0 servers. The client talks to Redmine through the platform `fetch`.
 
 ## Call an operation
 
@@ -471,7 +483,7 @@ To use an HTTP proxy in Node, pass the `fetch` from [undici](https://github.com/
 ## Runtime support
 
 - Node 22 and 24. CI runs the unit tests on both, and runs a smoke test of the built package on Node 24 against real Redmine 6.1 and 7.0 servers.
-- Bun. CI runs the same smoke test under the latest Bun release.
+- Bun. CI runs the same smoke test under Bun 1.4.4, the version it pins.
 - Browsers through an injected `fetch`, untested. Redmine sends no CORS headers, and an API key in a browser is readable by anyone who opens the developer tools. Pass a `fetch` that sends each request to a proxy on your origin, and let the proxy add the key on the server.
 - Deno is not a target, and CI does not run on it.
 - The package is ESM only, so load it with `import`, not `require`. It has no `node:` imports and no dependencies. The client uses only web platform APIs, such as `fetch`, `URL`, `AbortSignal.any`, and web streams.
@@ -542,7 +554,7 @@ Some Redmine endpoints have no method because another method does the same job. 
 
 ## Acknowledgements
 
-The types and operations in this package are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi), an unofficial OpenAPI 3.0.3 description of the Redmine REST API released under the MIT license. This release uses its tags `6.1.3-r1` and `7.0.1-r1`.
+The types and operations in this package are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi), an unofficial OpenAPI 3.0.3 description of the Redmine REST API released under the MIT license. This release uses its tags `6.1.3-r1` and `7.0.2-r1`.
 
 If a field or operation looks wrong, the cause is most likely in the spec. Please report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues), and open an issue at [moddi3/redmine-ts/issues](https://github.com/moddi3/redmine-ts/issues) so the SDK picks up the fix.
 
