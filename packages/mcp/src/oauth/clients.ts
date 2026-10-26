@@ -1,7 +1,10 @@
 // Who may ask for a token. A client is a Client ID Metadata Document, an https URL the server fetches,
 // or a registration the server sealed into the client_id itself, so no client is ever stored.
 
+import type { JSONWebKeySet } from "jose";
 import { z } from "zod";
+import { isSigningAlg, peek, verifyAssertion } from "./assertion.ts";
+import type { SigningAlg, Verified } from "./assertion.ts";
 import type { Sealer } from "./seal.ts";
 import { readText } from "./web.ts";
 
@@ -12,25 +15,49 @@ export interface Client {
   /** The host that serves the client's metadata document. Undefined for a registered client. */
   documentHost: string | undefined;
   redirectUris: readonly string[];
+  authentication: ClientAuthentication;
 }
+
+/**
+ * How a client proves itself at the token endpoint: with PKCE alone, or also with a JWT signed by a
+ * key its metadata document publishes, inline or at a URL, and with the alg the document names.
+ */
+export type ClientAuthentication =
+  | { method: "none" }
+  | {
+      method: "private_key_jwt";
+      keys: { set: JSONWebKeySet } | { uri: string };
+      alg: SigningAlg | undefined;
+    };
+
+/**
+ * Why a client failed to authenticate: refused, for a proof or a document that is wrong, or
+ * unreachable, when its document or key set could not be fetched.
+ */
+export type Unauthenticated = { refused: string } | { unreachable: string };
 
 export interface ClientsOptions {
   sealer: Sealer;
-  /** Fetches metadata documents. It must refuse private addresses where the runtime can tell. */
+  /**
+   * Fetches metadata documents and the key sets they name. It must refuse private addresses where
+   * the runtime can tell.
+   */
   fetch: typeof fetch;
   /** Hostnames a client must belong to. Undefined admits any client. */
   allowedHosts: readonly string[] | undefined;
+  /** What a client assertion's aud may name: the server's issuer and its token endpoint. */
+  audiences: readonly string[];
 }
 
 /** Documents are small; the draft suggests 5 KB as the cap. */
 const DOCUMENT_MAX_BYTES = 5 * 1024;
-const DOCUMENT_TIMEOUT_MS = 5000;
-const DOCUMENT_CACHE_MS = 5 * 60_000;
-const DOCUMENT_CACHE_SIZE = 256;
+const FETCH_TIMEOUT_MS = 5000;
+const CACHE_MS = 5 * 60_000;
+const CACHE_SIZE = 256;
 /**
  * Documents one handler fetches at once, which is one process for the CLI and one isolate on Workers.
- * Each document is fetched about once per DOCUMENT_CACHE_MS, so sign-ins rarely need two at a time.
- * The cap bounds the sockets that unauthenticated authorize requests can make the server open.
+ * Each document is fetched about once per CACHE_MS, so sign-ins rarely need two at a time. The cap
+ * bounds the sockets that unauthenticated authorize requests can make the server open.
  */
 const DOCUMENT_FETCHES = 8;
 /**
@@ -38,7 +65,7 @@ const DOCUMENT_FETCHES = 8;
  * cancel the work of a request whose client disconnects. Its slot is then free after this long, and
  * requests that share it stop waiting.
  */
-const FLIGHT_MS = DOCUMENT_TIMEOUT_MS + 1000;
+const FLIGHT_MS = FETCH_TIMEOUT_MS + 1000;
 /**
  * While every slot is taken, a document fetched within this time still serves its client, so a flood
  * of unknown client_ids cannot lock out a client the server has seen.
@@ -47,13 +74,24 @@ const DOCUMENT_STALE_MS = 60 * 60_000;
 const UNFETCHED = "its metadata document could not be fetched";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+/** ChatGPT's key set, one RSA key, is 438 bytes. */
+const KEY_SET_MAX_BYTES = 16 * 1024;
+/**
+ * Key sets one handler fetches at once. Only a grant sealed for a client that declared
+ * private_key_jwt makes the server fetch one, at the token endpoint, so a few slots of their own
+ * keep a flood of sign-ins from delaying them.
+ */
+const KEY_SET_FETCHES = 4;
+/** A kid the kept key set lacks fetches it again once it is this old, so random kids cannot. */
+const KEY_SET_REFETCH_MS = 60_000;
+
 /**
  * What resolve answers when the client needs a fetch that cannot answer in time, because every slot is
  * taken or its own fetch did not settle, and no document fetched within DOCUMENT_STALE_MS can serve it.
  */
 export const BUSY: unique symbol = Symbol("busy");
 /** Most slots free within one fetch timeout. */
-export const BUSY_RETRY_SECONDS: number = DOCUMENT_TIMEOUT_MS / 1000;
+export const BUSY_RETRY_SECONDS: number = FETCH_TIMEOUT_MS / 1000;
 
 /** Names are shown on the consent page and sealed into registrations, so they stay short. */
 const NAME_MAX_LENGTH = 100;
@@ -66,9 +104,19 @@ const Document = z.object({
   client_name: z.string().trim().min(1).max(NAME_MAX_LENGTH).optional().catch(undefined),
   redirect_uris: z.array(z.string()).min(1).max(20),
   token_endpoint_auth_method: z.string().optional(),
+  // Read only for private_key_jwt, so a public client's document is checked as before.
+  token_endpoint_auth_signing_alg: z.unknown().optional(),
+  jwks: z.unknown().optional(),
+  jwks_uri: z.unknown().optional(),
   client_secret: z
     .undefined({ error: "a metadata document must not carry a client_secret" })
     .optional(),
+});
+
+const KeySet = z.object({
+  keys: z.array(
+    z.looseObject({ kty: z.string(), kid: z.string().optional(), use: z.string().optional() }),
+  ),
 });
 
 const Registration = z.object({
@@ -90,38 +138,52 @@ export type Registered =
 export interface Clients {
   /** The client a client_id names, why it is refused, or BUSY to try again in a moment. */
   resolve(clientId: string): Promise<Client | string | typeof BUSY>;
+  /**
+   * Checks the client_assertion of a client whose grant was sealed for private_key_jwt, against the
+   * keys its current document gives, or BUSY to try again in a moment.
+   */
+  authenticate(
+    clientId: string,
+    assertion: string,
+  ): Promise<Verified | Unauthenticated | typeof BUSY>;
   /** Dynamic Client Registration (RFC 7591) for clients without a metadata document. */
   register(metadata: unknown): Promise<Registered>;
 }
 
-export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): Clients {
+export function createClients({ sealer, fetch, allowedHosts, audiences }: ClientsOptions): Clients {
   const documents = new Map<string, { client: Client; fetched: number }>();
-  /** Fetches under way by client_id. Concurrent resolves of one client_id share its fetch. */
-  const flights = new Map<string, { outcome: Promise<Client | string>; until: number }>();
+  const documentFlights = createFlights<Client | string>(DOCUMENT_FETCHES);
+  const keySets = new Map<string, { set: JSONWebKeySet; fetched: number }>();
+  const keySetFlights = createFlights<JSONWebKeySet | Unauthenticated>(KEY_SET_FETCHES);
   const admitted = (host: string) => allowedHosts === undefined || allowedHosts.includes(host);
+
+  async function resolve(clientId: string): Promise<Client | string | typeof BUSY> {
+    if (clientId.startsWith("https://")) return fetchDocument(clientId);
+    const sealed = await sealer.open<Sealed>("registration", clientId);
+    if (sealed === undefined) return "it is not a client this server registered or can fetch";
+    if (!sealed.r.every((uri) => admitted(new URL(uri).hostname))) {
+      return "its redirect URIs are not on allowed client hosts";
+    }
+    return {
+      id: clientId,
+      name: sealed.n,
+      documentHost: undefined,
+      redirectUris: sealed.r,
+      authentication: PUBLIC,
+    };
+  }
 
   async function fetchDocument(clientId: string): Promise<Client | string | typeof BUSY> {
     const url = documentUrl(clientId);
     if (typeof url === "string") return url;
     if (!admitted(url.hostname)) return `${url.hostname} is not an allowed client host`;
-    const now = Date.now();
     const cached = documents.get(clientId);
-    if (cached !== undefined && cached.fetched + DOCUMENT_CACHE_MS > now) return cached.client;
-    for (const [id, flight] of flights) if (flight.until <= now) flights.delete(id);
-    let flight = flights.get(clientId);
-    if (flight === undefined) {
-      if (flights.size >= DOCUMENT_FETCHES) return recent(clientId);
-      // A flight past its time may have been dropped and replaced by a newer one, which stays.
-      const current = () => flights.get(clientId) === started;
-      const started = { outcome: load(clientId, url, current), until: now + FLIGHT_MS };
-      const land = () => {
-        if (current()) flights.delete(clientId);
-      };
-      started.outcome.then(land, land);
-      flights.set(clientId, started);
-      flight = started;
-    }
-    return settled(flight.outcome, flight.until - now, () => recent(clientId));
+    if (cached !== undefined && cached.fetched + CACHE_MS > Date.now()) return cached.client;
+    return documentFlights(
+      clientId,
+      (current) => load(clientId, url, current),
+      () => recent(clientId),
+    );
   }
 
   /** The document fetched within DOCUMENT_STALE_MS, for when no fetch can answer now, or BUSY. */
@@ -146,46 +208,56 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
     if (typeof outcome === "string") {
       documents.delete(clientId);
     } else {
-      remember(documents, clientId, { client: outcome, fetched: Date.now() }, DOCUMENT_CACHE_SIZE);
+      remember(documents, clientId, { client: outcome, fetched: Date.now() }, CACHE_SIZE);
     }
     return outcome;
   }
 
-  async function fetchAndCheck(clientId: string, url: URL): Promise<Client | string> {
+  /**
+   * GETs a URL a client named: without following redirects, within the timeout, and at most
+   * `maxBytes` of it. The status is not repeated: it would tell the caller what answers there.
+   */
+  async function download(
+    url: URL,
+    maxBytes: number,
+  ): Promise<{ text: string } | "unfetched" | "oversize"> {
     let response: Response;
     try {
       response = await fetch(url, {
         headers: { accept: "application/json" },
         redirect: "manual",
-        signal: AbortSignal.timeout(DOCUMENT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
     } catch {
-      return UNFETCHED;
+      return "unfetched";
     }
-    // The status is not repeated: it would tell the caller what answers where the URL points.
     if (response.status !== 200) {
       await response.body?.cancel();
-      return UNFETCHED;
+      return "unfetched";
     }
     let text: string | undefined;
     try {
-      text = await readText(response, DOCUMENT_MAX_BYTES);
+      text = await readText(response, maxBytes);
     } catch {
       // The timeout also ends a body that stalls after the headers.
-      return UNFETCHED;
+      return "unfetched";
     }
-    if (text === undefined) return `its metadata document is over ${DOCUMENT_MAX_BYTES} bytes`;
+    return text === undefined ? "oversize" : { text };
+  }
+
+  async function fetchAndCheck(clientId: string, url: URL): Promise<Client | string> {
+    const body = await download(url, DOCUMENT_MAX_BYTES);
+    if (body === "unfetched") return UNFETCHED;
+    if (body === "oversize") return `its metadata document is over ${DOCUMENT_MAX_BYTES} bytes`;
     let parsed: z.infer<typeof Document>;
     try {
-      parsed = Document.parse(JSON.parse(text));
+      parsed = Document.parse(JSON.parse(body.text));
     } catch {
       return "its metadata document is not valid client metadata";
     }
     if (parsed.client_id !== clientId) return "its metadata document names another client_id";
-    // Only public clients: a client that declares another method expects us to authenticate it.
-    if (!publicClient(parsed.token_endpoint_auth_method)) {
-      return "its metadata document asks for client authentication, and this server has public clients only";
-    }
+    const authentication = authenticationOf(parsed);
+    if (typeof authentication === "string") return authentication;
     if (!parsed.redirect_uris.every(isRedirectUri)) {
       return "its metadata document lists a redirect URI that is not https or loopback";
     }
@@ -194,18 +266,74 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
       name: parsed.client_name,
       documentHost: url.hostname,
       redirectUris: parsed.redirect_uris,
+      authentication,
     };
   }
 
+  /**
+   * The key set at `uri`, kept for CACHE_MS. A `kid` it lacks fetches it again, at most once per
+   * KEY_SET_REFETCH_MS, so a rotated key works within a minute. A failed fetch is not kept, and the
+   * set fetched before stays until its time is up.
+   */
+  async function keySet(
+    uri: string,
+    kid: unknown,
+  ): Promise<JSONWebKeySet | Unauthenticated | typeof BUSY> {
+    const kept = keySets.get(uri);
+    const age = kept === undefined ? Infinity : Date.now() - kept.fetched;
+    const known = kid === undefined || kept?.set.keys.some((key) => key.kid === kid);
+    if (kept !== undefined && age < CACHE_MS && (known || age < KEY_SET_REFETCH_MS)) {
+      return kept.set;
+    }
+    return keySetFlights(
+      uri,
+      async (current) => {
+        const outcome = await fetchKeySet(new URL(uri));
+        if (current() && "keys" in outcome) {
+          remember(keySets, uri, { set: outcome, fetched: Date.now() }, CACHE_SIZE);
+        }
+        return outcome;
+      },
+      () => BUSY,
+    );
+  }
+
+  async function fetchKeySet(url: URL): Promise<JSONWebKeySet | Unauthenticated> {
+    const body = await download(url, KEY_SET_MAX_BYTES);
+    if (body === "unfetched") return { unreachable: "the client's key set could not be fetched" };
+    if (body === "oversize") {
+      return { refused: `the client's key set is over ${KEY_SET_MAX_BYTES} bytes` };
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body.text);
+    } catch {
+      parsed = undefined;
+    }
+    return signingKeys(parsed) ?? { refused: "the client's key set has no signing key" };
+  }
+
   return {
-    async resolve(clientId: string): Promise<Client | string | typeof BUSY> {
-      if (clientId.startsWith("https://")) return fetchDocument(clientId);
-      const sealed = await sealer.open<Sealed>("registration", clientId);
-      if (sealed === undefined) return "it is not a client this server registered or can fetch";
-      if (!sealed.r.every((uri) => admitted(new URL(uri).hostname))) {
-        return "its redirect URIs are not on allowed client hosts";
+    resolve,
+
+    async authenticate(clientId, assertion) {
+      const client = await resolve(clientId);
+      if (client === BUSY) return BUSY;
+      if (typeof client === "string") {
+        return client === UNFETCHED
+          ? { unreachable: "the client's metadata document could not be fetched" }
+          : { refused: `the server refuses the client: ${client}` };
       }
-      return { id: clientId, name: sealed.n, documentHost: undefined, redirectUris: sealed.r };
+      const { authentication } = client;
+      if (authentication.method !== "private_key_jwt") {
+        return { refused: "the client's metadata document no longer declares private_key_jwt" };
+      }
+      const keys =
+        "set" in authentication.keys
+          ? authentication.keys.set
+          : await keySet(authentication.keys.uri, peek(assertion)?.kid);
+      if (keys === BUSY || !("keys" in keys)) return keys;
+      return verifyAssertion(assertion, { clientId, keys, alg: authentication.alg, audiences });
     },
 
     async register(metadata: unknown): Promise<Registered> {
@@ -223,7 +351,7 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
           ok: false,
           error: "invalid_client_metadata",
           description:
-            "This server registers public clients only: it answers token_endpoint_auth_method none, and cannot verify a key",
+            "This server registers public clients only, which use token_endpoint_auth_method none. A client with keys can instead use, as its client_id, the URL of a metadata document that declares private_key_jwt",
         };
       }
       if (!redirect_uris.every(isRedirectUri)) {
@@ -288,16 +416,45 @@ export function redirectMatches(registered: string, requested: string): boolean 
 }
 
 /**
+ * Starts a fetch for a key, or shares the one under way, with at most `cap` under way at once. A
+ * caller gets `late()` when every slot is taken, or when the shared fetch is not done in its time.
+ * `start` is told whether its flight is still the key's current one, once it has awaited something.
+ */
+type Flights<T> = <L>(
+  key: string,
+  start: (current: () => boolean) => Promise<T>,
+  late: () => L,
+) => Promise<T | L>;
+
+function createFlights<T>(cap: number): Flights<T> {
+  const flights = new Map<string, { outcome: Promise<T>; until: number }>();
+  return async (key, start, late) => {
+    const now = Date.now();
+    for (const [id, flight] of flights) if (flight.until <= now) flights.delete(id);
+    let flight = flights.get(key);
+    if (flight === undefined) {
+      if (flights.size >= cap) return late();
+      // A flight past its time may have been dropped and replaced by a newer one, which stays.
+      const current = () => flights.get(key) === started;
+      const started = { outcome: start(current), until: now + FLIGHT_MS };
+      const land = () => {
+        if (current()) flights.delete(key);
+      };
+      started.outcome.then(land, land);
+      flights.set(key, started);
+      flight = started;
+    }
+    return settled(flight.outcome, flight.until - now, late);
+  };
+}
+
+/**
  * A shared fetch's outcome, or `late()` once its time is up, since a cancelled fetch never settles.
  * Its sharers then know nothing about the client, so they get no refusal.
  */
-function settled(
-  outcome: Promise<Client | string>,
-  ms: number,
-  late: () => Client | typeof BUSY,
-): Promise<Client | string | typeof BUSY> {
+function settled<T, L>(outcome: Promise<T>, ms: number, late: () => L): Promise<T | L> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const lapsed = new Promise<Client | typeof BUSY>((resolve) => {
+  const lapsed = new Promise<L>((resolve) => {
     timer = setTimeout(() => resolve(late()), ms);
   });
   return Promise.race([outcome, lapsed]).finally(() => clearTimeout(timer));
@@ -310,9 +467,49 @@ function remember<V>(map: Map<string, V>, key: string, value: V, size: number): 
   map.set(key, value);
 }
 
-/** No method, or `none`: the client proves itself with PKCE alone. */
-function publicClient(method: string | undefined): boolean {
-  return method === undefined || method === "none";
+const PUBLIC: ClientAuthentication = { method: "none" };
+
+/**
+ * How a document's client authenticates: with no method or `none`, by PKCE alone; with
+ * `private_key_jwt`, also with keys from exactly one of `jwks` and `jwks_uri`. Draft 02 of Client ID
+ * Metadata Documents forbids shared secrets, and the server checks nothing else.
+ */
+function authenticationOf(document: z.infer<typeof Document>): ClientAuthentication | string {
+  const method = document.token_endpoint_auth_method;
+  if (method === undefined || method === "none") return PUBLIC;
+  if (method !== "private_key_jwt") {
+    return "its metadata document asks for a token_endpoint_auth_method other than none and private_key_jwt";
+  }
+  const alg = document.token_endpoint_auth_signing_alg;
+  if (alg !== undefined && !isSigningAlg(alg)) {
+    return "its metadata document asks for a token_endpoint_auth_signing_alg other than RS256, PS256 or ES256";
+  }
+  const { jwks, jwks_uri } = document;
+  if (jwks !== undefined && jwks_uri !== undefined) {
+    return "its metadata document gives both jwks and jwks_uri";
+  }
+  if (jwks_uri !== undefined) {
+    const url = typeof jwks_uri === "string" ? keySetUrl(jwks_uri) : undefined;
+    if (url === undefined) {
+      return "its metadata document gives a jwks_uri that is not a public https URL";
+    }
+    return { method, keys: { uri: url.href }, alg };
+  }
+  if (jwks === undefined) {
+    return "its metadata document declares private_key_jwt without jwks or jwks_uri";
+  }
+  const set = signingKeys(jwks);
+  return set === undefined
+    ? "its metadata document gives no signing key in jwks"
+    : { method, keys: { set }, alg };
+}
+
+/** A JWK Set's keys for signatures, which are those without `use` or with `sig`, if it has one. */
+function signingKeys(value: unknown): JSONWebKeySet | undefined {
+  const parsed = KeySet.safeParse(value);
+  if (!parsed.success) return undefined;
+  const keys = parsed.data.keys.filter(({ use }) => use === undefined || use === "sig");
+  return keys.length === 0 ? undefined : { keys };
 }
 
 /**
@@ -346,8 +543,7 @@ function isRedirectUri(uri: string): boolean {
 
 /**
  * The client_id as a document URL the server may fetch: https, normalized, with a path, on a public
- * name. IP literals and local names are refused here; a fetch that checks resolved addresses refuses
- * the rest.
+ * name.
  */
 function documentUrl(clientId: string): URL | string {
   let url: URL;
@@ -358,14 +554,35 @@ function documentUrl(clientId: string): URL | string {
   }
   if (url.href !== clientId) return "its URL is not in normalized form";
   if (url.pathname === "/") return "its URL has no path";
-  if (url.port !== "" || url.username !== "" || url.password !== "" || url.hash !== "") {
-    return "its URL carries a port, credentials or a fragment";
+  if (!bare(url)) return "its URL carries a port, credentials or a fragment";
+  return publicHost(url.hostname) ? url : "its URL does not name a public host";
+}
+
+/** A jwks_uri the server may fetch: https on a public name, as for documents. */
+function keySetUrl(uri: string): URL | undefined {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return undefined;
   }
-  const host = url.hostname;
-  const local =
-    !host.includes(".") ||
-    host.startsWith("[") ||
-    /^[\d.]+$/.test(host) ||
-    /\.(localhost|local|internal|home\.arpa|localdomain)$/.test(host);
-  return local ? "its URL does not name a public host" : url;
+  return url.protocol === "https:" && bare(url) && publicHost(url.hostname) ? url : undefined;
+}
+
+/** Without a port, credentials or a fragment. */
+function bare(url: URL): boolean {
+  return url.port === "" && url.username === "" && url.password === "" && url.hash === "";
+}
+
+/**
+ * IP literals and local names are refused here; a fetch that checks resolved addresses refuses the
+ * rest.
+ */
+function publicHost(host: string): boolean {
+  return (
+    host.includes(".") &&
+    !host.startsWith("[") &&
+    !/^[\d.]+$/.test(host) &&
+    !/\.(localhost|local|internal|home\.arpa|localdomain)$/.test(host)
+  );
 }

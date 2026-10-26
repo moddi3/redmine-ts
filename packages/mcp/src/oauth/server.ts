@@ -10,8 +10,9 @@ import { z } from "zod";
 import type { BearerGrant, BearerVerifier } from "../http.ts";
 import { checkApiKey, KEY_CHECK_TIMEOUT_MS } from "../redmine-key.ts";
 import type { KeyVerdict } from "../redmine-key.ts";
+import { JWT_BEARER, peek, SIGNING_ALGS } from "./assertion.ts";
 import { allowsRedirect, BUSY, BUSY_RETRY_SECONDS, createClients } from "./clients.ts";
-import type { Client } from "./clients.ts";
+import type { Client, ClientAuthentication } from "./clients.ts";
 import { consentPage, errorPage } from "./pages.ts";
 import { grantedScopes, redmineScope, scopeNames, scopesFor } from "./scopes.ts";
 import type { Scope } from "./scopes.ts";
@@ -65,12 +66,13 @@ interface OAuthSettings {
    */
   allowedClientHosts?: readonly string[];
   /**
-   * Fetches the Client ID Metadata Documents clients name by URL. Required, because those URLs are the
-   * caller's choice: the fetch must not reach the server's own network. On Node pass `publicFetch`
-   * from `@redmine-ts/mcp/node`, which refuses private and special-use addresses; the CLI does. On
-   * Workers, which cannot reach private addresses, pass the global fetch with the
-   * `global_fetch_strictly_public` compatibility flag on, so a URL on the Worker's own zone goes
-   * through Cloudflare's front door, and its security settings, instead of straight to the origin.
+   * Fetches the Client ID Metadata Documents clients name by URL, and the key sets those documents
+   * name. Required, because those URLs are the caller's choice: the fetch must not reach the server's
+   * own network. On Node pass `publicFetch` from `@redmine-ts/mcp/node`, which refuses private and
+   * special-use addresses; the CLI does. On Workers, which cannot reach private addresses, pass the
+   * global fetch with the `global_fetch_strictly_public` compatibility flag on, so a URL on the
+   * Worker's own zone goes through Cloudflare's front door, and its security settings, instead of
+   * straight to the origin.
    */
   fetchClientMetadata: typeof fetch;
   /**
@@ -159,6 +161,9 @@ const OTHER_BROWSER =
 const PKCE_VERIFIER = /^[\w.~-]{43,128}$/;
 const S256_CHALLENGE = /^[\w-]{43}$/;
 
+/** A client that must prove a key at the token endpoint, as its metadata document declared. */
+type KeyBound = Exclude<ClientAuthentication["method"], "none">;
+
 /** The request the person sees on the consent page, carried through the form. */
 interface ConsentPayload {
   /** Single use: each answer to the page needs a page of its own. */
@@ -172,6 +177,8 @@ interface ConsentPayload {
   challenge: string;
   scopes: Scope[];
   state: string | undefined;
+  /** From the client's document at authorize, so every grant of the sign-in needs the key. */
+  auth?: KeyBound;
 }
 
 /** What the redirect to Redmine carries and the callback needs. */
@@ -187,6 +194,7 @@ interface StatePayload {
   state: string | undefined;
   /** The PKCE verifier for Redmine's code. */
   verifier: string;
+  auth?: KeyBound;
 }
 
 /** What a code stands for at Redmine: its code and our PKCE verifier for it, or a checked API key. */
@@ -195,15 +203,22 @@ type CodeGrant = { redmineCode: string; verifier: string } | { apiKey: string };
 /** What a refresh token stands for at Redmine. */
 type RefreshGrant = { redmineRefresh: string } | { apiKey: string };
 
-interface CodePayload {
-  /** Single use. */
-  id: string;
-  /** The sign-in every token from this code belongs to, which a store can end as one. */
+/** What the code and every refresh token of one sign-in carry. */
+interface SignIn {
+  /** The sign-in every token from the code belongs to, which a store can end as one. */
   family: string;
   /** Seconds since the epoch when an API-key grant ends, without a store to rotate it. */
   until?: number;
-  grant: CodeGrant;
+  /** SHA-256 of the client_id. */
   client: string;
+  /** Set when the client must prove a key at the token endpoint; a public client proves PKCE alone. */
+  auth?: KeyBound;
+}
+
+interface CodePayload extends SignIn {
+  /** Single use. */
+  id: string;
+  grant: CodeGrant;
   redirect: string;
   challenge: string;
   scopes: Scope[];
@@ -217,14 +232,11 @@ interface AccessPayload {
   audience: string;
 }
 
-interface RefreshPayload {
+interface RefreshPayload extends SignIn {
   /** Single use, with a store. */
   id: string;
-  family: string;
-  until?: number;
   grant: RefreshGrant;
   scopes: Scope[];
-  client: string;
 }
 
 /** Redmine's side of a token pair. */
@@ -240,7 +252,14 @@ const RedmineTokens = z.object({
   expires_in: z.number().int().positive().optional(),
 });
 
-type TokenError = { status: number; error: string; description: string };
+type TokenError = { status: number; error: string; description: string; retryAfter?: number };
+
+/** Who a token request comes from: its client_id, that client_id hashed, and its assertion if any. */
+interface Caller {
+  id: string;
+  hash: string;
+  assertion: string | undefined;
+}
 
 export function createAuthorizationServer(
   options: RedmineOAuthOptions,
@@ -274,6 +293,7 @@ export function createAuthorizationServer(
     sealer,
     fetch: options.fetchClientMetadata,
     allowedHosts: options.allowedClientHosts,
+    audiences: [issuer, paths.origin + paths.token],
   });
   const callbackUrl = paths.origin + paths.callback;
   // Codes and states are used once: across instances through the store, or in this process.
@@ -295,7 +315,8 @@ export function createAuthorizationServer(
     response_types_supported: ["code"],
     response_modes_supported: ["query"],
     grant_types_supported: ["authorization_code", "refresh_token"],
-    token_endpoint_auth_methods_supported: ["none"],
+    token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+    token_endpoint_auth_signing_alg_values_supported: SIGNING_ALGS,
     code_challenge_methods_supported: ["S256"],
     scopes_supported: scopesFor(access),
     client_id_metadata_document_supported: true,
@@ -381,6 +402,7 @@ export function createAuthorizationServer(
       challenge,
       scopes,
       state,
+      auth: client.authentication.method === "none" ? undefined : client.authentication.method,
     };
     return showConsent(client, consent, await sealer.seal("consent", consent, FLOW_TTL), {
       headers: { "Set-Cookie": await browserCookie(nonce) },
@@ -457,6 +479,7 @@ export function createAuthorizationServer(
       scopes: consent.scopes,
       state: consent.state,
       verifier,
+      auth: consent.auth,
     };
     return redirect(
       new URL("oauth/authorize", redminePublic).href,
@@ -545,6 +568,7 @@ export function createAuthorizationServer(
       ...(families === undefined ? { until: now() + REFRESH_TTL } : {}),
       grant: { apiKey },
       client: await sha256(consent.client),
+      auth: consent.auth,
       redirect: consent.redirect,
       challenge: consent.challenge,
       scopes: consent.scopes,
@@ -605,6 +629,7 @@ export function createAuthorizationServer(
       family: randomToken(),
       grant: { redmineCode: code, verifier: state.verifier },
       client: state.client,
+      auth: state.auth,
       redirect: state.redirect,
       challenge: state.challenge,
       scopes: state.scopes,
@@ -634,17 +659,14 @@ export function createAuthorizationServer(
         description: `This server issues tokens only for ${issuer}`,
       });
     }
-    const clientId = form.get("client_id");
-    if (!clientId) {
-      return tokenError({ status: 401, error: "invalid_client", description: "Send client_id" });
-    }
-    const client = await sha256(clientId);
+    const caller = await identify(form);
+    if ("error" in caller) return tokenError(caller);
     const grantType = form.get("grant_type");
     const result =
       grantType === "authorization_code"
-        ? await redeemCode(form, client)
+        ? await redeemCode(form, caller)
         : grantType === "refresh_token"
-          ? await refresh(form, client)
+          ? await refresh(form, caller)
           : {
               status: 400,
               error: "unsupported_grant_type",
@@ -653,10 +675,71 @@ export function createAuthorizationServer(
     return "access_token" in result ? tokenResponse(result) : tokenError(result);
   }
 
-  async function redeemCode(form: URLSearchParams, client: string) {
+  /**
+   * The client a token request names: its client_id, or the sub of its client_assertion, which RFC
+   * 7521 makes client_id optional for. When both are sent they must agree. Nothing is verified yet.
+   */
+  async function identify(form: URLSearchParams): Promise<Caller | TokenError> {
+    const sent = form.get("client_id") || undefined;
+    const assertion = form.get("client_assertion") ?? undefined;
+    if (assertion === undefined && !form.has("client_assertion_type")) {
+      if (sent === undefined) return invalidClient("Send client_id");
+      return { id: sent, hash: await sha256(sent), assertion };
+    }
+    if (assertion === undefined || form.get("client_assertion_type") !== JWT_BEARER) {
+      return invalidClient(`Send client_assertion with client_assertion_type ${JWT_BEARER}`);
+    }
+    const claimed = peek(assertion)?.sub;
+    if (typeof claimed !== "string") {
+      return invalidClient("The client_assertion is not a JWT that names its client in sub");
+    }
+    if (sent !== undefined && sent !== claimed) {
+      return invalidClient("client_id differs from the sub of the client_assertion");
+    }
+    return { id: claimed, hash: await sha256(claimed), assertion };
+  }
+
+  /**
+   * Checks the client's proof for a grant sealed with `auth`. A grant bound to a key needs a
+   * client_assertion that verifies, once; any other grant must come without one, as RFC 6749 allows
+   * one authentication method per request.
+   */
+  async function authenticate(caller: Caller, auth: KeyBound | undefined) {
+    if (auth === undefined) {
+      return caller.assertion === undefined
+        ? undefined
+        : invalidClient("Send no client_assertion: this client is public, and PKCE proves it");
+    }
+    if (caller.assertion === undefined) {
+      return invalidClient(
+        "Send a client_assertion: this client authenticates with private_key_jwt",
+      );
+    }
+    const verdict = await clients.authenticate(caller.id, caller.assertion);
+    if (verdict === BUSY) return CLIENTS_BUSY;
+    if ("unreachable" in verdict) {
+      return {
+        status: 502,
+        error: "server_error",
+        description: `Client authentication failed: ${verdict.unreachable}`,
+      };
+    }
+    if ("refused" in verdict) {
+      return invalidClient(`Client authentication failed: ${verdict.refused}`);
+    }
+    const jti = `assertion:${caller.hash}:${await sha256(verdict.jti)}`;
+    if (!(await once.consume(jti, verdict.ttl))) {
+      return invalidClient("Client authentication failed: the client_assertion was already used");
+    }
+    return undefined;
+  }
+
+  async function redeemCode(form: URLSearchParams, caller: Caller) {
     const code = await sealer.open<CodePayload>("code", form.get("code") ?? "");
     if (code === undefined) return invalidGrant("The code is invalid or has expired");
-    if (code.client !== client) return invalidGrant("The code was issued to another client");
+    if (code.client !== caller.hash) return invalidGrant("The code was issued to another client");
+    const unauthenticated = await authenticate(caller, code.auth);
+    if (unauthenticated !== undefined) return unauthenticated;
     // OAuth 2.1 clients leave redirect_uri out; PKCE binds the exchange. When sent, it must match.
     const redirectUri = form.get("redirect_uri");
     if (redirectUri !== null && redirectUri !== code.redirect) {
@@ -676,7 +759,7 @@ export function createAuthorizationServer(
     if (!(await spend(once, used, code.id, CODE_TTL))) {
       return usedAgain(once, code.id, code.family, again);
     }
-    return issue(upstream, code.scopes, client, code.family, code.until);
+    return issue(upstream, code.scopes, code);
   }
 
   /**
@@ -734,12 +817,14 @@ export function createAuthorizationServer(
     return redmineToken(app, { grant_type: "refresh_token", refresh_token: grant.redmineRefresh });
   }
 
-  async function refresh(form: URLSearchParams, client: string) {
+  async function refresh(form: URLSearchParams, caller: Caller) {
     const old = await sealer.open<RefreshPayload>("refresh", form.get("refresh_token") ?? "");
     if (old === undefined) return invalidGrant("The refresh token is invalid or has expired");
-    if (old.client !== client) {
+    if (old.client !== caller.hash) {
       return invalidGrant("The refresh token was issued to another client");
     }
+    const unauthenticated = await authenticate(caller, old.auth);
+    if (unauthenticated !== undefined) return unauthenticated;
     // A refresh may narrow the grant, never widen it or name anything else.
     const requested = scopeNames(form.get("scope"));
     if (requested.some((name) => !(old.scopes as string[]).includes(name))) {
@@ -767,7 +852,7 @@ export function createAuthorizationServer(
     if (families !== undefined && !(await spend(families, used, old.id, REFRESH_TTL))) {
       return usedAgain(families, old.id, old.family, again);
     }
-    return issue(upstream, old.scopes.slice(0, top + 1), client, old.family, old.until);
+    return issue(upstream, old.scopes.slice(0, top + 1), old);
   }
 
   function keyTokens(apiKey: string): Upstream {
@@ -781,9 +866,7 @@ export function createAuthorizationServer(
   async function issue(
     upstream: Upstream,
     scopes: Scope[],
-    client: string,
-    family: string,
-    until: number | undefined,
+    { family, until, client, auth }: SignIn,
   ): Promise<TokenSet> {
     const left = until === undefined ? REFRESH_TTL : until - now();
     const skew = Math.min(EXPIRY_SKEW, Math.floor(upstream.expiresIn / 2));
@@ -802,6 +885,7 @@ export function createAuthorizationServer(
       grant: upstream.refresh,
       scopes,
       client,
+      auth,
     };
     return {
       access_token: await sealer.seal("access", accessPayload, lifetime),
@@ -948,16 +1032,35 @@ function tokenResponse(tokens: TokenSet): Response {
   return Response.json(tokens, { headers: TOKEN_HEADERS });
 }
 
-function tokenError({ status, error, description }: TokenError): Response {
+function tokenError({ status, error, description, retryAfter }: TokenError): Response {
   return Response.json(
     { error, error_description: description },
-    { status, headers: TOKEN_HEADERS },
+    {
+      status,
+      headers:
+        retryAfter === undefined
+          ? TOKEN_HEADERS
+          : { ...TOKEN_HEADERS, "Retry-After": String(retryAfter) },
+    },
   );
 }
 
 function invalidGrant(description: string): TokenError {
   return { status: 400, error: "invalid_grant", description };
 }
+
+/** RFC 6749 section 5.2: client authentication failed. */
+function invalidClient(description: string): TokenError {
+  return { status: 401, error: "invalid_client", description };
+}
+
+/** When no fetch can check the client in time; nothing is known against it, so it may retry. */
+const CLIENTS_BUSY: TokenError = {
+  status: 503,
+  error: "temporarily_unavailable",
+  description: "The server is busy checking clients. Try again in a moment.",
+  retryAfter: BUSY_RETRY_SECONDS,
+};
 
 const STORE_DOWN: TokenError = {
   status: 503,

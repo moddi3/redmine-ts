@@ -1,4 +1,12 @@
-import { createHash, randomBytes } from "node:crypto";
+import {
+  constants,
+  createHash,
+  createHmac,
+  generateKeyPairSync,
+  randomBytes,
+  sign,
+} from "node:crypto";
+import type { KeyObject } from "node:crypto";
 
 /** Redmine as the server reaches it, and as browsers do, which a sidecar setup keeps apart. */
 export const REDMINE_INTERNAL = "http://redmine.internal:3000/";
@@ -214,4 +222,49 @@ export function consentValue(page: string): string {
 export function pkce() {
   const verifier = randomBytes(32).toString("base64url");
   return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
+}
+
+export type SigningAlg = "RS256" | "PS256" | "ES256";
+
+/** A client's key pair, and the public JWK its key set publishes. */
+export function clientKey(
+  alg: SigningAlg,
+  { kid = randomBytes(8).toString("hex"), bits = 2048 } = {},
+) {
+  const { privateKey, publicKey } =
+    alg === "ES256"
+      ? generateKeyPairSync("ec", { namedCurve: "P-256" })
+      : generateKeyPairSync("rsa", { modulusLength: bits });
+  const jwk = { ...publicKey.export({ format: "jwk" }), kid, alg, use: "sig" };
+  return { alg, kid, privateKey, publicKey, jwk };
+}
+
+export type ClientKey = ReturnType<typeof clientKey>;
+
+/**
+ * A compact JWS of `claims`, signed with `key` as `header.alg` says. `none` leaves the signature
+ * empty, and HS256 takes `key`, a public key, as the HMAC secret, as an alg confusion attack does.
+ */
+export function signJwt(
+  header: Record<string, unknown>,
+  claims: Record<string, unknown>,
+  key: KeyObject,
+): string {
+  const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const input = `${part(header)}.${part(claims)}`;
+  const signature =
+    header.alg === "none"
+      ? Buffer.alloc(0)
+      : header.alg === "HS256"
+        ? createHmac("sha256", key.export({ type: "spki", format: "pem" }))
+            .update(input)
+            .digest()
+        : sign("sha256", Buffer.from(input), {
+            key,
+            ...(header.alg === "ES256" ? { dsaEncoding: "ieee-p1363" as const } : {}),
+            ...(header.alg === "PS256"
+              ? { padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }
+              : {}),
+          });
+  return `${input}.${signature.toString("base64url")}`;
 }
