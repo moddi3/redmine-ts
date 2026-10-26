@@ -1,7 +1,10 @@
 // Who may ask for a token. A client is a Client ID Metadata Document, an https URL the server fetches,
 // or a registration the server sealed into the client_id itself, so no client is ever stored.
 
+import type { JSONWebKeySet } from "jose";
 import { z } from "zod";
+import { isSigningAlg, peek, verifyAssertion } from "./assertion.ts";
+import type { SigningAlg, Verified } from "./assertion.ts";
 import type { Sealer } from "./seal.ts";
 import { readText } from "./web.ts";
 
@@ -12,14 +15,38 @@ export interface Client {
   /** The host that serves the client's metadata document. Undefined for a registered client. */
   documentHost: string | undefined;
   redirectUris: readonly string[];
+  authentication: ClientAuthentication;
 }
+
+/**
+ * How a client proves itself at the token endpoint: with PKCE alone, or also with a JWT signed by a
+ * key its metadata document publishes, inline or at a URL, and with the alg the document names.
+ */
+export type ClientAuthentication =
+  | { method: "none" }
+  | {
+      method: "private_key_jwt";
+      keys: { set: JSONWebKeySet } | { uri: string };
+      alg: SigningAlg | undefined;
+    };
+
+/**
+ * Why a client failed to authenticate: refused, for a proof or a document that is wrong, or
+ * unreachable, when its document or key set could not be fetched.
+ */
+export type Unauthenticated = { refused: string } | { unreachable: string };
 
 export interface ClientsOptions {
   sealer: Sealer;
-  /** Fetches metadata documents. It must refuse private addresses where the runtime can tell. */
+  /**
+   * Fetches metadata documents and the key sets they name. It must refuse private addresses where
+   * the runtime can tell.
+   */
   fetch: typeof fetch;
   /** Hostnames a client must belong to. Undefined admits any client. */
   allowedHosts: readonly string[] | undefined;
+  /** What a client assertion's aud may name: the server's issuer and its token endpoint. */
+  audiences: readonly string[];
 }
 
 /** Documents are small; the draft suggests 5 KB as the cap. */
@@ -47,6 +74,17 @@ const DOCUMENT_STALE_MS = 60 * 60_000;
 const UNFETCHED = "its metadata document could not be fetched";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+/** ChatGPT's key set, one RSA key, is 438 bytes. */
+const KEY_SET_MAX_BYTES = 16 * 1024;
+/**
+ * Key sets one handler fetches at once. Only a grant sealed for a client that declared
+ * private_key_jwt makes the server fetch one, at the token endpoint, so a few slots of their own
+ * keep a flood of sign-ins from delaying them.
+ */
+const KEY_SET_FETCHES = 4;
+/** A kid the kept key set lacks fetches it again once it is this old, so random kids cannot. */
+const KEY_SET_REFETCH_MS = 60_000;
+
 /**
  * What resolve answers when the client needs a fetch that cannot answer in time, because every slot is
  * taken or its own fetch did not settle, and no document fetched within DOCUMENT_STALE_MS can serve it.
@@ -66,9 +104,19 @@ const Document = z.object({
   client_name: z.string().trim().min(1).max(NAME_MAX_LENGTH).optional().catch(undefined),
   redirect_uris: z.array(z.string()).min(1).max(20),
   token_endpoint_auth_method: z.string().optional(),
+  // Read only for private_key_jwt, so a public client's document is checked as before.
+  token_endpoint_auth_signing_alg: z.unknown().optional(),
+  jwks: z.unknown().optional(),
+  jwks_uri: z.unknown().optional(),
   client_secret: z
     .undefined({ error: "a metadata document must not carry a client_secret" })
     .optional(),
+});
+
+const KeySet = z.object({
+  keys: z.array(
+    z.looseObject({ kty: z.string(), kid: z.string().optional(), use: z.string().optional() }),
+  ),
 });
 
 const Registration = z.object({
@@ -90,15 +138,40 @@ export type Registered =
 export interface Clients {
   /** The client a client_id names, why it is refused, or BUSY to try again in a moment. */
   resolve(clientId: string): Promise<Client | string | typeof BUSY>;
+  /**
+   * Checks the client_assertion of a client whose grant was sealed for private_key_jwt, against the
+   * keys its current document gives, or BUSY to try again in a moment.
+   */
+  authenticate(
+    clientId: string,
+    assertion: string,
+  ): Promise<Verified | Unauthenticated | typeof BUSY>;
   /** Dynamic Client Registration (RFC 7591) for clients without a metadata document. */
   register(metadata: unknown): Promise<Registered>;
 }
 
-export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): Clients {
+export function createClients({ sealer, fetch, allowedHosts, audiences }: ClientsOptions): Clients {
   const documents = new Map<string, { client: Client; fetched: number }>();
-  /** Document fetches under way by client_id. */
   const documentFlights = createFlights<Client | string>(DOCUMENT_FETCHES);
+  const keySets = new Map<string, { set: JSONWebKeySet; fetched: number }>();
+  const keySetFlights = createFlights<JSONWebKeySet | Unauthenticated>(KEY_SET_FETCHES);
   const admitted = (host: string) => allowedHosts === undefined || allowedHosts.includes(host);
+
+  async function resolve(clientId: string): Promise<Client | string | typeof BUSY> {
+    if (clientId.startsWith("https://")) return fetchDocument(clientId);
+    const sealed = await sealer.open<Sealed>("registration", clientId);
+    if (sealed === undefined) return "it is not a client this server registered or can fetch";
+    if (!sealed.r.every((uri) => admitted(new URL(uri).hostname))) {
+      return "its redirect URIs are not on allowed client hosts";
+    }
+    return {
+      id: clientId,
+      name: sealed.n,
+      documentHost: undefined,
+      redirectUris: sealed.r,
+      authentication: PUBLIC,
+    };
+  }
 
   async function fetchDocument(clientId: string): Promise<Client | string | typeof BUSY> {
     const url = documentUrl(clientId);
@@ -183,10 +256,8 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
       return "its metadata document is not valid client metadata";
     }
     if (parsed.client_id !== clientId) return "its metadata document names another client_id";
-    // Only public clients: a client that declares another method expects us to authenticate it.
-    if (!publicClient(parsed.token_endpoint_auth_method)) {
-      return "its metadata document asks for client authentication, and this server has public clients only";
-    }
+    const authentication = authenticationOf(parsed);
+    if (typeof authentication === "string") return authentication;
     if (!parsed.redirect_uris.every(isRedirectUri)) {
       return "its metadata document lists a redirect URI that is not https or loopback";
     }
@@ -195,18 +266,74 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
       name: parsed.client_name,
       documentHost: url.hostname,
       redirectUris: parsed.redirect_uris,
+      authentication,
     };
   }
 
+  /**
+   * The key set at `uri`, kept for CACHE_MS. A `kid` it lacks fetches it again, at most once per
+   * KEY_SET_REFETCH_MS, so a rotated key works within a minute. A failed fetch is not kept, and the
+   * set fetched before stays until its time is up.
+   */
+  async function keySet(
+    uri: string,
+    kid: unknown,
+  ): Promise<JSONWebKeySet | Unauthenticated | typeof BUSY> {
+    const kept = keySets.get(uri);
+    const age = kept === undefined ? Infinity : Date.now() - kept.fetched;
+    const known = kid === undefined || kept?.set.keys.some((key) => key.kid === kid);
+    if (kept !== undefined && age < CACHE_MS && (known || age < KEY_SET_REFETCH_MS)) {
+      return kept.set;
+    }
+    return keySetFlights(
+      uri,
+      async (current) => {
+        const outcome = await fetchKeySet(new URL(uri));
+        if (current() && "keys" in outcome) {
+          remember(keySets, uri, { set: outcome, fetched: Date.now() }, CACHE_SIZE);
+        }
+        return outcome;
+      },
+      () => BUSY,
+    );
+  }
+
+  async function fetchKeySet(url: URL): Promise<JSONWebKeySet | Unauthenticated> {
+    const body = await download(url, KEY_SET_MAX_BYTES);
+    if (body === "unfetched") return { unreachable: "the client's key set could not be fetched" };
+    if (body === "oversize") {
+      return { refused: `the client's key set is over ${KEY_SET_MAX_BYTES} bytes` };
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body.text);
+    } catch {
+      parsed = undefined;
+    }
+    return signingKeys(parsed) ?? { refused: "the client's key set has no signing key" };
+  }
+
   return {
-    async resolve(clientId: string): Promise<Client | string | typeof BUSY> {
-      if (clientId.startsWith("https://")) return fetchDocument(clientId);
-      const sealed = await sealer.open<Sealed>("registration", clientId);
-      if (sealed === undefined) return "it is not a client this server registered or can fetch";
-      if (!sealed.r.every((uri) => admitted(new URL(uri).hostname))) {
-        return "its redirect URIs are not on allowed client hosts";
+    resolve,
+
+    async authenticate(clientId, assertion) {
+      const client = await resolve(clientId);
+      if (client === BUSY) return BUSY;
+      if (typeof client === "string") {
+        return client === UNFETCHED
+          ? { unreachable: "the client's metadata document could not be fetched" }
+          : { refused: `the server refuses the client: ${client}` };
       }
-      return { id: clientId, name: sealed.n, documentHost: undefined, redirectUris: sealed.r };
+      const { authentication } = client;
+      if (authentication.method !== "private_key_jwt") {
+        return { refused: "the client's metadata document no longer declares private_key_jwt" };
+      }
+      const keys =
+        "set" in authentication.keys
+          ? authentication.keys.set
+          : await keySet(authentication.keys.uri, peek(assertion)?.kid);
+      if (keys === BUSY || !("keys" in keys)) return keys;
+      return verifyAssertion(assertion, { clientId, keys, alg: authentication.alg, audiences });
     },
 
     async register(metadata: unknown): Promise<Registered> {
@@ -224,7 +351,7 @@ export function createClients({ sealer, fetch, allowedHosts }: ClientsOptions): 
           ok: false,
           error: "invalid_client_metadata",
           description:
-            "This server registers public clients only: it answers token_endpoint_auth_method none, and cannot verify a key",
+            "This server registers public clients only, which use token_endpoint_auth_method none. A client with keys can instead use, as its client_id, the URL of a metadata document that declares private_key_jwt",
         };
       }
       if (!redirect_uris.every(isRedirectUri)) {
@@ -340,9 +467,49 @@ function remember<V>(map: Map<string, V>, key: string, value: V, size: number): 
   map.set(key, value);
 }
 
-/** No method, or `none`: the client proves itself with PKCE alone. */
-function publicClient(method: string | undefined): boolean {
-  return method === undefined || method === "none";
+const PUBLIC: ClientAuthentication = { method: "none" };
+
+/**
+ * How a document's client authenticates: with no method or `none`, by PKCE alone; with
+ * `private_key_jwt`, also with keys from exactly one of `jwks` and `jwks_uri`. Draft 02 of Client ID
+ * Metadata Documents forbids shared secrets, and the server checks nothing else.
+ */
+function authenticationOf(document: z.infer<typeof Document>): ClientAuthentication | string {
+  const method = document.token_endpoint_auth_method;
+  if (method === undefined || method === "none") return PUBLIC;
+  if (method !== "private_key_jwt") {
+    return "its metadata document asks for a token_endpoint_auth_method other than none and private_key_jwt";
+  }
+  const alg = document.token_endpoint_auth_signing_alg;
+  if (alg !== undefined && !isSigningAlg(alg)) {
+    return "its metadata document asks for a token_endpoint_auth_signing_alg other than RS256, PS256 or ES256";
+  }
+  const { jwks, jwks_uri } = document;
+  if (jwks !== undefined && jwks_uri !== undefined) {
+    return "its metadata document gives both jwks and jwks_uri";
+  }
+  if (jwks_uri !== undefined) {
+    const url = typeof jwks_uri === "string" ? keySetUrl(jwks_uri) : undefined;
+    if (url === undefined) {
+      return "its metadata document gives a jwks_uri that is not a public https URL";
+    }
+    return { method, keys: { uri: url.href }, alg };
+  }
+  if (jwks === undefined) {
+    return "its metadata document declares private_key_jwt without jwks or jwks_uri";
+  }
+  const set = signingKeys(jwks);
+  return set === undefined
+    ? "its metadata document gives no signing key in jwks"
+    : { method, keys: { set }, alg };
+}
+
+/** A JWK Set's keys for signatures, which are those without `use` or with `sig`, if it has one. */
+function signingKeys(value: unknown): JSONWebKeySet | undefined {
+  const parsed = KeySet.safeParse(value);
+  if (!parsed.success) return undefined;
+  const keys = parsed.data.keys.filter(({ use }) => use === undefined || use === "sig");
+  return keys.length === 0 ? undefined : { keys };
 }
 
 /**
@@ -376,8 +543,7 @@ function isRedirectUri(uri: string): boolean {
 
 /**
  * The client_id as a document URL the server may fetch: https, normalized, with a path, on a public
- * name. IP literals and local names are refused here; a fetch that checks resolved addresses refuses
- * the rest.
+ * name.
  */
 function documentUrl(clientId: string): URL | string {
   let url: URL;
@@ -388,14 +554,35 @@ function documentUrl(clientId: string): URL | string {
   }
   if (url.href !== clientId) return "its URL is not in normalized form";
   if (url.pathname === "/") return "its URL has no path";
-  if (url.port !== "" || url.username !== "" || url.password !== "" || url.hash !== "") {
-    return "its URL carries a port, credentials or a fragment";
+  if (!bare(url)) return "its URL carries a port, credentials or a fragment";
+  return publicHost(url.hostname) ? url : "its URL does not name a public host";
+}
+
+/** A jwks_uri the server may fetch: https on a public name, as for documents. */
+function keySetUrl(uri: string): URL | undefined {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return undefined;
   }
-  const host = url.hostname;
-  const local =
-    !host.includes(".") ||
-    host.startsWith("[") ||
-    /^[\d.]+$/.test(host) ||
-    /\.(localhost|local|internal|home\.arpa|localdomain)$/.test(host);
-  return local ? "its URL does not name a public host" : url;
+  return url.protocol === "https:" && bare(url) && publicHost(url.hostname) ? url : undefined;
+}
+
+/** Without a port, credentials or a fragment. */
+function bare(url: URL): boolean {
+  return url.port === "" && url.username === "" && url.password === "" && url.hash === "";
+}
+
+/**
+ * IP literals and local names are refused here; a fetch that checks resolved addresses refuses the
+ * rest.
+ */
+function publicHost(host: string): boolean {
+  return (
+    host.includes(".") &&
+    !host.startsWith("[") &&
+    !/^[\d.]+$/.test(host) &&
+    !/\.(localhost|local|internal|home\.arpa|localdomain)$/.test(host)
+  );
 }
