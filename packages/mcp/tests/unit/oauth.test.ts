@@ -10,14 +10,16 @@ import { createRedmineMcpHandler, memoryGrantStore } from "../../src/index.ts";
 import type { GrantStore, RedmineMcpHandlerOptions } from "../../src/index.ts";
 import {
   browser,
+  clientKey,
   consentValue,
   fakeRedmine,
   pkce,
   REDMINE_APP,
   REDMINE_INTERNAL,
   REDMINE_PUBLIC,
+  signJwt,
 } from "./oauth-fakes.ts";
-import type { FakeRedmine } from "./oauth-fakes.ts";
+import type { ClientKey, FakeRedmine, SigningAlg } from "./oauth-fakes.ts";
 
 type Handler = (request: Request) => Promise<Response>;
 
@@ -217,7 +219,8 @@ describe("built-in authorization server", () => {
       response_types_supported: ["code"],
       response_modes_supported: ["query"],
       grant_types_supported: ["authorization_code", "refresh_token"],
-      token_endpoint_auth_methods_supported: ["none"],
+      token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+      token_endpoint_auth_signing_alg_values_supported: ["RS256", "PS256", "ES256"],
       code_challenge_methods_supported: ["S256"],
       scopes_supported: ["redmine:read", "redmine:write", "redmine:delete"],
       client_id_metadata_document_supported: true,
@@ -307,6 +310,8 @@ describe("built-in authorization server", () => {
     await client.connect(transport());
     const result = await client.callTool({ name: "issue_statuses_list", arguments: {} });
     expect(result.structuredContent).toMatchObject({ items: [{ name: "New for jsmith" }] });
+    // A registered client is public: nothing is fetched to check it.
+    expect(setupped.fetched).toEqual([]);
     // Redmine sees its own token, never ours.
     const call = redmine.apiCalls.at(-1)!;
     expect(redmine.tokens.has(call.authorization!.slice("Bearer ".length))).toBe(true);
@@ -371,6 +376,8 @@ describe("built-in authorization server", () => {
       client_id: CLAUDE,
     });
     expect(await replayed.json()).toMatchObject({ error: "invalid_grant" });
+    // A public client's tokens never send the server back to its document.
+    expect(fetched).toEqual([CLAUDE]);
   });
 
   it.each([
@@ -867,6 +874,11 @@ describe("built-in authorization server", () => {
         body: { error: "invalid_client_metadata" },
       });
     }
+    // A client with keys has a way in: its own metadata document.
+    expect(
+      (await register({ redirect_uris: [uri(40)], token_endpoint_auth_method: "private_key_jwt" }))
+        .body.error_description,
+    ).toContain("metadata document that declares private_key_jwt");
     const largest = await register({
       redirect_uris: Array.from({ length: 5 }, (_, at) => `${uri(255)}${at}`),
       client_name: "n".repeat(100),
@@ -875,38 +887,68 @@ describe("built-in authorization server", () => {
     expect(largest.body.client_id!.length).toBeLessThan(2600);
   });
 
-  it("refuses a metadata document that asks for client authentication", async () => {
+  it("admits a metadata document with none or private_key_jwt and one key source, and refuses the rest", async () => {
     const setupped = setup();
-    const page = async (clientId: string) => {
-      const response = await browser(setupped.handle, ORIGIN, setupped.redmine).send(
-        authorizeUrl({
-          response_type: "code",
-          client_id: clientId,
-          redirect_uri: CLAUDE_REDIRECT,
-          code_challenge: pkce().challenge,
-          code_challenge_method: "S256",
-        }),
-      );
-      return { status: response.status, text: await response.text() };
+    const key = clientKey("ES256");
+    const page = async (document: Record<string, unknown>) => {
+      const id = `https://${randomBytes(4).toString("hex")}.example/client.json`;
+      setupped.documents.set(id, { client_id: id, redirect_uris: [CLAUDE_REDIRECT], ...document });
+      const response = await authorizePage(setupped, id);
+      const text = await response.text();
+      return { status: response.status, reason: /<p class="error">([^<]*)<\/p>/.exec(text)?.[1] };
     };
-    const jwt = "https://jwt.example/meta.json";
-    setupped.documents.set(jwt, {
-      client_id: jwt,
-      redirect_uris: [CLAUDE_REDIRECT],
-      token_endpoint_auth_method: "private_key_jwt",
-      jwks_uri: "https://jwt.example/jwks.json",
-    });
-    expect(await page(jwt)).toMatchObject({
-      status: 400,
-      text: expect.stringContaining("public clients only"),
-    });
-    const none = "https://none.example/meta.json";
-    setupped.documents.set(none, {
-      client_id: none,
-      redirect_uris: [CLAUDE_REDIRECT],
-      token_endpoint_auth_method: "none",
-    });
-    expect((await page(none)).status).toBe(200);
+    const jwt = { token_endpoint_auth_method: "private_key_jwt" };
+    const admitted = [
+      {},
+      { token_endpoint_auth_method: "none" },
+      { ...jwt, jwks_uri: "https://jwt.example/jwks.json" },
+      { ...jwt, jwks: { keys: [key.jwk] } },
+      { ...jwt, jwks: { keys: [{ ...key.jwk, use: undefined }] } },
+      {
+        ...jwt,
+        jwks_uri: "https://jwt.example/jwks.json",
+        token_endpoint_auth_signing_alg: "PS256",
+      },
+    ];
+    for (const document of admitted) {
+      expect([document, (await page(document)).status]).toEqual([document, 200]);
+    }
+    const refused: [Record<string, unknown>, string][] = [
+      [jwt, "its metadata document declares private_key_jwt without jwks or jwks_uri"],
+      [
+        { ...jwt, jwks_uri: "https://jwt.example/jwks.json", jwks: { keys: [key.jwk] } },
+        "its metadata document gives both jwks and jwks_uri",
+      ],
+      [
+        { ...jwt, jwks: { keys: [{ ...key.jwk, use: "enc" }] } },
+        "its metadata document gives no signing key in jwks",
+      ],
+      [{ ...jwt, jwks: { keys: [] } }, "its metadata document gives no signing key in jwks"],
+      [
+        { ...jwt, jwks_uri: "http://jwt.example/jwks.json" },
+        "its metadata document gives a jwks_uri that is not a public https URL",
+      ],
+      [
+        { ...jwt, jwks_uri: "https://10.0.0.1/jwks.json" },
+        "its metadata document gives a jwks_uri that is not a public https URL",
+      ],
+      ...["HS256", "RS512", "none"].map((alg): [Record<string, unknown>, string] => [
+        { ...jwt, jwks_uri: "https://jwt.example/jwks.json", token_endpoint_auth_signing_alg: alg },
+        "its metadata document asks for a token_endpoint_auth_signing_alg other than RS256, PS256 or ES256",
+      ]),
+      ...["client_secret_basic", "client_secret_post", "client_secret_jwt", "tls_client_auth"].map(
+        (method): [Record<string, unknown>, string] => [
+          { token_endpoint_auth_method: method, jwks_uri: "https://jwt.example/jwks.json" },
+          "its metadata document asks for a token_endpoint_auth_method other than none and private_key_jwt",
+        ],
+      ),
+    ];
+    for (const [document, reason] of refused) {
+      expect([document, await page(document)]).toEqual([
+        document,
+        { status: 400, reason: `This server refuses the client: ${reason}.` },
+      ]);
+    }
   });
 
   it("says only that a metadata document could not be fetched, whatever its server answered", async () => {
@@ -1494,6 +1536,433 @@ describe("metadata document fetches", () => {
     expect(page.status).toBe(400);
     expect(await page.text()).toContain("its metadata document could not be fetched");
     expect(setupped.errors).toEqual([]);
+  });
+});
+
+const CHATGPT = "https://chatgpt.com/oauth/client.json";
+const CHATGPT_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect";
+const CHATGPT_JWKS = "https://chatgpt.com/oauth/jwks.json";
+const JWT_BEARER = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+
+/** ChatGPT's metadata document as chatgpt.com served it on 2026-10-26. */
+const CHATGPT_DOCUMENT = {
+  client_id: CHATGPT,
+  client_uri: "https://chatgpt.com/",
+  redirect_uris: [CHATGPT_REDIRECT],
+  token_endpoint_auth_method: "private_key_jwt",
+  token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+  grant_types: ["authorization_code", "refresh_token"],
+  response_types: ["code"],
+  client_name: "ChatGPT",
+  logo_uri: "https://persistent.oaistatic.com/sonic/misc/openai-logo.png",
+  token_endpoint_auth_signing_alg: "RS256",
+  jwks_uri: CHATGPT_JWKS,
+};
+
+/** ChatGPT's key set publishes one RSA key under this kid. */
+const CHATGPT_KID = "cimd-20260428030119";
+
+/** A handler that serves ChatGPT's document, or `document`, with `keys` at its jwks_uri. */
+function keyed(keys: object[], document: object = CHATGPT_DOCUMENT, oauth = {}): Setup {
+  const setupped = setup({}, oauth);
+  setupped.documents.set(CHATGPT, document);
+  setupped.documents.set(CHATGPT_JWKS, { keys });
+  return setupped;
+}
+
+/** A client assertion as ChatGPT signs one: kid in the header, iss and sub its client_id, aud the issuer. */
+function assertion(
+  key: ClientKey,
+  claims: Record<string, unknown> = {},
+  header: Record<string, unknown> = {},
+): string {
+  const at = Math.floor(Date.now() / 1000);
+  return signJwt(
+    { alg: key.alg, kid: key.kid, typ: "JWT", ...header },
+    {
+      iss: CHATGPT,
+      sub: CHATGPT,
+      aud: PUBLIC_URL,
+      iat: at,
+      exp: at + 300,
+      jti: randomBytes(16).toString("base64url"),
+      ...claims,
+    },
+    key.privateKey,
+  );
+}
+
+const proof = (jwt: string) => ({ client_assertion_type: JWT_BEARER, client_assertion: jwt });
+
+async function chatGptSignIn(setupped: Setup) {
+  return signIn(setupped, { clientId: CHATGPT, redirectUri: CHATGPT_REDIRECT });
+}
+
+async function grant(handle: Handler, params: Record<string, string>) {
+  const response = await form(handle, TOKEN, params);
+  return {
+    status: response.status,
+    body: (await response.json()) as Issued & Record<string, string>,
+  };
+}
+
+function redeem(
+  setupped: Setup,
+  signed: Awaited<ReturnType<typeof chatGptSignIn>>,
+  params: Record<string, string>,
+) {
+  return grant(setupped.handle, {
+    grant_type: "authorization_code",
+    code: signed.landed.searchParams.get("code")!,
+    code_verifier: signed.verifier,
+    ...params,
+  });
+}
+
+function renew(setupped: Setup, refreshToken: string, params: Record<string, string>) {
+  return grant(setupped.handle, {
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    ...params,
+  });
+}
+
+const fetchesOf = (setupped: Setup, url: string) =>
+  setupped.fetched.filter((fetched) => fetched === url).length;
+
+describe("private_key_jwt clients", () => {
+  it.each([
+    ["RS256", "jwks_uri"],
+    ["PS256", "jwks_uri"],
+    ["ES256", "jwks_uri"],
+    ["RS256", "jwks"],
+    ["PS256", "jwks"],
+    ["ES256", "jwks"],
+  ] as [SigningAlg, string][])(
+    "signs in a %s client whose keys are in its %s, and asks for an assertion at every refresh",
+    async (alg, source) => {
+      const key = clientKey(alg);
+      const setupped = keyed([key.jwk], {
+        client_id: CHATGPT,
+        redirect_uris: [CHATGPT_REDIRECT],
+        token_endpoint_auth_method: "private_key_jwt",
+        token_endpoint_auth_signing_alg: alg,
+        ...(source === "jwks" ? { jwks: { keys: [key.jwk] } } : { jwks_uri: CHATGPT_JWKS }),
+      });
+      const signed = await chatGptSignIn(setupped);
+      const issued = await redeem(setupped, signed, {
+        client_id: CHATGPT,
+        ...proof(assertion(key)),
+      });
+      expect(issued.status, JSON.stringify(issued.body)).toBe(200);
+      const bearer = (token: string) =>
+        callTool(setupped.handle, { Authorization: `Bearer ${token}` });
+      expect((await bearer(issued.body.access_token)).status).toBe(200);
+
+      const bare = await renew(setupped, issued.body.refresh_token, { client_id: CHATGPT });
+      expect([bare.status, bare.body.error]).toEqual([401, "invalid_client"]);
+      const renewed = await renew(setupped, issued.body.refresh_token, proof(assertion(key)));
+      expect(renewed.status, JSON.stringify(renewed.body)).toBe(200);
+      expect((await bearer(renewed.body.access_token)).status).toBe(200);
+      // The rotated refresh token is bound to the key as well.
+      const again = await renew(setupped, renewed.body.refresh_token, { client_id: CHATGPT });
+      expect([again.status, again.body.error]).toEqual([401, "invalid_client"]);
+      expect(
+        (await renew(setupped, renewed.body.refresh_token, proof(assertion(key)))).status,
+      ).toBe(200);
+      // A key set is fetched once for the whole sign-in; inline keys are never fetched.
+      expect(fetchesOf(setupped, CHATGPT_JWKS)).toBe(source === "jwks_uri" ? 1 : 0);
+      expect(fetchesOf(setupped, CHATGPT)).toBe(1);
+    },
+  );
+
+  it("takes ChatGPT's metadata document and an assertion shaped as ChatGPT signs one", async () => {
+    const key = clientKey("RS256", { kid: CHATGPT_KID });
+    const setupped = keyed([key.jwk]);
+    const person = browser(setupped.handle, ORIGIN, setupped.redmine);
+    const page = await person.send(
+      authorizeUrl({
+        response_type: "code",
+        client_id: CHATGPT,
+        redirect_uri: CHATGPT_REDIRECT,
+        code_challenge: pkce().challenge,
+        code_challenge_method: "S256",
+      }),
+    );
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("ChatGPT");
+
+    const signed = await chatGptSignIn(setupped);
+    const issued = await redeem(setupped, signed, {
+      redirect_uri: CHATGPT_REDIRECT,
+      client_id: CHATGPT,
+      resource: PUBLIC_URL,
+      ...proof(assertion(key)),
+    });
+    expect(issued.status, JSON.stringify(issued.body)).toBe(200);
+    // The assertion names the client, so client_id may be left out.
+    const renewed = await renew(setupped, issued.body.refresh_token, proof(assertion(key)));
+    expect(renewed.status, JSON.stringify(renewed.body)).toBe(200);
+    // The token endpoint URL also names this server as an audience.
+    expect(
+      (await renew(setupped, renewed.body.refresh_token, proof(assertion(key, { aud: TOKEN }))))
+        .status,
+    ).toBe(200);
+  });
+
+  it("refuses an assertion that fails any check with 401 invalid_client, and spends nothing", async () => {
+    const key = clientKey("RS256", { kid: CHATGPT_KID });
+    // Without alg on the key, only the document's token_endpoint_auth_signing_alg stops PS256.
+    const setupped = keyed([{ ...key.jwk, alg: undefined }]);
+    const signed = await chatGptSignIn(setupped);
+    const at = Math.floor(Date.now() / 1000);
+    const impostor = clientKey("RS256", { kid: CHATGPT_KID });
+    const forged = (header: Record<string, unknown>) =>
+      signJwt(
+        { kid: CHATGPT_KID, ...header },
+        { iss: CHATGPT, sub: CHATGPT, aud: PUBLIC_URL, exp: at + 300, jti: "forged" },
+        header.alg === "HS256" ? key.publicKey : key.privateKey,
+      );
+    const other = "https://evil.example/client.json";
+    const cases: [string, Record<string, string>, string][] = [
+      ["no assertion", { client_id: CHATGPT }, "client_assertion"],
+      [
+        "another assertion type",
+        {
+          ...proof(assertion(key)),
+          client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:saml2-bearer",
+        },
+        "client_assertion_type",
+      ],
+      ["not a JWT", proof("not.a.jwt"), "JWT"],
+      ["another key under its kid", proof(assertion(impostor)), "signature"],
+      ["alg none", proof(forged({ alg: "none" })), "alg"],
+      ["HS256 keyed with the public key", proof(forged({ alg: "HS256" })), "alg"],
+      ["another alg than the document's", proof(assertion(key, {}, { alg: "PS256" })), "alg"],
+      ["iss other than sub", proof(assertion(key, { iss: other })), "iss"],
+      [
+        "iss and sub of another client",
+        { client_id: CHATGPT, ...proof(assertion(key, { iss: other, sub: other })) },
+        "client_id",
+      ],
+      ["client_id other than iss", { client_id: other, ...proof(assertion(key)) }, "client_id"],
+      ["another aud", proof(assertion(key, { aud: "https://other.example/mcp" })), "aud"],
+      ["the authorization endpoint as aud", proof(assertion(key, { aud: AUTHORIZE })), "aud"],
+      ["no exp", proof(assertion(key, { exp: undefined })), "exp"],
+      ["exp passed", proof(assertion(key, { exp: at - 120 })), "exp"],
+      ["exp over an hour away", proof(assertion(key, { exp: at + 3600 + 120 })), "exp"],
+      ["nbf ahead", proof(assertion(key, { nbf: at + 120 })), "nbf"],
+      ["iat ahead", proof(assertion(key, { iat: at + 120 })), "iat"],
+      ["no jti", proof(assertion(key, { jti: undefined })), "jti"],
+    ];
+    for (const [label, params, names] of cases) {
+      const refused = await redeem(setupped, signed, params);
+      expect([label, refused.status, refused.body.error]).toEqual([label, 401, "invalid_client"]);
+      expect([label, refused.body.error_description]).toEqual([
+        label,
+        expect.stringContaining(names),
+      ]);
+      expect(refused.body.error_description).not.toContain(params.client_assertion ?? "\0");
+    }
+    expect(setupped.redmine.tokenRequests).toEqual([]);
+    const issued = await redeem(setupped, signed, proof(assertion(key)));
+    expect(issued.status, JSON.stringify(issued.body)).toBe(200);
+  });
+
+  it("takes each assertion once", async () => {
+    const key = clientKey("ES256", { kid: CHATGPT_KID });
+    const setupped = keyed([key.jwk], {
+      ...CHATGPT_DOCUMENT,
+      token_endpoint_auth_signing_alg: "ES256",
+    });
+    const once = assertion(key);
+    const issued = await redeem(setupped, await chatGptSignIn(setupped), proof(once));
+    expect(issued.status).toBe(200);
+    const replayed = await renew(setupped, issued.body.refresh_token, proof(once));
+    expect([replayed.status, replayed.body.error]).toEqual([401, "invalid_client"]);
+    expect(replayed.body.error_description).toContain("already used");
+    expect((await renew(setupped, issued.body.refresh_token, proof(assertion(key)))).status).toBe(
+      200,
+    );
+  });
+
+  it("refuses an assertion from a public client, which proves itself with PKCE alone", async () => {
+    const setupped = setup();
+    const key = clientKey("ES256");
+    const signed = await signIn(setupped);
+    const claims = { iss: CLAUDE, sub: CLAUDE };
+    const refused = await redeem(setupped, signed, {
+      client_id: CLAUDE,
+      ...proof(assertion(key, claims)),
+    });
+    expect([refused.status, refused.body.error]).toEqual([401, "invalid_client"]);
+    // Without client_id, the assertion's sub names the client.
+    const named = await redeem(setupped, signed, proof(assertion(key, claims)));
+    expect([named.status, named.body.error]).toEqual([401, "invalid_client"]);
+    const issued = await redeem(setupped, signed, { client_id: CLAUDE });
+    expect(issued.status).toBe(200);
+    const renewed = await renew(setupped, issued.body.refresh_token, {
+      client_id: CLAUDE,
+      ...proof(assertion(key, claims)),
+    });
+    expect([renewed.status, renewed.body.error]).toEqual([401, "invalid_client"]);
+    expect(setupped.fetched).toEqual([CLAUDE]);
+  });
+
+  it("refuses an RSA key under 2048 bits", async () => {
+    const key = clientKey("RS256", { kid: CHATGPT_KID, bits: 1024 });
+    const setupped = keyed([key.jwk]);
+    const refused = await redeem(setupped, await chatGptSignIn(setupped), proof(assertion(key)));
+    expect([refused.status, refused.body.error]).toEqual([401, "invalid_client"]);
+  });
+
+  it("refetches a key set for an unknown kid at most once a minute, so a rotated key works", async () => {
+    const first = clientKey("RS256", { kid: "first" });
+    const setupped = keyed([first.jwk]);
+    const issued = await redeem(setupped, await chatGptSignIn(setupped), proof(assertion(first)));
+    expect(issued.status).toBe(200);
+    expect(fetchesOf(setupped, CHATGPT_JWKS)).toBe(1);
+
+    const second = clientKey("RS256", { kid: "second" });
+    setupped.documents.set(CHATGPT_JWKS, { keys: [second.jwk] });
+    let refreshToken = issued.body.refresh_token;
+    const attempt = async (jwt: string) => {
+      const answer = await renew(setupped, refreshToken, proof(jwt));
+      if (answer.status === 200) refreshToken = answer.body.refresh_token;
+      return [answer.status, answer.body.error];
+    };
+    const random = () => assertion(second, {}, { kid: randomBytes(8).toString("hex") });
+    // The set was fetched under a minute ago, so neither random kids nor the new key refetch it.
+    for (let at = 0; at < 5; at++) expect(await attempt(random())).toEqual([401, "invalid_client"]);
+    expect(await attempt(assertion(second))).toEqual([401, "invalid_client"]);
+    expect(fetchesOf(setupped, CHATGPT_JWKS)).toBe(1);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61_000);
+    for (let at = 0; at < 5; at++) expect(await attempt(random())).toEqual([401, "invalid_client"]);
+    expect(fetchesOf(setupped, CHATGPT_JWKS)).toBe(2);
+    expect(await attempt(assertion(second))).toEqual([200, undefined]);
+    expect(await attempt(assertion(first))).toEqual([401, "invalid_client"]);
+    expect(fetchesOf(setupped, CHATGPT_JWKS)).toBe(2);
+
+    // A key set is kept for five minutes, then fetched again.
+    vi.setSystemTime(Date.now() + 5 * 60_000);
+    expect(await attempt(assertion(second))).toEqual([200, undefined]);
+    expect(fetchesOf(setupped, CHATGPT_JWKS)).toBe(3);
+  });
+
+  it("answers while a key set cannot be fetched, and remembers no failure", async () => {
+    const key = clientKey("RS256", { kid: CHATGPT_KID });
+    let answer = "missing";
+    const calls: RequestInit[] = [];
+    const setupped = setup(
+      {},
+      {
+        fetchClientMetadata: async (input, init) => {
+          const url = new Request(input, init).url;
+          if (url === CHATGPT) return Response.json(CHATGPT_DOCUMENT);
+          calls.push(init!);
+          if (answer === "missing") return new Response(null, { status: 404 });
+          if (answer === "moved") {
+            return new Response(null, {
+              status: 302,
+              headers: { location: "http://169.254.169.254/" },
+            });
+          }
+          if (answer === "slow") throw new DOMException("The operation timed out.", "TimeoutError");
+          if (answer === "big") return Response.json({ keys: [key.jwk], pad: "x".repeat(17_000) });
+          if (answer === "broken") return new Response("{ not json");
+          return Response.json({ keys: [key.jwk] });
+        },
+      },
+    );
+    const signed = await chatGptSignIn(setupped);
+    const outcomes: [string, number, string][] = [
+      ["missing", 502, "server_error"],
+      ["moved", 502, "server_error"],
+      ["slow", 502, "server_error"],
+      ["big", 401, "invalid_client"],
+      ["broken", 401, "invalid_client"],
+    ];
+    for ([answer] of outcomes) {
+      const refused = await redeem(setupped, signed, proof(assertion(key)));
+      expect([answer, refused.status, refused.body.error]).toEqual(
+        outcomes.find(([name]) => name === answer),
+      );
+      expect(refused.body.error_description).toContain("key set");
+    }
+    answer = "ok";
+    expect((await redeem(setupped, signed, proof(assertion(key)))).status).toBe(200);
+    expect(calls).toHaveLength(outcomes.length + 1);
+    expect(
+      calls.every((init) => init.redirect === "manual" && init.signal instanceof AbortSignal),
+    ).toBe(true);
+    expect(setupped.redmine.tokenRequests).toHaveLength(1);
+  });
+
+  it("fails closed when the client's document no longer declares private_key_jwt, or cannot be fetched", async () => {
+    const key = clientKey("RS256", { kid: CHATGPT_KID });
+    const setupped = keyed([key.jwk]);
+    const issued = await redeem(setupped, await chatGptSignIn(setupped), proof(assertion(key)));
+    expect(issued.status).toBe(200);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    setupped.documents.set(CHATGPT, { ...CHATGPT_DOCUMENT, token_endpoint_auth_method: "none" });
+    const downgraded = await renew(setupped, issued.body.refresh_token, proof(assertion(key)));
+    expect([downgraded.status, downgraded.body.error]).toEqual([401, "invalid_client"]);
+    expect(downgraded.body.error_description).toContain("private_key_jwt");
+    expect((await renew(setupped, issued.body.refresh_token, { client_id: CHATGPT })).status).toBe(
+      401,
+    );
+    setupped.documents.delete(CHATGPT);
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    const gone = await renew(setupped, issued.body.refresh_token, proof(assertion(key)));
+    expect([gone.status, gone.body.error]).toEqual([502, "server_error"]);
+    expect(gone.body.error_description).toContain("metadata document");
+    setupped.documents.set(CHATGPT, CHATGPT_DOCUMENT);
+    expect((await renew(setupped, issued.body.refresh_token, proof(assertion(key)))).status).toBe(
+      200,
+    );
+  });
+
+  it("answers 503 to retry when the client's document needs a fetch and every slot is taken", async () => {
+    const key = clientKey("RS256", { kid: CHATGPT_KID });
+    const held = heldDocuments();
+    let documentFetches = 0;
+    const setupped = setup(
+      {},
+      {
+        fetchClientMetadata: (input, init) => {
+          const url = new Request(input, init).url;
+          if (url === CHATGPT) {
+            documentFetches++;
+            return Promise.resolve(Response.json(CHATGPT_DOCUMENT));
+          }
+          if (url === CHATGPT_JWKS) return Promise.resolve(Response.json({ keys: [key.jwk] }));
+          return held.fetchClientMetadata(input, init);
+        },
+      },
+    );
+    const issued = await redeem(setupped, await chatGptSignIn(setupped), proof(assertion(key)));
+    expect(issued.status).toBe(200);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61 * 60_000);
+    const pages = ids("flood", 8).map((id) => authorizePage(setupped, id));
+    await vi.waitFor(() => expect(held.open()).toBe(8));
+    const busy = await form(setupped.handle, TOKEN, {
+      grant_type: "refresh_token",
+      refresh_token: issued.body.refresh_token,
+      ...proof(assertion(key)),
+    });
+    expect(busy.status).toBe(503);
+    expect(busy.headers.get("retry-after")).toBe("5");
+    expect(await busy.json()).toMatchObject({ error: "temporarily_unavailable" });
+    held.release();
+    await Promise.all(pages);
+    expect((await renew(setupped, issued.body.refresh_token, proof(assertion(key)))).status).toBe(
+      200,
+    );
+    expect(documentFetches).toBe(2);
   });
 });
 
