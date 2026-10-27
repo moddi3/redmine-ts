@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { localFiles } from "../../src/node.ts";
 import { lastJson, texts } from "../connect.ts";
 import { callError, callOk, json, sent, serve } from "./harness.ts";
 import type { Route, Seen } from "./harness.ts";
@@ -199,6 +200,32 @@ describe("attachments_upload", () => {
       expect(upload?.inputSchema.properties?.path).toMatchObject({
         description: expect.stringContaining(`"${named}"`),
       });
+    });
+
+    it("names the resolved directory when the configured path is a symlink", async () => {
+      const linked = join(root, "linked");
+      symlinkSync(dir, linked);
+      const { client, seen } = await serve(ROUTES, {}, { filesDir: linked });
+      const upload = (await client.listTools()).tools.find(
+        (tool) => tool.name === "attachments_upload",
+      );
+      expect(upload?.inputSchema.properties?.path).toMatchObject({
+        description: expect.stringContaining(`"${real}"`),
+      });
+      await callOk(client, "attachments_upload", {
+        filename: "app.log",
+        path: `${linked}/logs/app.log`,
+      });
+      expect(new TextDecoder().decode(uploads(seen)[0]?.bytes)).toBe("line 1\n");
+      const result = await callError(client, "attachments_upload", {
+        filename: "x",
+        path: "link.txt",
+      });
+      expect(texts(result)[0]).toContain(`resolves outside the files directory "${real}"`);
+    });
+
+    it("throws when the directory does not exist", () => {
+      expect(() => localFiles(join(root, "missing"))).toThrow();
     });
 
     it.each([
