@@ -48,8 +48,8 @@ function each(fix: Fix): Fix {
 
 /**
  * Redmine builds these lists oldest first and reverses the whole list for a user whose "Display
- * comments" preference is newest first. The REST API does not send that preference, so the list
- * itself tells: Redmine reversed it when its first entry is later than its last.
+ * comments" preference is newest first. The REST API does not send that preference, so the order
+ * comes from the list itself. Redmine reversed it when its first entry is later than its last.
  */
 function oldestFirst(
   later: (first: Record<string, unknown>, last: Record<string, unknown>) => boolean,
@@ -62,7 +62,7 @@ function oldestFirst(
   };
 }
 
-/** 1, -1 or 0, and 0 when either side is not a number. */
+/** The sign of `a - b`, or 0 when either is not a number. */
 function compare(a: unknown, b: unknown): number {
   return typeof a === "number" && typeof b === "number" ? Math.sign(a - b) || 0 : 0;
 }

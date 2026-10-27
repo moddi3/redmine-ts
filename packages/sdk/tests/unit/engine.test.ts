@@ -1038,8 +1038,16 @@ describe("lists that Redmine reverses for a user who reads comments newest first
     ["as one entry", [journal(1, 0)], [1]],
     ["empty", [], []],
     ["newest first within one second", [journal(3, 0), journal(2, 0), journal(1, 0)], [1, 2, 3]],
-    ["oldest first, by microseconds", [journal(7, 0), journal(6, 0), journal(8, 5)], [7, 6, 8]],
-    ["newest first, by microseconds", [journal(8, 5), journal(6, 0), journal(7, 0)], [7, 6, 8]],
+    [
+      "oldest first, with a same-second pair out of id order",
+      [journal(7, 0), journal(6, 0), journal(8, 5)],
+      [7, 6, 8],
+    ],
+    [
+      "newest first, with a same-second pair out of id order",
+      [journal(8, 5), journal(6, 0), journal(7, 0)],
+      [7, 6, 8],
+    ],
   ])(
     "issue journals sent %s come back in Redmine's oldest-first order",
     async (_, sent, expected) => {
