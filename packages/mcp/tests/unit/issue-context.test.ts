@@ -680,6 +680,65 @@ describe("journal changes to long or multi-line text", () => {
     ]);
   });
 
+  const table = () => {
+    const cell = (text: string) => text.padEnd(60);
+    const row = (name: string, cells: readonly string[]) =>
+      `| ${cell(name)} | ${cells.map(cell).join(" | ")} | ${name} |`;
+    const steps = ["shipped", "invoiced", "paid", "checked by QA", "signed", "archived"];
+    const values = (codes: readonly string[]) => codes.map((code, n) => `${code} ${steps[n]}`);
+    const before = values(["1111", "2222", "3333", "4444", "5555", "6666"]);
+    const after = values(["7777", "8888", "9999", "1212", "3434", "5656"]);
+    return [
+      [row("alpha", before), row("beta", ["pending"])],
+      [row("beta", before), row("alpha", after)],
+    ];
+  };
+  const nearCap = () => {
+    const pad = (words: string, length: number) =>
+      `${words} `.repeat(Math.ceil(length / (words.length + 1))).slice(0, length);
+    const row = ([x, y]: readonly string[]) =>
+      `${pad("the weekly report", 164)} ${x} ${pad("every subscriber", 177)} ${y} ${pad("and log the result", 53)}`;
+    const notes = (note: (n: number) => string) =>
+      Array.from({ length: 8 }, (_, n) => [`c${n}`, note(n)]).flat();
+    return [
+      [
+        ...notes((n) => `old ${n} with a longer note`),
+        "gap",
+        ...[
+          ["three", "two"],
+          ["two", "four"],
+          ["four", "one"],
+          ["four", "three"],
+        ].map(row),
+      ],
+      [
+        ...notes((n) => `new ${n}`),
+        "gap",
+        ...[
+          ["four", "four"],
+          ["two", "one"],
+          ["one", "two"],
+          ["one", "three"],
+        ].map(row),
+      ],
+    ];
+  };
+
+  it.each([
+    ["their own changes fill the line", table],
+    ["the block reaches the 1000-character cap", nearCap],
+  ])("never shows a - and a + line that read the same when %s", async (_, lines) => {
+    const [old, next] = lines();
+    const [change] = (await diffOf(old!.join("\r\n"), next!.join("\r\n"))) as { diff: string }[];
+    const rows = (sign: string) =>
+      change!.diff
+        .split("\n")
+        .filter((row) => row.startsWith(`${sign} `))
+        .map((row) => row.slice(2));
+    expect(rows("+").filter((row) => rows("-").includes(row))).toEqual([]);
+    expect(change!.diff).toContain("\n[clipped: ");
+  });
+
   it("names the call for all of a diff once, at its end, however many lines it cuts", async () => {
     const paragraph = (topic: string) =>
       `${topic}: ${"the service reads each queued message, checks the sender against the allow list, writes an audit row and then hands the message to the delivery worker, which retries three times before it gives up. ".repeat(3)}`;
