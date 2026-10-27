@@ -16,11 +16,14 @@ export interface Redact {
   (value: unknown): unknown;
 }
 
-export function redactor(auth: Auth | undefined): Redact {
+/** With `reveal`, nothing is hidden, and an error still becomes its JSON. */
+export function redactor(auth: Auth | undefined, reveal: boolean): Redact {
   const sent =
     auth && ("apiKey" in auth ? auth.apiKey : "bearer" in auth ? auth.bearer : undefined);
   const credential =
-    typeof sent === "string" && sent.length >= SHORTEST_CREDENTIAL_TO_HIDE ? sent : undefined;
+    !reveal && typeof sent === "string" && sent.length >= SHORTEST_CREDENTIAL_TO_HIDE
+      ? sent
+      : undefined;
   function redact(text: string): string;
   function redact(error: RedmineError): ReturnType<RedmineError["toJSON"]>;
   function redact(value: unknown): unknown;
@@ -37,11 +40,12 @@ export function redactor(auth: Auth | undefined): Redact {
     return Object.fromEntries(
       Object.entries(value).map(([key, field]) => [
         key,
-        key === "api_key" ? HIDDEN : redact(field),
+        key === "api_key" && !reveal ? HIDDEN : redact(field),
       ]),
     );
   }
   const redactBody = (body: string): string => {
+    if (reveal) return body;
     try {
       return JSON.stringify(redact(JSON.parse(body)));
     } catch {

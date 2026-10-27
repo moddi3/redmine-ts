@@ -18,7 +18,7 @@ import { publicFetch } from "./public-fetch.ts";
 import { ACCESS_ORDER, strictest } from "./tools.ts";
 
 export type CliCommand =
-  | { kind: "serve"; config: RedmineConfig; filesDir?: string; dangerouslyRevealApiKeys?: true }
+  | { kind: "serve"; config: RedmineConfig; filesDir?: string; dangerouslyRevealApiKeys?: boolean }
   | {
       kind: "http";
       host: string;
@@ -341,7 +341,7 @@ export function parseCli(
       access: requestedAccess(REDMINE_MCP_ACCESS, flags),
     },
     ...(REDMINE_MCP_FILES_DIR === undefined ? {} : { filesDir: REDMINE_MCP_FILES_DIR }),
-    ...(flags["dangerously-reveal-api-keys"] ? { dangerouslyRevealApiKeys: true as const } : {}),
+    ...(flags["dangerously-reveal-api-keys"] ? { dangerouslyRevealApiKeys: true } : {}),
   };
 }
 
