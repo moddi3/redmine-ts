@@ -31,7 +31,7 @@ export const getIssues = op({
   id: "getIssues",
   method: "GET",
   path: "issues.json",
-  query: { include: "csv" },
+  query: { include: "csv", query_id: "scalar" },
   filters: {
     project_id: { ops: ["=", "!"] },
     category_id: { ops: ["=", "!", "*", "!*"], scoped: true },

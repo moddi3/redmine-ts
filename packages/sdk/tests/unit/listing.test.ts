@@ -87,11 +87,15 @@ describe("compileWhere", () => {
   });
 });
 
-async function sentQuery(op: AnyOp, where: object): Promise<Record<string, string[]>> {
+async function sentQuery(
+  op: AnyOp,
+  where: object,
+  input: object = {},
+): Promise<Record<string, string[]>> {
   const { list, requests } = testEngine(() =>
     json({ issues: [], time_entries: [], total_count: 0, offset: 0, limit: 100 }),
   );
-  await list(op, { where }).page();
+  await list(op, { ...input, where }).page();
   const query: Record<string, string[]> = {};
   for (const [key, value] of requests[0]?.url.searchParams ?? []) (query[key] ??= []).push(value);
   return query;
@@ -244,6 +248,25 @@ describe("project_id beyond one id or identifier", () => {
     expect(error.kind).toBe("invalid_input");
     expect(error.message).toMatch(/category_id/);
     expect(requests).toHaveLength(0);
+  });
+
+  test("refuses a saved query, since Redmine runs it without reading the long form's filters", async () => {
+    const { list, requests } = testEngine(issueServer(5));
+    const error = await failure(
+      list(ops.getIssues, { query_id: 3, where: { project_id: [1, 2] } }).all(),
+    );
+
+    expect(error.kind).toBe("invalid_input");
+    expect(error.message).toMatch(/query_id/);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("sends a saved query next to one project as before", async () => {
+    expect(await sentQuery(ops.getIssues, { project_id: 5 }, { query_id: 3 })).toEqual({
+      project_id: ["5"],
+      query_id: ["3"],
+      ...page,
+    });
   });
 
   test("drops the empty values after a trailing pipe in raw, as Redmine's split does", async () => {
