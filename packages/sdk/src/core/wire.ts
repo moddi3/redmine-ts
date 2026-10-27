@@ -48,6 +48,12 @@ export function planRequest(
     for (const [key, { wire }] of Object.entries(filters)) params.set(key, wire);
     for (const [key, value] of Object.entries(query)) params.set(key, value);
   } else {
+    if (params.has("query_id")) {
+      throw invalidInput(
+        `query_id on ${op.id} works only next to one project_id, because Redmine runs a saved query without reading the long form's filters, project_id included; send one request per project`,
+        op.id,
+      );
+    }
     for (const [key, value] of long) params.append(key, value);
   }
 

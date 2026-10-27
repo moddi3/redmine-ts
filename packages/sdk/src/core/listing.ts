@@ -16,7 +16,10 @@ export type CondText =
   | { starts_with: string }
   | { ends_with: string };
 export type CondPresence = { any: true } | { none: true };
-/** Escape hatch, sent verbatim after `field=`. For relative dates ("<t-30") and rarer operators. */
+/**
+ * Escape hatch in Redmine's short syntax, sent verbatim after `field=`. For relative dates ("<t-30") and rarer
+ * operators. Next to a `project_id` other than one id, it is read into the long form, or refused on a custom field.
+ */
 export type CondRaw = { raw: string };
 
 /**
@@ -101,26 +104,28 @@ export function longForm(
     filters.status_id = { code: "o", wire: "o" };
   }
   const entries: [string, string][] = [];
+  // A filter the client adds itself, such as the keyset bound `issue_id>=N`, moves into the long form with the rest.
   for (const [key, value] of Object.entries(query)) {
     if (own(op.filters, key)) filters[key] = { code: null, wire: value };
     else entries.push([key, value]);
   }
   for (const [key, filter] of Object.entries(filters)) {
     const { operator, values } = longCondition(op, key, filter);
-    const stray =
-      key === "project_id"
-        ? values.find((v) => !/^\d+$/.test(v) && !PROJECT_WORDS.has(v))
-        : undefined;
-    if (stray !== undefined) {
-      throw invalidInput(
-        `in a list or {not}, project_id takes ids, "mine" and "bookmarks", not "${stray}"; an identifier works only as the one value`,
-        op.id,
-      );
-    }
+    if (key === "project_id") checkProjects(op, values);
     entries.push(["f[]", key], [`op[${key}]`, operator]);
     for (const value of values) entries.push([`v[${key}][]`, value]);
   }
   return entries;
+}
+
+function checkProjects(op: AnyOp, values: readonly string[]): void {
+  const stray = values.find((v) => !/^\d+$/.test(v) && !PROJECT_WORDS.has(v));
+  if (stray !== undefined) {
+    throw invalidInput(
+      `with more than one value, {not} or raw, project_id takes ids, "mine" and "bookmarks", not "${stray}"; an identifier works only as the one value`,
+      op.id,
+    );
+  }
 }
 
 /**
@@ -143,7 +148,7 @@ function longCondition(
   if (spec !== undefined) return addShortFilter(spec.ops, wire);
   if (code === null || (code === "=" && /^[<>!*~^$]/.test(wire))) {
     throw invalidInput(
-      `filter "${key}" on ${op.id}: next to a project_id other than one id, a custom field takes no raw text and no value that starts with an operator character, because Redmine reads those by the field's format; use an operator object such as {contains}, {gte} or {any: true}, or one request per project`,
+      `filter "${key}" on ${op.id}: next to a project_id other than one id, a custom field takes no raw text and no value that starts with an operator character, because Redmine reads those by the field's format; use an operator object such as {not}, {contains}, {gte} or {any: true}, or one request per project`,
       op.id,
     );
   }
