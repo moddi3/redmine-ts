@@ -220,6 +220,42 @@ describeServers("workflow tools", (server) => {
     expect(notes(raw.response.issue.journals)).toEqual(written);
   });
 
+  it("numbers journals as #note-N, lower than Redmine's after a private note that the key cannot see", async () => {
+    const issue = await sdk.issues.create({
+      project_id: server.projectIdentifier,
+      subject: `MCP note numbers ${marker}`,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+    await sdk.issues.update({ issue_id: issue.id, notes: "Note 1" });
+    await sdk.issues.update({ issue_id: issue.id, notes: "Private 2", private_notes: true });
+    await sdk.issues.update({ issue_id: issue.id, notes: "Note 3" });
+    const login = `outsider-${marker}`;
+    const outsider = await sdk.users.create({
+      login,
+      firstname: "Out",
+      lastname: "Sider",
+      mail: `${login}@example.net`,
+      password: "outsider-pass-1",
+    });
+    cleanup.push(() => sdk.users.delete({ user_id: outsider.id }));
+    const { api_key: apiKey } = await sdk.users.get({ user_id: outsider.id });
+
+    const numbered = async (on: Client) => {
+      const { journals } = (await ok("issue_context", { issue_id: issue.id }, on))
+        .structuredContent as { journals: { note: number; notes: string }[] };
+      return journals.map(({ note, notes }) => [note, notes]);
+    };
+    expect(await numbered(client)).toEqual([
+      [1, "Note 1"],
+      [2, "Private 2"],
+      [3, "Note 3"],
+    ]);
+    expect(await numbered(await connectTo(server, "full", { apiKey }))).toEqual([
+      [1, "Note 1"],
+      [2, "Note 3"],
+    ]);
+  });
+
   it("uploads text, attaches it with issues_update, and reads it back three ways", async () => {
     const filename = `${marker}.log`;
     const ref = await value("attachments_upload", {
