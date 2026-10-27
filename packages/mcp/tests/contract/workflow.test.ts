@@ -194,22 +194,30 @@ describeServers("workflow tools", (server) => {
     const written = ["Note 1", "Note 2", "Note 3", "Note 4", "Note 5"];
     for (const notes of written) await sdk.issues.update({ issue_id: issue.id, notes });
 
-    const raw = await createRedmine({
-      baseUrl: server.baseUrl,
-      auth: { apiKey: apiKey! },
-    }).issues.get({ issue_id: issue.id, include: ["journals"] });
-    expect(raw.journals?.map((journal) => journal.notes)).toEqual(written.toReversed());
+    const notes = (journals: { notes: string }[]) => journals.map((journal) => journal.notes);
+    const read = (normalize: boolean) =>
+      createRedmine({ baseUrl: server.baseUrl, auth: { apiKey: apiKey! }, normalize }).issues.get({
+        issue_id: issue.id,
+        include: ["journals"],
+      });
+    expect(notes((await read(false)).journals)).toEqual(written.toReversed());
+    expect(notes((await read(true)).journals)).toEqual(written);
 
     const desc = await connectTo(server, "full", { apiKey });
-    const notes = (journals: { notes: string }[]) => journals.map((journal) => journal.notes);
     const context = (await ok("issue_context", { issue_id: issue.id, journals: 2 }, desc))
       .structuredContent as { journals: { notes: string }[] };
     expect(notes(context.journals)).toEqual(["Note 4", "Note 5"]);
     expect(context).toMatchObject({ journals_total: 5, journals_omitted: 3 });
 
-    const read = (await ok("issues_get", { issue_id: issue.id, include: ["journals"] }, desc))
+    const got = (await ok("issues_get", { issue_id: issue.id, include: ["journals"] }, desc))
       .structuredContent as { journals: { notes: string }[] };
-    expect(notes(read.journals)).toEqual(written);
+    expect(notes(got.journals)).toEqual(written);
+
+    const path = `issues/${issue.id}.json`;
+    const raw = (
+      await ok("raw_request", { method: "GET", path, query: { include: "journals" } }, desc)
+    ).structuredContent as { response: { issue: { journals: { notes: string }[] } } };
+    expect(notes(raw.response.issue.journals)).toEqual(written);
   });
 
   it("uploads text, attaches it with issues_update, and reads it back three ways", async () => {

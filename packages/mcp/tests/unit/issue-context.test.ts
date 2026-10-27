@@ -316,6 +316,20 @@ describe("journals that Redmine sends newest first, for a key whose user reads c
     expect(issue.journals.map((entry) => entry.id)).toEqual(JOURNALS.map((entry) => entry.id));
   });
 
+  it("raw_request returns them oldest first", async () => {
+    const { client } = await serve(NEWEST_FIRST);
+    const { response } = (
+      await callOk(client, "raw_request", {
+        method: "GET",
+        path: "issues/7.json",
+        query: { include: "journals" },
+      })
+    ).structuredContent as { response: { issue: { journals: { id: number }[] } } };
+    expect(response.issue.journals.map((entry) => entry.id)).toEqual(
+      JOURNALS.map((entry) => entry.id),
+    );
+  });
+
   it("issues_get orders them by created_on, then id, as Redmine does", async () => {
     const backdated = { ...journal(26, [], "Imported"), created_on: "2026-09-30T10:00:00Z" };
     const sameSecond = { ...journal(27, [], "Imported too"), created_on: backdated.created_on };
