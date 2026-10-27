@@ -228,7 +228,7 @@ describe("issue_context", () => {
       { field: "% Done", from: "0", to: "30" },
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- ${"x".repeat(350)}${clipped(4650, 24)}\n+ short`,
+        diff: `@@ line 1 @@\n- ${"x".repeat(349)}…\n+ short${clipped(4651, 24)}`,
       },
       { field: "Severity", from: "S2", to: "S1" },
       { field: "Custom field 99", from: null, to: "x" },
@@ -300,7 +300,7 @@ describe("issue_context", () => {
       changes: expect.arrayContaining([
         {
           field: "Description",
-          diff: `@@ line 1 @@\n- ${"x".repeat(350)}\n[clipped: 4650 more characters. ${rest}\n+ short`,
+          diff: `@@ line 1 @@\n- ${"x".repeat(349)}…\n+ short\n[clipped: 4651 more characters. ${rest}`,
         },
       ]),
     });
@@ -509,6 +509,17 @@ describe("journal changes to long or multi-line text", () => {
   const diffOf = async (old_value: string | null, new_value: string | null) =>
     changesFor(attr("description", old_value, new_value));
 
+  /** The description's diff as issue_context returns it, and with the journal in full. */
+  async function cutAndWhole(old_value: string, new_value: string) {
+    const { client } = await serveDetails([attr("description", old_value, new_value)]);
+    const diffFor = async (full: number[]) => {
+      const { journals } = (await callOk(client, "issue_context", { issue_id: 7, full }))
+        .structuredContent as { journals: { changes: { diff: string }[] }[] };
+      return journals[0]!.changes[0]!.diff;
+    };
+    return { cut: await diffFor([]), whole: await diffFor([1]) };
+  }
+
   it("shows an edited description as the changed lines with a line of context, without from and to", async () => {
     expect(await diffOf(STEPS.join("\r\n"), edited({ 14: "14. Step fourteen" }))).toEqual([
       {
@@ -563,48 +574,143 @@ describe("journal changes to long or multi-line text", () => {
     expect(await diffOf(old_value, new_value)).toEqual([{ field: "Description", diff }]);
   });
 
-  it("shows a long line from 40 characters before its change to 40 after it, with the clip marker", async () => {
+  it("shows a long line from 40 characters before its change to 40 after it, with … where text is left out", async () => {
     const before = "lorem ".repeat(500);
     const after = " ipsum".repeat(500);
-    const shown = (word: string) =>
-      `…${before.slice(-40)}${word}${after.slice(0, 40)}${clipped(5920)}`;
+    const shown = (word: string) => `…${before.slice(-40)}${word}${after.slice(0, 40)}…`;
     expect(await diffOf(`${before}old${after}`, `${before}new${after}`)).toEqual([
-      { field: "Description", diff: `@@ line 1 @@\n- ${shown("old")}\n+ ${shown("new")}` },
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- ${shown("old")}\n+ ${shown("new")}${clipped(2 * (6003 - 83))}`,
+      },
     ]);
   });
 
-  it("shows both changes in a 350-character line edited in two places", async () => {
+  it("shows both changes in a line edited in two places, each with 40 characters around it", async () => {
     const line =
       "The weekly digest goes to every subscriber on the main list. It carries product news, the blog roundup and a short survey, and its footer links the preference center. When a message bounces, the system retries delivery three times before it marks the address as invalid and moves it to the suppression list, and the team lead gets a report on Monday.";
     const twice = line
       .replace("every subscriber", "every active subscriber")
       .replace("three times", "five times");
+    const active = twice.indexOf("active ");
+    const five = twice.indexOf("five");
     expect(line).toHaveLength(350);
     expect(await diffOf(line, twice)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- ${line}\n+ ${twice.slice(0, 269)}${clipped(87)}`,
+        diff: `@@ line 1 @@\n- ${line}\n+ ${twice.slice(0, active + 47)}…${twice.slice(five - 40, five + 43)}…${clipped(twice.length - (active + 47) - 83)}`,
       },
     ]);
-    expect(twice.slice(0, 269)).toContain("five times");
   });
 
-  it("shows a long line from before its first change to after its last, cut at 350 characters", async () => {
+  it("shows every change in a long line, however far apart", async () => {
+    const line = `Alpha: send the digest${" and the team checks the numbers again".repeat(9)} to the list at nine in the morning.`;
+    const edited = line.replace("Alpha", "Omega").replace("nine", "ten");
+    expect(line).toHaveLength(400);
+    expect(line.indexOf("nine")).toBe(380);
+    expect(await diffOf(line, edited)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- ${line.slice(0, 44)}…${line.slice(340)}\n+ ${edited.slice(0, 44)}…${edited.slice(340)}${clipped(2 * (340 - 44))}`,
+      },
+    ]);
+  });
+
+  it("shows each change in a long line with 40 characters around it, joining changes whose windows touch", async () => {
     const words = Array.from({ length: 200 }, (_, n) => `w${String(n).padStart(3, "0")} `).join("");
-    const near = words.replace("w040", "W040").replace("w080", "W080");
+    const near = words.replace("w040", "W040").replace("w050", "W050");
     expect(await diffOf(words, near)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- …${words.slice(160, 441)}${clipped(719)}\n+ …${near.slice(160, 441)}${clipped(719)}`,
+        diff: `@@ line 1 @@\n- …${words.slice(160, 291)}…\n+ …${near.slice(160, 291)}…${clipped(2 * (1000 - 131))}`,
       },
     ]);
     const far = words.replace("w010", "W010").replace("w150", "W150");
     expect(await diffOf(words, far)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- …${words.slice(10, 360)}${clipped(650)}\n+ …${far.slice(10, 360)}${clipped(650)}`,
+        diff: `@@ line 1 @@\n- …${words.slice(10, 91)}…${words.slice(710, 791)}…\n+ …${far.slice(10, 91)}…${far.slice(710, 791)}…${clipped(2 * (1000 - 162))}`,
       },
     ]);
+  });
+
+  it("cuts a line whose changes do not fit in 350 characters and ends it with …", async () => {
+    const word = (n: number) => `w${String(n).padStart(3, "0")} `;
+    const words = Array.from({ length: 200 }, (_, n) => word(n)).join("");
+    const capitals = Array.from({ length: 200 }, (_, n) =>
+      n % 20 === 0 ? word(n).toUpperCase() : word(n),
+    ).join("");
+    const shown = (line: string) =>
+      `${[
+        [0, 41],
+        [60, 141],
+        [160, 241],
+        [260, 341],
+        [360, 421],
+      ]
+        .map(([from, to]) => line.slice(from, to))
+        .join("…")}…`;
+    expect(shown(words)).toHaveLength(350);
+    expect(await diffOf(words, capitals)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- ${shown(words)}\n+ ${shown(capitals)}${clipped(2 * (1000 - 345))}`,
+      },
+    ]);
+  });
+
+  it("pairs each changed long line with one line of its block, and shows what tells apart lines whose changes read the same", async () => {
+    const pad = (words: string, length: number) =>
+      `${words} `.repeat(Math.ceil(length / (words.length + 1))).slice(0, length);
+    const row = (x: string, y: string) =>
+      `${pad("Send the weekly report", 120)} ${x} ${pad("to every active subscriber of the list", 330)} ${y} ${pad("and log the result", 60)}`;
+    const old = [row("one", "one"), row("two", "two")];
+    const next = [row("one", "two"), row("two", "one")];
+    const shown = (line: string) => `…${line.slice(81, 164)}…${line.slice(416, 499)}…`;
+    expect(await diffOf(old.join("\r\n"), next.join("\r\n"))).toEqual([
+      {
+        field: "Description",
+        diff: [
+          "@@ line 1 @@",
+          ...old.map((line) => `- ${shown(line)}`),
+          ...next.map((line) => `+ ${shown(line)}`),
+        ]
+          .join("\n")
+          .concat(clipped(4 * (520 - 166))),
+      },
+    ]);
+  });
+
+  it("names the call for all of a diff once, at its end, however many lines it cuts", async () => {
+    const paragraph = (topic: string) =>
+      `${topic}: ${"the service reads each queued message, checks the sender against the allow list, writes an audit row and then hands the message to the delivery worker, which retries three times before it gives up. ".repeat(3)}`;
+    const [imports, exports] = [paragraph("Import"), paragraph("Export")];
+    const tenant = imports.replace("audit row", "audit row with the tenant id");
+    const five = exports.replace("three times", "five times");
+    const audit = imports.indexOf("audit row ") + "audit row ".length;
+    const retries = exports.indexOf("three");
+    const [change] = (await diffOf(
+      ["Intro", imports, exports, "Outro"].join("\r\n"),
+      ["Intro", tenant, five, "Outro"].join("\r\n"),
+    )) as { diff: string }[];
+    expect(change!.diff).toBe(
+      [
+        "@@ line 1 @@",
+        "  Intro",
+        `- …${imports.slice(audit - 40, audit + 40)}…`,
+        `- …${exports.slice(retries - 40, retries + 44)}…`,
+        `+ …${tenant.slice(audit - 40, audit + 59)}…`,
+        `+ …${five.slice(retries - 40, retries + 43)}…`,
+        "  Outro",
+      ]
+        .join("\n")
+        .concat(
+          clipped(
+            imports.length - 80 + exports.length - 84 + tenant.length - 99 + five.length - 83,
+          ),
+        ),
+    );
+    expect(change!.diff.match(/\[clipped: /g)).toHaveLength(1);
   });
 
   it("shows a line that fits in 350 characters whole, wherever it changed", async () => {
@@ -623,17 +729,17 @@ describe("journal changes to long or multi-line text", () => {
     expect(await diffOf(`${words}end`, `${words}fin`)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- …${words.slice(-40)}end${clipped(380)}\n+ …${words.slice(-40)}fin${clipped(380)}`,
+        diff: `@@ line 1 @@\n- …${words.slice(-40)}end\n+ …${words.slice(-40)}fin${clipped(2 * 380)}`,
       },
     ]);
   });
 
-  it("ends an unchanged line it cuts with the clip marker", async () => {
+  it("shows the start of a long unchanged line and ends it with …", async () => {
     const heading = "c".repeat(500);
     expect(await diffOf(`${heading}\r\nshort`, `${heading}\r\nshorter`)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n  ${"c".repeat(350)}${clipped(150)}\n- short\n+ shorter`,
+        diff: `@@ line 1 @@\n  ${"c".repeat(349)}…\n- short\n+ shorter${clipped(151)}`,
       },
     ]);
   });
@@ -649,16 +755,16 @@ describe("journal changes to long or multi-line text", () => {
       `${above}${paragraph}\r\nend`,
       `${newAbove}${changed}\r\nend`,
     )) as { diff: string }[];
-    expect(change!.diff).toContain(`\n- …${paragraph.slice(260, 347)}${clipped(913)}\n`);
-    expect(change!.diff).toContain(`\n+ …${changed.slice(260, 347)}${clipped(913)}\n`);
+    expect(change!.diff).toContain(`\n- …${paragraph.slice(260, 347)}…\n`);
+    expect(change!.diff).toContain(`\n+ …${changed.slice(260, 347)}…\n`);
   });
 
-  it("shows a long line with no counterpart from its start, with the clip marker", async () => {
+  it("shows a long line with no partner from its start and ends it with …", async () => {
     const paragraph = "word ".repeat(200);
     expect(await diffOf("intro", `intro\r\n${paragraph}`)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n  intro\n+ ${paragraph.slice(0, 350)}${clipped(650)}`,
+        diff: `@@ line 1 @@\n  intro\n+ ${paragraph.slice(0, 349)}…${clipped(651)}`,
       },
     ]);
   });
@@ -669,7 +775,7 @@ describe("journal changes to long or multi-line text", () => {
     expect(await diffOf(`${smiles}😀${rest}`, `${smiles}😁${rest}`)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- …${"😀".repeat(21)}x${"😀".repeat(19)}${clipped(422)}\n+ …${"😀".repeat(20)}😁x${"😀".repeat(19)}${clipped(422)}`,
+        diff: `@@ line 1 @@\n- …${"😀".repeat(21)}x${"😀".repeat(19)}…\n+ …${"😀".repeat(20)}😁x${"😀".repeat(19)}…${clipped(2 * 422)}`,
       },
     ]);
   });
@@ -709,28 +815,18 @@ describe("journal changes to long or multi-line text", () => {
     const paragraph = "word ".repeat(200);
     const old = [paragraph, ...Array.from({ length: 100 }, (_, n) => `old line ${n + 1}`)];
     const rewritten = [`${paragraph}more`, ...old.slice(1).map((l) => l.replace("old", "new"))];
-    const { client } = await serveDetails([
-      attr("description", old.join("\r\n"), rewritten.join("\r\n")),
-    ]);
-    const diffFor = async (full: number[]) => {
-      const { journals } = (await callOk(client, "issue_context", { issue_id: 7, full }))
-        .structuredContent as { journals: { changes: { diff: string }[] }[] };
-      return journals[0]!.changes[0]!.diff;
-    };
-    expect(await diffFor([1])).toBe(
+    const { cut, whole } = await cutAndWhole(old.join("\r\n"), rewritten.join("\r\n"));
+    expect(whole).toBe(
       ["@@ line 1 @@", ...old.map((l) => `- ${l}`), ...rewritten.map((l) => `+ ${l}`)].join("\n"),
     );
-    const clippedDiff = await diffFor([]);
-    expect(
-      clippedDiff.startsWith(`@@ line 1 @@\n- …${paragraph.slice(-40)}${clipped(960)}\n`),
-    ).toBe(true);
-    expect(clippedDiff).toMatch(
+    expect(cut.startsWith(`@@ line 1 @@\n- …${paragraph.slice(-40)}\n- old line 1\n`)).toBe(true);
+    expect(cut).toMatch(
       /\n\[clipped: \d+ more characters\. Call issue_context with issue_id 7, journals 0 and full \[1\] for all of it\.\]$/,
     );
   });
 
-  it("clips a diff longer than 1000 characters with the clip marker", async () => {
-    const old = Array.from({ length: 100 }, (_, n) => `old line ${n + 1}`);
+  it("stops a diff at 1000 characters, ending the line it cuts with …, and counts what the full diff adds", async () => {
+    const old = Array.from({ length: 100 }, (_, n) => `old line ${n + 1}.`);
     const rewritten = old.map((line) => line.replace("old", "new"));
     const full = [
       "@@ line 1 @@",
@@ -738,12 +834,20 @@ describe("journal changes to long or multi-line text", () => {
       ...rewritten.map((l) => `+ ${l}`),
     ].join("\n");
     const [change] = (await diffOf(old.join("\r\n"), rewritten.join("\r\n"))) as { diff: string }[];
-    expect(
-      change!.diff.startsWith(
-        `${full.slice(0, 1000)}\n[clipped: ${full.length - 1000} more characters. `,
-      ),
-    ).toBe(true);
-    expect(change!.diff).not.toContain("old line 100");
+    expect(change!.diff).toBe(`${full.slice(0, 999)}…${clipped(full.length - 999)}`);
+  });
+
+  it("lists a rewrite of more than 1000 lines as a shorter one is listed, removed lines first", async () => {
+    const old = Array.from({ length: 1200 }, (_, n) => `old ${n}`);
+    const rewritten = Array.from({ length: 1200 }, (_, n) => `new ${n}`);
+    const full = [
+      "@@ line 1 @@",
+      ...old.map((l) => `- ${l}`),
+      ...rewritten.map((l) => `+ ${l}`),
+    ].join("\n");
+    const { cut, whole } = await cutAndWhole(old.join("\r\n"), rewritten.join("\r\n"));
+    expect(whole).toBe(full);
+    expect(cut).toBe(`${full.slice(0, 999)}…${clipped(full.length - 999)}`);
   });
 
   it("shows a multi-line custom field the same way", async () => {

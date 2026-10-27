@@ -2,9 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { CHANGE_CAP } from "../../src/workflow/clip.ts";
 import { LINE_CAP, lineDiff } from "../../src/workflow/diff.ts";
 
-const CLIPPED = "Read the rest elsewhere.";
-const WHOLE = undefined;
-const MARKER = /^\[clipped: (\d+) more characters\. Read the rest elsewhere\.\]$/;
+const REST = "Read the rest elsewhere.";
+const MARKER = /\n\[clipped: (\d+) more characters\. Read the rest elsewhere\.\]$/;
 
 function mulberry32(seed: number): () => number {
   let state = seed;
@@ -29,9 +28,44 @@ function fewestEdits(a: readonly string[], b: readonly string[]): number {
   return a.length + b.length - 2 * row[b.length]!;
 }
 
+/** The characters two lines share at their start and at their end, never overlapping. */
+function shared(a: string, b: string) {
+  let prefix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
+  let suffix = 0;
+  while (
+    suffix < a.length - prefix &&
+    suffix < b.length - prefix &&
+    a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+  )
+    suffix++;
+  return { prefix, suffix };
+}
+
+interface Case {
+  old: string[];
+  next: string[];
+  from: string;
+  to: string;
+  /** Lines the generator edited, by their index in the old and new text, and where each edit sits in them. */
+  edited: { old: number; next: number; at: [number[], number[]] }[];
+}
+
+function joined(random: () => number, old: string[], next: string[], edited: Case["edited"] = []) {
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
+  const join = (lines: readonly string[]) =>
+    lines.reduce(
+      (text, line, n) => (n === 0 ? line : `${text}${pick(["\n", "\r\n", "\r"])}${line}`),
+      "",
+    );
+  const [from, to] = [join(old), join(next)];
+  const split = (text: string) => (text === "" ? [] : text.split(/\r\n|\r|\n/));
+  return { old: split(from), next: split(to), from, to, edited };
+}
+
 const WORDS = ["alpha", "beta", "gamma", "delta", "😀", "x", "", " "];
 
-function texts(random: () => number) {
+function texts(random: () => number): Case {
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
   const paragraphs = Array.from({ length: 1 + Math.floor(random() * 3) }, () =>
     Array.from({ length: 70 + Math.floor(random() * 150) }, () => pick(WORDS.slice(0, 5))).join(
@@ -64,114 +98,251 @@ function texts(random: () => number) {
     else if (roll < 0.5) next.splice(at, 0, ...Array.from({ length: run }, line));
     else if (at < next.length) next[at] = edit(next[at]!);
   }
-  const join = (lines: readonly string[]) =>
-    lines.reduce(
-      (text, line, n) => (n === 0 ? line : `${text}${pick(["\n", "\r\n", "\r"])}${line}`),
-      "",
-    );
-  const from = join(old);
-  const to = join(next);
-  const split = (text: string) => (text === "" ? [] : text.split(/\r\n|\r|\n/));
-  return { old: split(from), next: split(to), from, to };
+  return joined(random, old, next);
 }
 
-interface Shown {
-  sign: string;
-  shown: string;
-  marker: number | undefined;
-  actual: string;
-}
-
-/** Each line the diff shows, matched to the line of the old or new text it stands for. */
-function read(diff: string, old: readonly string[], next: readonly string[], capped: boolean) {
-  const rows = diff.split("\n");
-  if (capped) rows.splice(-2);
-  const shown: Shown[][] = [];
-  let oldAt = 0;
-  let newAt = 0;
-  for (const row of rows) {
-    const hunk = /^@@ line (\d+) @@$/.exec(row);
-    const marker = MARKER.exec(row);
-    if (hunk) {
-      const start = Number(hunk[1]) - 1;
-      const oldStart = start + oldAt - newAt;
-      expect(old.slice(oldAt, oldStart)).toEqual(next.slice(newAt, start));
-      oldAt = oldStart;
-      newAt = start;
-      shown.push([]);
-    } else if (marker) {
-      shown.at(-1)!.at(-1)!.marker = Number(marker[1]);
-    } else {
-      const sign = row.slice(0, 1);
-      const actual = sign === "+" ? next[newAt++]! : old[oldAt++]!;
-      if (sign === " ") expect(next[newAt++]).toBe(actual);
-      shown.at(-1)!.push({ sign, shown: row.slice(2), marker: undefined, actual });
-    }
-  }
-  if (!capped) expect(old.slice(oldAt)).toEqual(next.slice(newAt));
-  return { capped, lines: shown.flat(), hunks: shown };
-}
-
-function check(from: string, to: string, old: readonly string[], next: readonly string[]) {
-  const diff = lineDiff(from, to, CLIPPED);
-  if (fewestEdits(old, next) === 0) {
-    expect(diff).toBe(from === to ? "No change." : "Only line endings changed.");
-    return { cut: 0 };
-  }
-  const { capped, lines, hunks } = read(diff, old, next, diff.length > CHANGE_CAP);
-  let cut = 0;
-  for (const [n, { shown, marker, actual }] of lines.entries()) {
-    const markerCutOff = capped && n === lines.length - 1 && marker === undefined;
-    if (markerCutOff) continue;
-    if (actual.length <= LINE_CAP) {
-      expect(shown).toBe(actual);
-      expect(marker).toBeUndefined();
+/**
+ * Two to four similar long lines in one block: the same runs of words around two words of each line's
+ * own. Either up to four words between those two change in each line, or the two words come from three
+ * and change, as in rows of a table.
+ */
+function rows(random: () => number): Case {
+  const int = (n: number) => Math.floor(random() * n);
+  const token = () =>
+    Array.from({ length: 3 + int(6) }, () => String.fromCharCode(97 + int(26))).join("");
+  const run = (length: number) => {
+    const words: string[] = [];
+    while (words.join(" ").length < length) words.push(token());
+    return words;
+  };
+  const few = random() < 0.4;
+  const own = () => (few ? ["one", "two", "three"][int(3)]! : token());
+  const [head, middle, end] = [run(60 + int(200)), run(150 + int(300)), run(40 + int(100))];
+  const row = () => [...head, own(), ...middle, own(), ...end];
+  const offsets = (words: readonly string[], at: readonly number[]) =>
+    at.map((n) => words.slice(0, n).join(" ").length + (n > 0 ? 1 : 0));
+  const old: string[][] = Array.from({ length: 2 + int(3) }, row);
+  const next: string[][] = [];
+  const edited: Case["edited"] = [];
+  for (const words of old) {
+    if (int(10) < 2) {
+      next.push(words);
       continue;
     }
-    cut++;
-    const head = shown.startsWith("…");
-    const core = shown.slice(head ? 1 : 0);
-    expect(core.length).toBeLessThanOrEqual(LINE_CAP);
-    expect(head ? actual.indexOf(core, 1) > 0 : actual.startsWith(core)).toBe(true);
-    expect(marker).toBe(actual.length - core.length);
-  }
-  for (const hunk of hunks) {
-    let block: Shown[] = [];
-    for (const line of [...hunk, undefined]) {
-      if (line !== undefined && line.sign !== " ") {
-        block.push(line);
+    if (few) {
+      next.push([...head, own(), ...middle, own(), ...end]);
+      continue;
+    }
+    const spots = new Set(
+      Array.from({ length: 1 + int(4) }, () => head.length + 1 + int(middle.length)),
+    );
+    const changed: string[] = [];
+    const at: [number[], number[]] = [[], []];
+    for (const [n, word] of words.entries()) {
+      if (!spots.has(n)) {
+        changed.push(word);
         continue;
       }
-      const removed = new Set(
-        block.filter((l) => l.sign === "-").map((l) => `${l.shown}${l.marker}`),
-      );
-      for (const added of block.filter((l) => l.sign === "+")) {
-        expect(removed.has(`${added.shown}${added.marker}`)).toBe(false);
-      }
-      block = [];
+      const roll = int(3);
+      if (roll !== 1) at[0].push(n);
+      if (roll !== 2) at[1].push(changed.length);
+      if (roll !== 2) changed.push(token());
+      if (roll === 1) changed.push(word);
+    }
+    edited.push({
+      old: old.indexOf(words),
+      next: next.length,
+      at: [offsets(words, at[0]), offsets(changed, at[1])],
+    });
+    next.push(changed);
+  }
+  const before = Array.from({ length: int(3) }, () => ["a", "b", "c"][int(3)]!);
+  const lines = (words: readonly string[][]) => [...before, ...words.map((w) => w.join(" "))];
+  return joined(
+    random,
+    lines(old),
+    lines(next),
+    edited.map((edit) => ({
+      ...edit,
+      old: edit.old + before.length,
+      next: edit.next + before.length,
+    })),
+  );
+}
+
+interface Row {
+  sign: string;
+  shown: string;
+  /** Its index in the old text, or in the new text for an added line. */
+  line: number;
+  text: string;
+  /** The characters the diff had room for on this line. */
+  budget: number;
+}
+
+/** Each line the diff shows by run, with the line of the old or new text it stands for. */
+function read(
+  body: string,
+  old: readonly string[],
+  next: readonly string[],
+  whole: boolean,
+  fail: (problem: string) => void,
+) {
+  const hunks: Row[][] = [];
+  let oldAt = 0;
+  let newAt = 0;
+  let start = 0;
+  const same = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && a.every((line, n) => line === b[n]);
+  for (const row of body.split("\n")) {
+    const budget = whole ? Infinity : Math.min(LINE_CAP, CHANGE_CAP - (start - 1) - 3);
+    start += row.length + 1;
+    const hunk = /^@@ line (\d+) @@$/.exec(row);
+    if (hunk) {
+      const at = Number(hunk[1]) - 1;
+      const oldStart = at + oldAt - newAt;
+      if (!same(old.slice(oldAt, oldStart), next.slice(newAt, at))) fail(`${row} skips a change`);
+      oldAt = oldStart;
+      newAt = at;
+      hunks.push([]);
+      continue;
+    }
+    const sign = row.slice(0, 1);
+    if (!["-", "+", " "].includes(sign) || row.slice(1, 2) !== " ") fail(`bad row ${row}`);
+    const line = sign === "+" ? newAt++ : oldAt++;
+    const text = sign === "+" ? next[line]! : old[line]!;
+    if (sign === " " && next[newAt++] !== text) fail(`unchanged line ${line} differs`);
+    hunks.at(-1)!.push({ sign, shown: row.slice(2), line, text, budget });
+  }
+  if (whole && !same(old.slice(oldAt), next.slice(newAt))) fail("a change after the last run");
+  return hunks;
+}
+
+/** Whether `shown` is `text` with … in place of each part left out. */
+function fits(shown: string, text: string): boolean {
+  const pieces = shown.split("…");
+  if (!text.startsWith(pieces[0]!)) return false;
+  let at = pieces[0]!.length;
+  for (const piece of pieces.slice(1, -1)) {
+    const found = text.indexOf(piece, at + 1);
+    if (piece === "" || found < 0) return false;
+    at = found + piece.length;
+  }
+  const last = pieces.at(-1)!;
+  if (pieces.length === 1) return at === text.length;
+  return last === "" ? at < text.length : text.endsWith(last) && text.length - last.length > at;
+}
+
+/** The README's pairs in a block: each long line with the line across it that shares the most at its start and end, one to one, the earlier lines first on a tie. */
+function pairs(block: readonly Row[]): [Row, Row][] {
+  const candidates: [number, Row, Row][] = [];
+  for (const removed of block.filter((row) => row.sign === "-")) {
+    for (const added of block.filter((row) => row.sign === "+")) {
+      if (removed.text.length <= LINE_CAP && added.text.length <= LINE_CAP) continue;
+      const { prefix, suffix } = shared(removed.text, added.text);
+      candidates.push([prefix + suffix, removed, added]);
     }
   }
-  if (!capped) {
-    const changed = lines.filter((line) => line.sign !== " ").length;
-    expect(changed).toBe(fewestEdits(old, next));
+  candidates.sort((a, b) => b[0] - a[0] || a[1].line - b[1].line || a[2].line - b[2].line);
+  const taken = new Set<Row>();
+  const out: [Row, Row][] = [];
+  for (const [, removed, added] of candidates) {
+    if (taken.has(removed) || taken.has(added)) continue;
+    taken.add(removed).add(added);
+    out.push([removed, added]);
   }
-  const whole = read(lineDiff(from, to, WHOLE), old, next, false);
-  for (const { shown, marker, actual } of whole.lines) {
-    expect(shown).toBe(actual);
-    expect(marker).toBeUndefined();
+  return out;
+}
+
+const tally = { cases: 0, cut: 0, shown: 0, hiddenByCut: 0 };
+
+/** What the diffs of one case get wrong. */
+function check({ old, next, from, to, edited }: Case): string[] {
+  const problems: string[] = [];
+  const fail = (problem: string) => problems.push(problem);
+  tally.cases++;
+  const diff = lineDiff(from, to, REST);
+  const edits = fewestEdits(old, next);
+  if (edits === 0) {
+    if (diff !== (from === to ? "No change." : "Only line endings changed.")) fail(diff);
+    return problems;
   }
-  expect(whole.lines.filter((line) => line.sign !== " ")).toHaveLength(fewestEdits(old, next));
-  return { cut };
+  const whole = lineDiff(from, to, undefined);
+  const wholeRows = read(whole, old, next, true, fail).flat();
+  if (wholeRows.some((row) => row.shown !== row.text)) fail("a line in full is cut");
+  if (wholeRows.filter((row) => row.sign !== " ").length !== edits) fail("not the fewest edits");
+
+  const marker = MARKER.exec(diff);
+  const body = marker === null ? diff : diff.slice(0, marker.index);
+  if (body.length > CHANGE_CAP) fail("past the cap");
+  const left = whole.length - (body.length - (body.split("…").length - 1));
+  if ((marker === null ? 0 : Number(marker[1])) !== left) fail(`marker should count ${left}`);
+  const hunks = read(body, old, next, false, fail);
+  const complete = hunks.flat().length === wholeRows.length;
+  for (const row of hunks.flat()) {
+    if (row.text.length <= row.budget) {
+      if (row.shown !== row.text) fail(`${row.sign} line ${row.line} is cut`);
+      continue;
+    }
+    tally.cut++;
+    if (row.shown.length > row.budget) fail(`${row.sign} line ${row.line} is past its room`);
+    if (!fits(row.shown, row.text)) fail(`${row.sign} line ${row.line} is not its text with …`);
+  }
+  for (const hunk of hunks) {
+    const blocks = hunk.reduce<Row[][]>((out, row, n) => {
+      if (row.sign === " ") return out;
+      if (n === 0 || hunk[n - 1]!.sign === " ") out.push([]);
+      out.at(-1)!.push(row);
+      return out;
+    }, []);
+    for (const block of blocks) {
+      for (const removed of block.filter((row) => row.sign === "-" && row.budget === LINE_CAP)) {
+        for (const added of block.filter((row) => row.sign === "+" && row.budget === LINE_CAP)) {
+          if (removed.text !== added.text && removed.shown === added.shown) {
+            fail(`- line ${removed.line} and + line ${added.line} read the same`);
+          }
+        }
+      }
+      if (!complete) continue;
+      for (const [removed, added] of pairs(block)) {
+        const { prefix, suffix } = shared(removed.text, added.text);
+        const made = edited.find((edit) => edit.old === removed.line && edit.next === added.line);
+        const sides: [Row, number[]][] = [
+          [removed, [prefix, removed.text.length - suffix, ...(made?.at[0] ?? [])]],
+          [added, [prefix, added.text.length - suffix, ...(made?.at[1] ?? [])]],
+        ];
+        for (const [row, at] of sides) {
+          if (row.text.length <= row.budget) continue;
+          if (row.shown.length >= row.budget - 1) {
+            tally.hiddenByCut++;
+            continue;
+          }
+          for (const n of at) {
+            tally.shown++;
+            if (!row.shown.includes(row.text.slice(Math.max(0, n - 30), n + 38))) {
+              fail(`${row.sign} line ${row.line} hides offset ${n}`);
+            }
+          }
+        }
+      }
+    }
+  }
+  return problems;
 }
 
 describe("lineDiff against a reference LCS", () => {
-  it("transforms the old text into the new with the fewest edits, never shows a changed long line as unchanged, and marks every cut, or shows every line whole for a journal in full", () => {
+  it("transforms the old text into the new with the fewest edits, shows every change of a long line against its partner, marks every cut with …, and counts what the full diff adds", () => {
     const random = mulberry32(53);
-    let cut = 0;
-    for (let n = 0; n < 6000; n++) {
-      const { old, next, from, to } = texts(random);
-      cut += check(from, to, old, next).cut;
-    }
-    expect(cut).toBeGreaterThan(1000);
+    const cases = [
+      ...Array.from({ length: 2000 }, () => texts(random)),
+      ...Array.from({ length: 1000 }, () => rows(random)),
+    ];
+    const failed = cases
+      .map((c) => ({ problems: check(c), from: c.from, to: c.to }))
+      .filter(({ problems }) => problems.length > 0);
+    expect(failed.slice(0, 1)).toEqual([]);
+    expect(tally.cut).toBeGreaterThan(1000);
+    expect(tally.shown).toBeGreaterThan(8000);
+    expect(tally.hiddenByCut).toBeLessThan(tally.shown / 10);
   });
 });
