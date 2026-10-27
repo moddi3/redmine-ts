@@ -81,8 +81,10 @@ export function createRedmineMcpServer(
 ): Server {
   const { files, observe } = options;
   const access = config.access ?? "full";
-  const rm = createRedmine(
-    observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
+  const rm = journalsOldestFirst(
+    createRedmine(
+      observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
+    ),
   );
   const context: ToolContext = { lookups: createLookups(rm), files };
   const tools = [...workflowTools(access, files !== undefined), ...catalogTools];
@@ -136,6 +138,26 @@ function observed(
     const response = await send(input, init);
     exchange.status = response.status;
     return response;
+  };
+}
+
+/**
+ * Redmine sorts an issue's journals by created_on, then id, and reverses them when the key user's
+ * "Display comments" preference is newest first.
+ */
+function journalsOldestFirst(rm: Client): Client {
+  return {
+    ...rm,
+    issues: {
+      ...rm.issues,
+      get: async (input, options) => {
+        const issue = await rm.issues.get(input, options);
+        issue.journals?.sort(
+          (a, b) => Date.parse(a.created_on) - Date.parse(b.created_on) || a.id - b.id,
+        );
+        return issue;
+      },
+    },
   };
 }
 
