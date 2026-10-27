@@ -135,7 +135,7 @@ const IssueContextSchema = z.object({
       "The newest journals and those in full, oldest first, with ids in changes resolved to names.",
     ),
   journals_total: z.int(),
-  journals_omitted: z.int().describe("Older journals left out."),
+  journals_omitted: z.int().describe("Journals left out."),
 });
 
 type IssueContext = z.output<typeof IssueContextSchema>;
@@ -185,7 +185,7 @@ async function issueContext(
   const unknown = [...whole].filter((id) => !all.some((journal) => journal.id === id));
   if (unknown.length > 0) {
     throw new ToolError(
-      `Issue ${issue.id} has no journal ${unknown.join(" or ")} that this API key can read.`,
+      `Issue ${issue.id} has no journal ${unknown.join(" or ")} that this API key can read. Journal ids come from journals[].id or a clip marker.`,
       { kind: "unknown_journal", issue_id: issue.id, journal_ids: unknown },
     );
   }
