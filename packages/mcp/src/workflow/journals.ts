@@ -36,6 +36,7 @@ const ATTRIBUTES: Readonly<Record<string, { label: string; kind?: Kind }>> = {
   category_id: { label: "Category", kind: "category" },
   fixed_version_id: { label: "Target version", kind: "version" },
   parent_id: { label: "Parent task" },
+  child_id: { label: "Subtask" },
   subject: { label: "Subject" },
   description: { label: "Description" },
   start_date: { label: "Start date" },
@@ -126,7 +127,7 @@ function renderer(
   if (property === "relation") return (id) => `${RELATION_PHRASES[name] ?? name} #${id}`;
   // A cf value is the stored value as is, an attachment's is its filename.
   if (property !== "attr") return (value) => value;
-  if (name === "parent_id") return (id) => `#${id}`;
+  if (name === "parent_id" || name === "child_id") return (id) => `#${id}`;
   if (name === "description") return (text) => clip(text, CHANGE_CAP, rest);
   const kind = ATTRIBUTES[name]?.kind;
   const known = kind === undefined ? undefined : names.get(kind);
