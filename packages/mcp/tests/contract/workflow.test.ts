@@ -309,6 +309,37 @@ describeServers("workflow tools", (server) => {
     expect(lines).toContain(`- Subtask: #${child.id} → none`);
   });
 
+  it("shows description edits as the lines that changed, whether sent with LF or CRLF", async () => {
+    const steps = Array.from({ length: 30 }, (_, n) => `${n + 1}. Step ${n + 1}`);
+    const issue = await sdk.issues.create({
+      project_id: server.projectIdentifier,
+      subject: `MCP description diff ${marker}`,
+      description: steps.join("\n"),
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+    const once = steps.with(13, "14. Step fourteen");
+    await sdk.issues.update({ issue_id: issue.id, description: once.join("\n") });
+    expect((await sdk.issues.get({ issue_id: issue.id })).description).toBe(once.join("\r\n"));
+    const twice = once.with(14, "15. Step fifteen");
+    await sdk.issues.update({ issue_id: issue.id, description: twice.join("\r\n") });
+
+    const context = await value("issue_context", { issue_id: issue.id });
+    expect(context.journals.map((journal: { changes: unknown[] }) => journal.changes)).toEqual([
+      [
+        {
+          field: "Description",
+          diff: "@@ line 13 @@\n  13. Step 13\n- 14. Step 14\n+ 14. Step fourteen\n  15. Step 15",
+        },
+      ],
+      [
+        {
+          field: "Description",
+          diff: "@@ line 14 @@\n  14. Step fourteen\n- 15. Step 15\n+ 15. Step fifteen\n  16. Step 16",
+        },
+      ],
+    ]);
+  });
+
   it("uploads text, attaches it with issues_update, and reads it back three ways", async () => {
     const filename = `${marker}.log`;
     const ref = await value("attachments_upload", {

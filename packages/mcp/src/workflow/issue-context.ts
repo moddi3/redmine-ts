@@ -8,10 +8,10 @@ import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
 import type { Client, ToolSpec } from "../tools.ts";
 import { UNTRUSTED } from "../user-text.ts";
-import { clip, clipJournal, TEXT_CAP } from "./clip.ts";
-import type { Clip } from "./clip.ts";
+import { clip, journalRest, TEXT_CAP } from "./clip.ts";
 import { bestEffort, defineTool, ToolError } from "./define.ts";
-import { changesOf, RELATION_PHRASES, resolveNames } from "./journals.ts";
+import { LINE_CAP } from "./diff.ts";
+import { changesOf, FROM_TO_CAP, RELATION_PHRASES, resolveNames } from "./journals.ts";
 import type { Lookups } from "./lookups.ts";
 
 export const DEFAULT_JOURNALS = 20;
@@ -132,7 +132,17 @@ const IssueContextSchema = z.object({
         notes: z.string(),
         private_notes: z.boolean(),
         changes: z.array(
-          z.object({ field: z.string(), from: z.string().nullable(), to: z.string().nullable() }),
+          z.union([
+            z.object({ field: z.string(), from: z.string().nullable(), to: z.string().nullable() }),
+            z.object({
+              field: z.string(),
+              diff: z
+                .string()
+                .describe(
+                  `In place of from and to for a description on several lines or over ${FROM_TO_CAP} characters, or a custom field on several lines. The changed lines, - old and + new, with one unchanged line around each run. A line over ${LINE_CAP} characters shows the text around each place it changed, with … in place of each part left out. A diff that leaves anything out ends with one clip marker that names the call for all of it. A journal in full is not cut.`,
+                ),
+            }),
+          ]),
         ),
       }),
     )
@@ -236,15 +246,15 @@ async function issueContext(
       ? {}
       : { watchers: issue.watchers.map(({ id, name }) => ({ id, name })) }),
     journals: shown.map((journal) => {
-      const cut: Clip = whole.has(journal.id) ? (text) => text : clipJournal(issue.id, journal.id);
+      const rest = whole.has(journal.id) ? undefined : journalRest(issue.id, journal.id);
       return {
         id: journal.id,
         note: all.indexOf(journal) + 1,
         user: journal.user?.name ?? null,
         created_on: journal.created_on,
-        notes: cut(journal.notes ?? "", TEXT_CAP),
+        notes: clip(journal.notes ?? "", TEXT_CAP, rest),
         private_notes: journal.private_notes ?? false,
-        changes: changesOf(journal, names, customFields, cut),
+        changes: changesOf(journal, names, customFields, rest),
       };
     }),
     journals_total: all.length,
@@ -380,8 +390,10 @@ function markdown(context: IssueContext): string {
         "",
         `### #note-${journal.note}, ${journal.created_on}, ${journal.user ?? "unknown user"} (journal ${journal.id}${journal.private_notes ? ", private notes" : ""})`,
         "",
-        ...journal.changes.map(
-          ({ field, from, to }) => `- ${field}: ${from || "none"} → ${to || "none"}`,
+        ...journal.changes.flatMap((change) =>
+          "diff" in change
+            ? [`- ${change.field}:`, ...diffBlock(change.diff).map((line) => `  ${line}`)]
+            : [`- ${change.field}: ${change.from || "none"} → ${change.to || "none"}`],
         ),
       );
       if (journal.notes !== "")
@@ -393,6 +405,12 @@ function markdown(context: IssueContext): string {
 
 function section(title: string, body: readonly string[]): string[] {
   return body.length === 0 ? [] : ["", `## ${title}`, "", ...body];
+}
+
+/** A fence longer than any run of backticks in the diff, so no line of the user's text can close it. */
+function diffBlock(diff: string): string[] {
+  const fence = "`".repeat(Math.max(2, ...(diff.match(/`+/g) ?? []).map((run) => run.length)) + 1);
+  return [`${fence}diff`, ...diff.split("\n"), fence];
 }
 
 function quote(text: string): string {
