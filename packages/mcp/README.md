@@ -106,9 +106,9 @@ Six hand-written tools cover what an agent does most, in fewer calls than the ge
 
 To attach a file, call `attachments_upload`, then pass the reference in `uploads` of the create or update tool. The generated tools take references in `uploads`, never file content, so their schemas stay small and each file travels in its own request. Over `--http`, a request body may be up to about 6.7 MiB, enough for a 5 MiB file as `content_base64` (see [Security defaults](#security-defaults)). Redmine keeps an upload that no record takes until an admin prunes it, so upload only what you attach.
 
-`REDMINE_MCP_FILES_DIR` names the one local directory the server may use. With it, `attachments_upload` accepts `path`, a file in that directory, and `attachments_save` is listed: it saves an attachment there under a name that never replaces an existing file, such as `build (1).log`, and returns the absolute path.
+`REDMINE_MCP_FILES_DIR` names the one local directory the server may use. With it, `attachments_upload` accepts `path`, a file in that directory given relative to it or as an absolute path, and `attachments_save` is listed: it saves an attachment there under a name that never replaces an existing file, such as `build (1).log`, and returns the absolute path. The description of `path` names the directory with its symlinks resolved, as in the paths `attachments_save` returns, and so do the errors for a path that does not exist in it or resolves outside it.
 
-A path must resolve inside the directory after symlinks are followed, so `../secret` and a symlink that points outside are refused before anything is read or sent. `attachments_save` only reads from Redmine, so `read-only` mode lists it too, but it writes the local file, so its `readOnlyHint` is `false`.
+A path must resolve inside the directory after symlinks are followed, so `../secret`, an absolute path outside the directory, and a symlink that points outside are refused before anything is read or sent. `attachments_save` only reads from Redmine, so `read-only` mode lists it too, but it writes the local file, so its `readOnlyHint` is `false`.
 
 ### The issue resource
 
