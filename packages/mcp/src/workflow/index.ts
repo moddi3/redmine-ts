@@ -11,18 +11,17 @@ import { transitionTool } from "./transition.ts";
 
 const built = new Map<string, readonly ToolSpec[]>();
 
-/** `files`: whether a files directory is configured, which adds `path` uploads and attachments_save. */
-export function workflowTools(access: Access, files: boolean): readonly ToolSpec[] {
-  const key = `${access} ${files}`;
+export function workflowTools(access: Access, dir: string | undefined): readonly ToolSpec[] {
+  const key = `${access} ${dir}`;
   let tools = built.get(key);
   if (tools === undefined) {
     tools = [
       issueContextTool,
       referenceDataTool,
       transitionTool(access),
-      uploadTool(files),
-      downloadTool(files),
-      ...(files ? [saveTool] : []),
+      uploadTool(dir),
+      downloadTool(dir !== undefined),
+      ...(dir === undefined ? [] : [saveTool]),
       rawRequestTool(access),
     ];
     built.set(key, tools);

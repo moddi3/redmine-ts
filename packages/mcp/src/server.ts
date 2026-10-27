@@ -85,7 +85,7 @@ export function createRedmineMcpServer(
     observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
   );
   const context: ToolContext = { lookups: createLookups(rm), files };
-  const tools = [...workflowTools(access, files !== undefined), ...catalogTools];
+  const tools = [...workflowTools(access, files?.dir), ...catalogTools];
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const listed = tools.filter((tool) => isListed(tool, access, config.version)).map(definition);
 

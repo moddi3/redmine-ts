@@ -54,10 +54,11 @@ const AttachmentId = z
   .positive()
   .describe("The attachment id, from issue_context or issues_get.");
 
-export function uploadTool(files: boolean): ToolSpec {
-  const sources = files
-    ? "exactly one of content_text (UTF-8 text, such as a log), content_base64 (any bytes) or path (a file in the server's files directory)"
-    : "exactly one of content_text (UTF-8 text, such as a log) or content_base64 (any bytes)";
+export function uploadTool(dir: string | undefined): ToolSpec {
+  const sources =
+    dir === undefined
+      ? "exactly one of content_text (UTF-8 text, such as a log) or content_base64 (any bytes)"
+      : "exactly one of content_text (UTF-8 text, such as a log), content_base64 (any bytes) or path (a file in the server's files directory)";
   return defineTool({
     name: "attachments_upload",
     title: "Upload a file",
@@ -76,15 +77,17 @@ export function uploadTool(files: boolean): ToolSpec {
       description: z.string().optional().describe("Kept on the attachment once it is attached."),
       content_text: z.string().optional().describe("The file as UTF-8 text."),
       content_base64: z.string().optional().describe("The file's bytes, base64-encoded."),
-      ...(files
-        ? {
+      ...(dir === undefined
+        ? {}
+        : {
             path: z
               .string()
               .min(1)
               .optional()
-              .describe("A file in the server's files directory, relative to it."),
-          }
-        : {}),
+              .describe(
+                `A file in the server's files directory "${dir}", relative to it or absolute.`,
+              ),
+          }),
     }),
     output: UploadRef,
     ...BY_METHOD.POST,
