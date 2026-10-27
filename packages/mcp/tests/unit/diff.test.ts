@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { CHANGE_CAP, LINE_CAP } from "../../src/workflow/clip.ts";
+import { CHANGE_CAP, clip, LINE_CAP } from "../../src/workflow/clip.ts";
+import type { Clip } from "../../src/workflow/clip.ts";
 import { lineDiff } from "../../src/workflow/diff.ts";
 
-const REST = "Read the rest elsewhere.";
+const CLIPPED: Clip = (text, cap, start) => clip(text, cap, "Read the rest elsewhere.", start);
+const WHOLE: Clip = (text) => text;
 const MARKER = /^\[clipped: (\d+) more characters\. Read the rest elsewhere\.\]$/;
 
 /** Mulberry32, so a failing seed reruns the same case. */
@@ -43,8 +45,18 @@ function texts(random: () => number) {
     const cut = Math.floor(random() * 4);
     return `${text.slice(0, at)}${pick(["", "X", "new words"])}${text.slice(at + cut)}`;
   };
+  // Lines that share a long middle make the closest counterpart hard to tell from the others.
+  const middle = "m".repeat(300 + Math.floor(random() * 100));
+  const tail = () => Array.from({ length: 4 }, () => pick(["a", "b"])).join("");
+  const similar = random() < 0.2;
   const line = (): string =>
-    random() < 0.35 ? (random() < 0.5 ? pick(paragraphs) : edit(pick(paragraphs))) : pick(WORDS);
+    similar && random() < 0.6
+      ? `${tail()}${middle}${tail()}`
+      : random() < 0.35
+        ? random() < 0.5
+          ? pick(paragraphs)
+          : edit(pick(paragraphs))
+        : pick(WORDS);
   const old = Array.from({ length: Math.floor(random() * 9) }, line);
   const next = [...old];
   for (let n = Math.floor(random() * 5); n > 0; n--) {
@@ -75,8 +87,7 @@ interface Shown {
 }
 
 /** Each line the diff shows, matched to the line of the old or new text it stands for. */
-function read(diff: string, old: readonly string[], next: readonly string[]) {
-  const capped = diff.length > CHANGE_CAP;
+function read(diff: string, old: readonly string[], next: readonly string[], capped: boolean) {
   const rows = diff.split("\n");
   if (capped) rows.splice(-2);
   const shown: Shown[][] = [];
@@ -106,12 +117,12 @@ function read(diff: string, old: readonly string[], next: readonly string[]) {
 }
 
 function check(from: string, to: string, old: readonly string[], next: readonly string[]) {
-  const diff = lineDiff(from, to, REST);
+  const diff = lineDiff(from, to, CLIPPED);
   if (fewestEdits(old, next) === 0) {
     expect(diff).toBe(from === to ? "No change." : "Only line endings changed.");
     return { cut: 0 };
   }
-  const { capped, lines, hunks } = read(diff, old, next);
+  const { capped, lines, hunks } = read(diff, old, next, diff.length > CHANGE_CAP);
   let cut = 0;
   for (const [n, { shown, marker, actual }] of lines.entries()) {
     // The cap can fall between the last line it keeps and that line's marker.
@@ -123,13 +134,9 @@ function check(from: string, to: string, old: readonly string[], next: readonly 
     }
     cut++;
     const head = shown.startsWith("…");
-    const tail = shown.endsWith("…");
-    const core = shown.slice(head ? 1 : 0, tail ? -1 : undefined);
+    const core = shown.slice(head ? 1 : 0);
     expect(core.length).toBeLessThanOrEqual(LINE_CAP);
-    expect(
-      head ? actual.indexOf(core, 1) : actual.startsWith(core) ? 0 : -1,
-    ).toBeGreaterThanOrEqual(0);
-    if (!tail) expect(actual.endsWith(core)).toBe(true);
+    expect(head ? actual.indexOf(core, 1) > 0 : actual.startsWith(core)).toBe(true);
     expect(marker).toBe(actual.length - core.length);
   }
   for (const hunk of hunks) {
@@ -152,11 +159,17 @@ function check(from: string, to: string, old: readonly string[], next: readonly 
     const changed = lines.filter((line) => line.sign !== " ").length;
     expect(changed).toBe(fewestEdits(old, next));
   }
+  const whole = read(lineDiff(from, to, WHOLE), old, next, false);
+  for (const { shown, marker, actual } of whole.lines) {
+    expect(shown).toBe(actual);
+    expect(marker).toBeUndefined();
+  }
+  expect(whole.lines.filter((line) => line.sign !== " ")).toHaveLength(fewestEdits(old, next));
   return { cut };
 }
 
 describe("lineDiff against a reference LCS", () => {
-  it("transforms the old text into the new with the fewest edits, and never shows a changed long line as unchanged", () => {
+  it("transforms the old text into the new with the fewest edits, never shows a changed long line as unchanged, and marks every cut, or shows every line whole for a journal in full", () => {
     const random = generator(53);
     let cut = 0;
     for (let n = 0; n < 6000; n++) {
