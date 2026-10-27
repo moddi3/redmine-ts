@@ -16,8 +16,7 @@ export async function connect(
 ): Promise<Client> {
   const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
   const files = filesDir === undefined ? undefined : localFiles(filesDir);
-  const options = { files, dangerouslyRevealApiKeys };
-  const server = createRedmineMcpServer(config, options);
+  const server = createRedmineMcpServer(config, { files, dangerouslyRevealApiKeys });
   await server.connect(serverEnd);
   const client = new Client({ name: "redmine-mcp-tests", version: "0.0.0" });
   await client.connect(clientEnd);

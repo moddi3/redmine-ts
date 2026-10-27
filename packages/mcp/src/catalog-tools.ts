@@ -5,7 +5,6 @@ import { VERSIONS } from "@redmine-ts/sdk";
 import type { Listing } from "@redmine-ts/sdk";
 import { catalog } from "@redmine-ts/sdk/catalog";
 import type { CatalogEntry, JsonSchema } from "@redmine-ts/sdk/catalog";
-import { withoutApiKeys } from "./api-keys.ts";
 import { portable } from "./portable.ts";
 import type { Annotations, Client, Schema, Tier, ToolSpec } from "./tools.ts";
 
@@ -142,7 +141,6 @@ type Method = (input: Record<string, unknown>) => unknown;
 
 export const catalogTools: readonly ToolSpec[] = catalog
   .filter((entry) => !HAND_WRITTEN.has(entry.id))
-  .map((entry) => ({ ...entry, output: withoutApiKeys(entry.output) }))
   .map(toolFor)
   .map((tool) => ({
     ...tool,

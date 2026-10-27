@@ -18,7 +18,7 @@ import { publicFetch } from "./public-fetch.ts";
 import { ACCESS_ORDER, strictest } from "./tools.ts";
 
 export type CliCommand =
-  | { kind: "serve"; config: RedmineConfig; filesDir?: string }
+  | { kind: "serve"; config: RedmineConfig; filesDir?: string; dangerouslyRevealApiKeys?: true }
   | {
       kind: "http";
       host: string;
@@ -33,7 +33,7 @@ export type CliCommand =
 /** Clear of Redmine's own 3000, the MCP Inspector's 6274 and 6277, and the usual 8000 and 8080. */
 const DEFAULT_PORT = 3737;
 
-export const USAGE: string = `Usage: redmine-mcp [--read-only] [--no-delete]
+export const USAGE: string = `Usage: redmine-mcp [--read-only] [--no-delete] [--dangerously-reveal-api-keys]
        redmine-mcp --http [--port <n>] [--host <addr>] [--allow-origin <hostname|origin>]...
                           [--allow-host <hostname>]... [--api-key-login]
                           [--allow-client <hostname>]...
@@ -71,6 +71,11 @@ Environment for OAuth over HTTP:
 Flags:
   --read-only          List and send only reads
   --no-delete          Hide and refuse deletes
+  --dangerously-reveal-api-keys
+                       Return API keys as Redmine sends them. Without it, each
+                       api_key value, and REDMINE_API_KEY wherever a response
+                       repeats it, reads [hidden by @redmine-ts/mcp]. Not
+                       accepted with --http
   --http               Serve Streamable HTTP instead of stdio
   --port <n>           HTTP port, default ${DEFAULT_PORT}; 0 picks a free one
   --host <addr>        Address to listen on, default 127.0.0.1
@@ -262,6 +267,7 @@ const HTTP_FLAGS = [
 interface Flags {
   "read-only"?: boolean;
   "no-delete"?: boolean;
+  "dangerously-reveal-api-keys"?: boolean;
   http?: boolean;
   port?: string;
   host?: string;
@@ -291,6 +297,7 @@ export function parseCli(
       options: {
         "read-only": { type: "boolean" },
         "no-delete": { type: "boolean" },
+        "dangerously-reveal-api-keys": { type: "boolean" },
         http: { type: "boolean" },
         port: { type: "string" },
         host: { type: "string" },
@@ -334,10 +341,18 @@ export function parseCli(
       access: requestedAccess(REDMINE_MCP_ACCESS, flags),
     },
     ...(REDMINE_MCP_FILES_DIR === undefined ? {} : { filesDir: REDMINE_MCP_FILES_DIR }),
+    ...(flags["dangerously-reveal-api-keys"] ? { dangerouslyRevealApiKeys: true as const } : {}),
   };
 }
 
 function httpCommand(flags: Flags, env: Readonly<Record<string, string | undefined>>): CliCommand {
+  if (flags["dangerously-reveal-api-keys"]) {
+    return {
+      kind: "error",
+      message:
+        "--dangerously-reveal-api-keys works only over stdio, where the person who starts the server owns the key",
+    };
+  }
   const parsed = HttpSettings.safeParse({
     ...env,
     "--port": flags.port,

@@ -60,9 +60,9 @@ switch (command.kind) {
     break;
   }
   case "serve": {
-    const { config, filesDir } = command;
+    const { config, filesDir, dangerouslyRevealApiKeys } = command;
     const files = filesDir === undefined ? undefined : localFiles(filesDir);
-    serveStdio(() => createRedmineMcpServer(config, { files }), {
+    serveStdio(() => createRedmineMcpServer(config, { files, dangerouslyRevealApiKeys }), {
       onerror: (error) => console.error(`redmine-mcp: ${error.message}`),
     });
   }

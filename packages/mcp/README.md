@@ -155,7 +155,7 @@ Items in a page leave out the long fields `description`, `notes`, `text`, `comme
 
 ### Results
 
-A tool that returns a record, such as `issues_get` or `issues_create`, returns the record as Redmine sends it. A tool with nothing to return, such as `issues_update` or `issues_delete`, returns `{ "ok": true }`.
+A tool that returns a record, such as `issues_get` or `issues_create`, returns Redmine's record with the SDK's response fixes applied, such as turning the `hours` string `"8/1"` into the number 8. Each `api_key` value in it reads `[hidden by @redmine-ts/mcp]`, as [API keys](#api-keys) describes. A tool with nothing to return, such as `issues_update` or `issues_delete`, returns `{ "ok": true }`.
 
 Every result carries the object twice: as `structuredContent`, and as compact JSON in a text block. The tool's `outputSchema` describes it, and the server checks each result against that schema before it answers. `attachments_download` adds the image as an image block after the JSON.
 
@@ -608,6 +608,7 @@ The server reads its settings once at startup. A missing or invalid value stops 
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--read-only`                       | Same as `REDMINE_MCP_ACCESS=read-only`.                                                                                                            |
 | `--no-delete`                       | Same as `REDMINE_MCP_ACCESS=no-delete`.                                                                                                            |
+| `--dangerously-reveal-api-keys`     | Returns API keys as Redmine sends them. Over stdio only. See [API keys](#api-keys).                                                                |
 | `--http`                            | Serves Streamable HTTP at `/mcp` instead of stdio.                                                                                                 |
 | `--port <n>`                        | The HTTP port, 3737 by default. `0` picks a free port.                                                                                             |
 | `--host <addr>`                     | The address to listen on, `127.0.0.1` by default.                                                                                                  |
@@ -619,12 +620,21 @@ The server reads its settings once at startup. A missing or invalid value stops 
 
 `--port`, `--host`, `--allow-origin`, `--allow-host`, `--api-key-login` and `--allow-client` need `--http`. `--allow-origin`, `--allow-host` and `--allow-client` match each name exactly, so a value with `*` stops the server at startup. Their options in [`createRedmineMcpHandler`](#embed-the-server), `allowedOrigins`, `allowedHosts` and `oauth.allowedClientHosts`, throw a `TypeError` for an entry with `*` when the handler is created.
 
+## API keys
+
+Redmine sends a working API key as `api_key` in `users/current.json`, `users/:id.json` and `my/account.json`, and in the user that `users_create` makes. A user gets their own key, and an admin gets the key of any user. The server replaces each `api_key` value, at any depth, with `[hidden by @redmine-ts/mcp]`. The field stays, so a record without `api_key` still means that Redmine sent none.
+
+The rule covers tool results, `raw_request` included, error results and the `redmine://issues/{id}` resource. The SDK cuts an error body at 2 KiB, so a body that does not parse as JSON is matched as text. The server also replaces the credential it sends to Redmine, the API key or the OAuth access token, wherever a response repeats it, such as a proxy that echoes `X-Redmine-API-Key` in an error. A credential shorter than 20 characters stays, so that it cannot replace ordinary words.
+
+`--dangerously-reveal-api-keys` turns all of this off, and the tools return keys as Redmine sends them. The keys then sit in the agent's context and transcript. The flag works only over stdio, where the person who starts the server owns the key. With `--http`, the server refuses to start. Over HTTP, one flag would decide for every user, and a client signed in through [API key sign-in](#api-key-sign-in) would read the key that its person gave only to the consent page. Over OAuth through a Redmine application, Redmine sends no key, so the flag would change nothing there. Redmine sends a key over OAuth only to an admin whose token has the `admin` scope, and this server never asks for that scope.
+
 ## Safety
 
 - Text that Redmine users write reaches the agent unchanged. When a result contains `subject`, `description`, `notes`, `text`, or `comments`, its first text block says that the text is data and not instructions. Treat an agent that reads issues from strangers as exposed to prompt injection anyway, and run it in `read-only` mode when it does not need to write.
 - `full` mode lets the agent delete issues, projects, and users. Redmine has no undo. Use `no-delete` unless the agent needs to delete.
 - `raw_request` reaches every REST path, plugins included, with the same key. The access mode applies to it like to every tool, and the SDK refuses a path outside `REDMINE_URL`.
 - Without `REDMINE_MCP_FILES_DIR`, no tool reads or writes local files. With it, tools read and write only inside that directory.
+- The server hides API keys in what it returns, unless you pass `--dangerously-reveal-api-keys`. See [API keys](#api-keys).
 - The server never logs the API key and sends it only in the `X-Redmine-API-Key` header. Over [OAuth](#oauth), it sends Redmine only Redmine's own token or the key sealed in the client's token, never the client's token.
 
 ## Embed the server
@@ -645,7 +655,7 @@ serveStdio(() =>
 );
 ```
 
-`access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. To enable `path` uploads and `attachments_save`, pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. The main entry never imports file system code, so a server without `files` cannot touch local files. `observe` gets each request the server sends to Redmine, with its `method`, its `url`, and a `status` that is set once Redmine answers, and each call that the access mode refuses. `createRedmineMcpHandler` uses it to pick the status of an OAuth request.
+`access` and `version` choose the tools exactly as the settings above do. The other options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client. To enable `path` uploads and `attachments_save`, pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. The main entry never imports file system code, so a server without `files` cannot touch local files. `observe` gets each request the server sends to Redmine, with its `method`, its `url`, and a `status` that is set once Redmine answers, and each call that the access mode refuses. `createRedmineMcpHandler` uses it to pick the status of an OAuth request. `dangerouslyRevealApiKeys: true` does what `--dangerously-reveal-api-keys` does. The server replaces the credential only when `auth` holds it as a string, as `apiKey` or `bearer`.
 
 `createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`, which is the HTTP server of `--http` without the port. With `publicUrl`, it routes the endpoint and the [OAuth paths](#endpoints) itself, so give it every request; `oauth` takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, `store` (see [Grant store](#grant-store)), and the required `fetchClientMetadata`. To accept tokens from another authorization server instead, pass `verifier: { issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. The key check of [Security defaults](#security-defaults) goes through the same `fetch` and `onEvent`, gives up after the shorter of `timeoutMs` and 8 seconds, and reports an unanswered check to `onError`. It serves every path it receives, so route `/mcp` to it. `allowedOrigins` takes hostnames and origins, as `--allow-origin` does, and `allowedHosts` takes hostnames. A bad origin entry, or an entry with `*` in either of them or in `oauth.allowedClientHosts`, throws when the handler is created. `maxBodyBytesInFlight` and `bodyTimeoutMs` set the body budget and the body deadline of [Security defaults](#security-defaults). Set `allowedHosts` when you listen on loopback, or when you know every name clients reach the handler by, as `--allow-host` does; without it the handler does not check `Host`.
 
