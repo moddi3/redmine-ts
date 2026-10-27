@@ -13,6 +13,8 @@ import type { CallToolResult, JsonSchemaType, Tool } from "@modelcontextprotocol
 import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig, RedmineVersion } from "@redmine-ts/sdk";
 import pkg from "../package.json" with { type: "json" };
+import { redactor } from "./api-keys.ts";
+import type { Redact } from "./api-keys.ts";
 import { BY_METHOD, catalogTools, DEFAULT_LIMIT, HEAVY_KEYS, MAX_LIMIT } from "./catalog-tools.ts";
 import { ISSUE_TEMPLATE, readIssue } from "./resources.ts";
 import { isListed } from "./tools.ts";
@@ -52,6 +54,12 @@ export interface RedmineMcpOptions {
   files?: LocalFiles;
   /** Gets every request the server sends to Redmine and every call its access mode refuses. */
   observe?: (observation: Observation) => void;
+  /**
+   * Returns API keys as Redmine sends them. By default each `api_key` value becomes
+   * `[hidden by @redmine-ts/mcp]`, and so does a string `apiKey` or `bearer` credential of 20 or more
+   * characters wherever a response repeats it.
+   */
+  dangerouslyRevealApiKeys?: boolean;
 }
 
 /** Compiled once per schema for the process, because HTTP serving builds a server per request. */
@@ -79,12 +87,13 @@ export function createRedmineMcpServer(
   config: RedmineConfig,
   options: RedmineMcpOptions = {},
 ): Server {
-  const { files, observe } = options;
+  const { files, observe, dangerouslyRevealApiKeys } = options;
   const access = config.access ?? "full";
   const rm = createRedmine(
     observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
   );
   const context: ToolContext = { lookups: createLookups(rm), files };
+  const redact = redactor(config.auth, dangerouslyRevealApiKeys === true);
   const tools = [...workflowTools(access, files !== undefined), ...catalogTools];
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const listed = tools.filter((tool) => isListed(tool, access, config.version)).map(definition);
@@ -106,16 +115,16 @@ export function createRedmineMcpServer(
     const invalid = await check(tool.inputSchema, args);
     if (invalid !== undefined) {
       const reason = (await explainFilters(tool.inputSchema, args.where)) ?? invalid;
-      return failure(`Invalid arguments for ${name}: ${reason}. Nothing was sent.`);
+      return failure(redact, `Invalid arguments for ${name}: ${reason}. Nothing was sent.`);
     }
-    return call(tool, rm, args, context, observe);
+    return call(tool, rm, args, context, observe, redact);
   });
   server.setRequestHandler("resources/list", () => ({ resources: [] }));
   server.setRequestHandler("resources/templates/list", () => ({
     resourceTemplates: [ISSUE_TEMPLATE],
   }));
   server.setRequestHandler("resources/read", (request) =>
-    readIssue(rm, context.lookups, request.params.uri),
+    readIssue(rm, context.lookups, request.params.uri, redact),
   );
   return server;
 }
@@ -145,6 +154,7 @@ async function call(
   args: Record<string, unknown>,
   context: ToolContext,
   observe: RedmineMcpOptions["observe"],
+  redact: Redact,
 ): Promise<CallToolResult> {
   let result: ToolResult;
   try {
@@ -153,15 +163,19 @@ async function call(
     if (RedmineError.is(error, "access_denied")) {
       observe?.({ kind: "refused", tier: BY_METHOD[error.data.method].tier });
     }
-    if (error instanceof RedmineError) return redmineFailure(tool, error);
-    if (error instanceof ToolError) return failure(error.message, error.data);
+    if (error instanceof RedmineError) return redmineFailure(tool, error, redact);
+    if (error instanceof ToolError) return failure(redact, error.message, error.data);
     throw error;
   }
-  const { structured, extra = [] } = result;
+  const { extra = [] } = result;
+  const structured = redact(result.structured) as ToolResult["structured"];
   // Clients validate structuredContent against outputSchema, so a mismatch is reported here, by name.
   const mismatch = await check(tool.outputSchema, structured);
   if (mismatch !== undefined) {
-    return failure(`${tool.name} got a response that does not match its outputSchema: ${mismatch}`);
+    return failure(
+      redact,
+      `${tool.name} got a response that does not match its outputSchema: ${mismatch}`,
+    );
   }
   const json: CallToolResult["content"][number] = {
     type: "text",
@@ -210,17 +224,19 @@ function definition(tool: ToolSpec): Tool {
   };
 }
 
-function failure(message: string, data?: unknown): CallToolResult {
+function failure(redact: Redact, message: string, data?: unknown): CallToolResult {
   return {
     isError: true,
     content: [
-      { type: "text", text: message },
-      ...(data === undefined ? [] : [{ type: "text" as const, text: JSON.stringify(data) }]),
+      { type: "text", text: redact(message) },
+      ...(data === undefined
+        ? []
+        : [{ type: "text" as const, text: JSON.stringify(redact(data)) }]),
     ],
   };
 }
 
-function redmineFailure(tool: ToolSpec, error: RedmineError): CallToolResult {
+function redmineFailure(tool: ToolSpec, error: RedmineError, redact: Redact): CallToolResult {
   const { data } = error;
   const message = ((): string => {
     switch (data.kind) {
@@ -244,7 +260,7 @@ function redmineFailure(tool: ToolSpec, error: RedmineError): CallToolResult {
         return error.message;
     }
   })();
-  return failure(message, error);
+  return failure(redact, message, error);
 }
 
 /** The first 512 characters stand alone, because some clients cut instructions there. */

@@ -8,6 +8,7 @@ import {
 } from "@modelcontextprotocol/server";
 import type { ReadResourceResult, ResourceTemplateType } from "@modelcontextprotocol/server";
 import { RedmineError } from "@redmine-ts/sdk";
+import type { Redact } from "./api-keys.ts";
 import type { Client } from "./tools.ts";
 import { DEFAULT_JOURNALS, issueMarkdown } from "./workflow/issue-context.ts";
 import type { Lookups } from "./workflow/lookups.ts";
@@ -26,6 +27,7 @@ export async function readIssue(
   rm: Client,
   lookups: Lookups,
   uri: string,
+  redact: Redact,
 ): Promise<ReadResourceResult> {
   const id = ISSUE_URI.exec(uri)?.[1];
   if (id === undefined) {
@@ -36,7 +38,7 @@ export async function readIssue(
   }
   try {
     const text = await issueMarkdown(rm, lookups, Number(id));
-    return { contents: [{ uri, mimeType: "text/markdown", text }] };
+    return { contents: [{ uri, mimeType: "text/markdown", text: redact(text) }] };
   } catch (error) {
     if (RedmineError.is(error, "not_found") || RedmineError.is(error, "forbidden")) {
       throw new ResourceNotFoundError(
@@ -45,7 +47,11 @@ export async function readIssue(
       );
     }
     if (error instanceof RedmineError) {
-      throw new ProtocolError(ProtocolErrorCode.InternalError, error.message, error.toJSON());
+      throw new ProtocolError(
+        ProtocolErrorCode.InternalError,
+        redact(error.message),
+        redact(error),
+      );
     }
     throw error;
   }
