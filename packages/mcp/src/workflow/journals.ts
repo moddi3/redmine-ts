@@ -7,6 +7,7 @@
 import type { Issue } from "@redmine-ts/sdk";
 import type { Client } from "../tools.ts";
 import { LINE_CAP } from "./clip.ts";
+import type { Clip } from "./clip.ts";
 import { bestEffort } from "./define.ts";
 import { lineDiff } from "./diff.ts";
 import { projectMembers } from "./lookups.ts";
@@ -74,28 +75,25 @@ function referencedIds(journals: readonly Journal[]): Map<Kind, Set<string>> {
   return ids;
 }
 
-/**
- * `customFields` names the issue's custom fields by id. `rest` tells an agent where to read a clipped
- * value in full.
- */
+/** `customFields` names the issue's custom fields by id. */
 export function changesOf(
   journal: Journal,
   names: Names,
   customFields: ReadonlyMap<string, string>,
-  rest: string,
+  cut: Clip,
 ): Change[] {
-  return journal.details.map((detail) => change(detail, names, customFields, rest));
+  return journal.details.map((detail) => change(detail, names, customFields, cut));
 }
 
 function change(
   detail: Detail,
   names: Names,
   customFields: ReadonlyMap<string, string>,
-  rest: string,
+  cut: Clip,
 ): Change {
   const field = fieldLabel(detail, customFields);
   const { old_value: from, new_value: to } = detail;
-  if (showsAsDiff(detail)) return { field, diff: lineDiff(from ?? "", to ?? "", rest) };
+  if (showsAsDiff(detail)) return { field, diff: lineDiff(from ?? "", to ?? "", cut) };
   const render = renderer(detail, names);
   const show = (value: string | null): string | null =>
     value === null || value === "" ? value : render(value);

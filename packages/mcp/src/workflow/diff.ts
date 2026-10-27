@@ -1,10 +1,11 @@
 // A line diff for a journal's change to long text, such as an edited description. Lines split on any
 // line break, so text typed in a browser (CRLF) and text sent over the API (LF) compare equal. Each run
 // of changed lines shows with one unchanged line around it, under "@@ line N @@" with N the number of
-// the run's first line in the new text. A line longer than LINE_CAP is cut, and so is a diff longer than
-// CHANGE_CAP, each ending with the clip marker.
+// the run's first line in the new text. A line longer than LINE_CAP and a diff longer than CHANGE_CAP go
+// through the journal's clip, which cuts them or, for a journal returned in full, leaves them whole.
 
-import { CHANGE_CAP, clip, clipMarker, LINE_CAP } from "./clip.ts";
+import { CHANGE_CAP, LINE_CAP } from "./clip.ts";
+import type { Clip } from "./clip.ts";
 
 type Sign = " " | "-" | "+";
 
@@ -23,8 +24,7 @@ const LEAD = 40;
 /** Past this many edits, the search stops where it got furthest, and every line after that counts as changed. */
 const MAX_EDITS = 1000;
 
-/** `rest` goes in the clip marker and says where to read what was cut. */
-export function lineDiff(from: string, to: string, rest: string): string {
+export function lineDiff(from: string, to: string, cut: Clip): string {
   const lines = numbered(edits(split(from), split(to)));
   if (lines.every((line) => line.sign === " ")) {
     return from === to ? "No change." : "Only line endings changed.";
@@ -35,10 +35,10 @@ export function lineDiff(from: string, to: string, rest: string): string {
     for (let n = first; n <= last; n++) {
       // Only a line that starts inside the cap searches its block, which bounds the work.
       const same = diff.length < CHANGE_CAP ? counterpart(lines, n) : undefined;
-      diff += `\n${lines[n]!.sign} ${excerpt(lines[n]!.text, same, rest)}`;
+      diff += `\n${lines[n]!.sign} ${excerpt(lines[n]!.text, same, cut)}`;
     }
   }
-  return clip(diff, CHANGE_CAP, rest);
+  return cut(diff, CHANGE_CAP);
 }
 
 function split(text: string): string[] {
@@ -206,22 +206,14 @@ function shared(a: string, b: string): [number, number] {
 }
 
 /**
- * A line longer than LINE_CAP cut with … and the clip marker, never inside a surrogate pair. Given what it
- * shares with its counterpart, it shows from LEAD characters before the first difference to LEAD after
- * the last, at most LINE_CAP of them. A line with no counterpart shows its first LINE_CAP.
+ * A line longer than LINE_CAP, cut. Given what it shares with its counterpart, it shows from LEAD
+ * characters before the first difference to LEAD after the last, at most LINE_CAP of them. A line with no
+ * counterpart shows its first LINE_CAP.
  */
-function excerpt(text: string, same: [number, number] | undefined, rest: string): string {
+function excerpt(text: string, same: [number, number] | undefined, cut: Clip): string {
   if (text.length <= LINE_CAP) return text;
-  let start = 0;
-  let end = LINE_CAP;
-  if (same !== undefined) {
-    const [prefix, suffix] = same;
-    start = Math.max(0, prefix - LEAD);
-    if (start > 0 && /[\uDC00-\uDFFF]/.test(text.charAt(start))) start--;
-    end = Math.min(text.length - suffix + LEAD, start + LINE_CAP);
-  }
-  end = Math.min(end, text.length);
-  if (end < text.length && /[\uD800-\uDBFF]/.test(text.charAt(end - 1))) end--;
-  const shown = `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
-  return `${shown}${clipMarker(text.length - (end - start), rest)}`;
+  if (same === undefined) return cut(text, LINE_CAP);
+  const [prefix, suffix] = same;
+  const start = Math.max(0, prefix - LEAD);
+  return cut(text, Math.min(text.length - suffix + LEAD, start + LINE_CAP) - start, start);
 }

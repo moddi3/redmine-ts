@@ -10,25 +10,27 @@ export const CHANGE_CAP = 1000;
  */
 export const LINE_CAP = 350;
 
-export type Clip = (text: string, cap: number) => string;
+/** Cuts text to `cap` characters from `start`, or leaves it whole in a journal returned in full. */
+export type Clip = (text: string, cap: number, start?: number) => string;
 
-export function clip(text: string, cap: number, rest: string): string {
+/**
+ * Text longer than `cap` cut to the `cap` characters from `start`, never inside a surrogate pair. A cut
+ * before them shows as …, and the marker after them counts every character left out.
+ */
+export function clip(text: string, cap: number, rest: string, start = 0): string {
   if (text.length <= cap) return text;
-  // Never split a surrogate pair.
-  const end = /[\uD800-\uDBFF]/.test(text.charAt(cap - 1)) ? cap - 1 : cap;
-  return `${text.slice(0, end)}${clipMarker(text.length - end, rest)}`;
-}
-
-/** Ends text cut short, with how many characters it left out and `rest`, where to read them. */
-export function clipMarker(omitted: number, rest: string): string {
-  return `\n[clipped: ${omitted} more characters. ${rest}]`;
+  const from = start > 0 && /[\uDC00-\uDFFF]/.test(text.charAt(start)) ? start - 1 : start;
+  let end = Math.min(from + cap, text.length);
+  if (end < text.length && /[\uD800-\uDBFF]/.test(text.charAt(end - 1))) end--;
+  return `${from > 0 ? "…" : ""}${text.slice(from, end)}\n[clipped: ${text.length - (end - from)} more characters. ${rest}]`;
 }
 
 export function clipJournal(issueId: number, journalId: number): Clip {
-  return (text, cap) =>
+  return (text, cap, start) =>
     clip(
       text,
       cap,
       `Call issue_context with issue_id ${issueId}, journals 0 and full [${journalId}] for all of it.`,
+      start,
     );
 }

@@ -216,7 +216,6 @@ async function issueContext(
     Object.entries(issue).filter(([key]) => !(INCLUDES as readonly string[]).includes(key)),
   );
   const { description } = issue;
-  const rest = `Call issues_get with issue_id ${issue.id} and include ["journals"] for all of it.`;
   return {
     issue: {
       ...fields,
@@ -255,7 +254,7 @@ async function issueContext(
         created_on: journal.created_on,
         notes: cut(journal.notes ?? "", TEXT_CAP),
         private_notes: journal.private_notes ?? false,
-        changes: changesOf(journal, names, customFields, rest),
+        changes: changesOf(journal, names, customFields, cut),
       };
     }),
     journals_total: all.length,
