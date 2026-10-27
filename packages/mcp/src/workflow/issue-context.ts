@@ -121,6 +121,11 @@ const IssueContextSchema = z.object({
     .array(
       z.object({
         id: z.int(),
+        note: z
+          .int()
+          .describe(
+            "N in the issue page's #note-N: the place among the journals this key may see, oldest first, from 1. Lower than Redmine's after a journal hidden from the key's user, such as another user's private note.",
+          ),
         user: z.string().nullable(),
         created_on: z.string(),
         notes: z.string(),
@@ -174,6 +179,7 @@ async function issueContext(
   const issue = await rm.issues.get({ issue_id, include: [...INCLUDES] });
   const all = issue.journals ?? [];
   const shown = journals === 0 ? [] : all.slice(-journals);
+  const omitted = all.length - shown.length;
   const [names, children] = await Promise.all([
     resolveNames(rm, lookups, issue, shown),
     childrenOf(rm, issue),
@@ -213,8 +219,9 @@ async function issueContext(
     ...(issue.watchers === undefined
       ? {}
       : { watchers: issue.watchers.map(({ id, name }) => ({ id, name })) }),
-    journals: shown.map((journal) => ({
+    journals: shown.map((journal, index) => ({
       id: journal.id,
+      note: omitted + index + 1,
       user: journal.user?.name ?? null,
       created_on: journal.created_on,
       notes: clip(journal.notes ?? "", TEXT_CAP, rest),
@@ -222,7 +229,7 @@ async function issueContext(
       changes: changesOf(journal, names, customFields, rest),
     })),
     journals_total: all.length,
-    journals_omitted: all.length - shown.length,
+    journals_omitted: omitted,
   };
 }
 
@@ -352,7 +359,7 @@ function markdown(context: IssueContext): string {
     for (const journal of journals) {
       lines.push(
         "",
-        `### ${journal.created_on}, ${journal.user ?? "unknown user"} (journal ${journal.id}${journal.private_notes ? ", private notes" : ""})`,
+        `### #note-${journal.note}, ${journal.created_on}, ${journal.user ?? "unknown user"} (journal ${journal.id}${journal.private_notes ? ", private notes" : ""})`,
         "",
         ...journal.changes.map(
           ({ field, from, to }) => `- ${field}: ${from || "none"} → ${to || "none"}`,
