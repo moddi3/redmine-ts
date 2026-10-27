@@ -70,7 +70,7 @@ const ISSUE_CHILD =
 // Observed on 6.1 and 7.0: a list of two or more ids goes out in the long form, where Redmine compares
 // project_id with the values alone, and an identifier there matches nothing.
 const PROJECT_ID_NOTE =
-  "One id or identifier also matches subprojects, by Redmine's default setting. Two or more ids do not, and {not: id} excludes only that project, not its subprojects. An identifier works only as the one value.";
+  "One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.";
 
 export const overlay: Overlay = {
   namespaces: {
