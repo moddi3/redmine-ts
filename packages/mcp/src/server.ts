@@ -13,6 +13,7 @@ import type { CallToolResult, JsonSchemaType, Tool } from "@modelcontextprotocol
 import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig, RedmineVersion } from "@redmine-ts/sdk";
 import pkg from "../package.json" with { type: "json" };
+import { withoutApiKeys } from "./api-keys.ts";
 import { BY_METHOD, catalogTools, DEFAULT_LIMIT, HEAVY_KEYS, MAX_LIMIT } from "./catalog-tools.ts";
 import { ISSUE_TEMPLATE, readIssue } from "./resources.ts";
 import { isListed } from "./tools.ts";
@@ -157,7 +158,8 @@ async function call(
     if (error instanceof ToolError) return failure(error.message, error.data);
     throw error;
   }
-  const { structured, extra = [] } = result;
+  const { extra = [] } = result;
+  const structured = withoutApiKeys(result.structured);
   // Clients validate structuredContent against outputSchema, so a mismatch is reported here, by name.
   const mismatch = await check(tool.outputSchema, structured);
   if (mismatch !== undefined) {
