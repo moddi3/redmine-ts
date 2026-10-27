@@ -471,12 +471,71 @@ describe("journal changes to long or multi-line text", () => {
     ]);
   });
 
-  it("never cuts a long line inside a character's surrogate pair", async () => {
-    const smiles = "😀".repeat(100);
-    expect(await diffOf(`${smiles}😀`, `${smiles}😁`)).toEqual([
+  it("shows a line that fits in 200 characters whole, wherever it changed", async () => {
+    const line =
+      "14. The export should include the columns: name, email, phone, created date, and status.";
+    const fixed = line.replace("status", "state");
+    expect(await diffOf(edited({ 14: line }), edited({ 14: fixed }))).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- …${"😀".repeat(21)}\n+ …${"😀".repeat(20)}😁`,
+        diff: `@@ line 13 @@\n  13. Step 13\n- ${line}\n+ ${fixed}\n  15. Step 15`,
+      },
+    ]);
+  });
+
+  it("shows the last 200 characters of a long line changed near its end", async () => {
+    const words = "Subject words ".repeat(15);
+    expect(await diffOf(`${words}end`, `${words}fin`)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- …${`${words}end`.slice(-200)}\n+ …${`${words}fin`.slice(-200)}`,
+      },
+    ]);
+  });
+
+  it.each([
+    ["removed above it", "## Heading\r\n", ""],
+    ["added above it", "start\r\n", "start\r\nNew note line\r\n"],
+  ])("shows the change in a long line with a line %s", async (_, above, newAbove) => {
+    const paragraph = "word ".repeat(200);
+    const changed = `${paragraph.slice(0, 300)}CHANGED${paragraph.slice(307)}`;
+    const [change] = (await diffOf(
+      `${above}${paragraph}\r\nend`,
+      `${newAbove}${changed}\r\nend`,
+    )) as { diff: string }[];
+    expect(change!.diff).toContain(`\n- …${paragraph.slice(260, 460)}…\n`);
+    expect(change!.diff).toContain(`\n+ …${changed.slice(260, 460)}…\n`);
+  });
+
+  it("never cuts a long line inside a character's surrogate pair", async () => {
+    const smiles = "😀".repeat(100);
+    const rest = `x${"😀".repeat(150)}`;
+    expect(await diffOf(`${smiles}😀${rest}`, `${smiles}😁${rest}`)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- …${"😀".repeat(21)}x${"😀".repeat(78)}…\n+ …${"😀".repeat(20)}😁x${"😀".repeat(78)}…`,
+      },
+    ]);
+  });
+
+  it("finds two changes far apart in a text of 1500 lines", async () => {
+    const lines = Array.from({ length: 1500 }, (_, n) => `line ${n + 1}`);
+    const after = lines.with(1, "line two").with(1498, "line 1499 edited");
+    expect(await diffOf(lines.join("\r\n"), after.join("\r\n"))).toEqual([
+      {
+        field: "Description",
+        diff: [
+          "@@ line 1 @@",
+          "  line 1",
+          "- line 2",
+          "+ line two",
+          "  line 3",
+          "@@ line 1498 @@",
+          "  line 1498",
+          "- line 1499",
+          "+ line 1499 edited",
+          "  line 1500",
+        ].join("\n"),
       },
     ]);
   });
@@ -505,13 +564,21 @@ describe("journal changes to long or multi-line text", () => {
     ]);
   });
 
-  it("keeps from and to for text on one line of up to 200 characters", async () => {
+  it("keeps from and to for a description on one line of up to 200 characters, and for a subject or a file name of any length", async () => {
     const long = "y".repeat(200);
+    const subject = "s".repeat(255);
+    const filename = `${"f".repeat(250)}.xlsx`;
     expect(
-      await changesFor(attr("description", "Login fails", long), attr("subject", "a", "b")),
+      await changesFor(attr("description", "Login fails", long), attr("subject", "a", subject), {
+        property: "attachment",
+        name: "30",
+        old_value: null,
+        new_value: filename,
+      }),
     ).toEqual([
       { field: "Description", from: "Login fails", to: long },
-      { field: "Subject", from: "a", to: "b" },
+      { field: "Subject", from: "a", to: subject },
+      { field: "File", from: null, to: filename },
     ]);
   });
 
