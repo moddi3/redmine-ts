@@ -237,17 +237,24 @@ function blockChanges(lines: readonly Line[], start: number, room: number): Map<
   for (let n = start; n < end && long.length < showable; n++) {
     if (lines[n]!.text.length > LINE_CAP) long.push(n);
   }
-  const pairs: [shared: number, removed: number, added: number][] = [];
+  const pairs: Pair[] = [];
   for (const n of long) {
+    // Every other long line takes at most one partner first, so a line's partner is among its best long.length.
+    const best: Pair[] = [];
     for (let k = start; k < end; k++) {
       if (lines[k]!.sign === lines[n]!.sign) continue;
       const [removed, added] = lines[n]!.sign === "-" ? [n, k] : [k, n];
       const [a, b] = [lines[removed]!.text, lines[added]!.text];
       const [head, tail] = ends(a.length, b.length, chars(a, b));
-      pairs.push([head + tail, removed, added]);
+      const pair: Pair = [head + tail, removed, added];
+      if (best.length === long.length && byShared(pair, best.at(-1)!) >= 0) continue;
+      const at = best.findIndex((other) => byShared(pair, other) < 0);
+      best.splice(at < 0 ? best.length : at, 0, pair);
+      best.length = Math.min(best.length, long.length);
     }
+    pairs.push(...best);
   }
-  pairs.sort((a, b) => b[0] - a[0] || a[1] - b[1] || a[2] - b[2]);
+  pairs.sort(byShared);
   const changes = new Map<number, Changes>();
   const differ = (removed: number, added: number, kind: keyof Changes) => {
     const spans = differences(lines[removed]!.text, lines[added]!.text);
@@ -270,6 +277,13 @@ function blockChanges(lines: readonly Line[], start: number, room: number): Map<
     }
   }
   return changes;
+}
+
+type Pair = [shared: number, removed: number, added: number];
+
+/** Most shared characters first, then the earlier lines. */
+function byShared(a: Pair, b: Pair): number {
+  return b[0] - a[0] || a[1] - b[1] || a[2] - b[2];
 }
 
 /** Where `a` and `b` differ: for each run of changes, its span in `a` and its span in `b`. */
