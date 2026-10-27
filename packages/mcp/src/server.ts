@@ -81,7 +81,7 @@ function check(schema: Schema, value: unknown): Promise<string | undefined> {
 /**
  * An MCP server for one Redmine instance. `config.access` and `config.version` decide which tools are
  * listed, and the same config builds the client, so a hidden tool that is called anyway is refused by
- * the SDK before anything is sent.
+ * the SDK before anything is sent. The client's `normalize` is always on.
  */
 export function createRedmineMcpServer(
   config: RedmineConfig,
