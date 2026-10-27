@@ -1,8 +1,8 @@
 // Journal details as a readable diff. Redmine sends each change as {property, name, old_value,
 // new_value} with ids in strings, such as status_id from "1" to "2". Each becomes {field, from, to}
 // with a label and names, fetching only the lookups the details reference; an id no lookup resolves
-// stays raw. Text on several lines or longer than one diff line, such as a description, becomes
-// {field, diff} instead.
+// stays raw. A description or custom field value on several lines or longer than one diff line becomes
+// {field, diff} instead, where Redmine's own history shows a diff.
 
 import type { Issue } from "@redmine-ts/sdk";
 import type { Client } from "../tools.ts";
@@ -95,13 +95,18 @@ function change(
 ): Change {
   const field = fieldLabel(detail, customFields);
   const { old_value: from, new_value: to } = detail;
-  if (isLong(from) || isLong(to)) {
+  if (isText(detail) && (isLong(from) || isLong(to))) {
     return { field, diff: clip(lineDiff(from ?? "", to ?? ""), CHANGE_CAP, rest) };
   }
   const render = renderer(detail, names);
   const show = (value: string | null): string | null =>
     value === null || value === "" ? value : render(value);
   return { field, from: show(from), to: show(to) };
+}
+
+/** The fields that can hold long text. A subject or a file name is at most 255 characters and shows whole. */
+function isText({ property, name }: Detail): boolean {
+  return property === "cf" || (property === "attr" && name === "description");
 }
 
 function isLong(value: string | null): boolean {

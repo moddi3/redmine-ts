@@ -133,7 +133,7 @@ const IssueContextSchema = z.object({
               diff: z
                 .string()
                 .describe(
-                  `Replaces from and to for text on several lines or over ${LINE_CAP} characters. The changed lines, - old and + new, with one unchanged line around each run.`,
+                  `In place of from and to for a description or custom field on several lines or over ${LINE_CAP} characters. The changed lines, - old and + new, with one unchanged line around each run.`,
                 ),
             }),
           ]),

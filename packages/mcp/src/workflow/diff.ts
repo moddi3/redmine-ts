@@ -16,11 +16,13 @@ interface Line {
 
 const CONTEXT = 1;
 
-/** A changed long line shows from this many characters before its first difference from its pair. */
+/** A changed long line shows from this many characters before its first difference. */
 const LEAD = 40;
 
-/** Beyond this many old × new lines between the common head and tail, every one counts as changed. */
-const MAX_CELLS = 1_000_000;
+const REACH = 3;
+
+/** Past this many edits, the search stops and every line between the common head and tail counts as changed. */
+const MAX_EDITS = 1000;
 
 export function lineDiff(from: string, to: string): string {
   const lines = numbered(edits(split(from), split(to)));
@@ -58,40 +60,58 @@ function edits(a: readonly string[], b: readonly string[]): [Sign, string][] {
   ];
 }
 
-/** A longest common subsequence walk that puts removed lines before the added lines they make way for. */
+/** Myers' shortest edit script, for lines between the common head and tail. */
 function middle(a: readonly string[], b: readonly string[]): [Sign, string][] {
   const n = a.length;
   const m = b.length;
-  if (n * m > MAX_CELLS) {
-    return [
-      ...a.map((text): [Sign, string] => ["-", text]),
-      ...b.map((text): [Sign, string] => ["+", text]),
-    ];
-  }
-  const width = m + 1;
-  const common = new Uint32Array((n + 1) * width);
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      common[i * width + j] =
-        a[i] === b[j]
-          ? common[(i + 1) * width + j + 1]! + 1
-          : Math.max(common[(i + 1) * width + j]!, common[i * width + j + 1]!);
+  // v[offset + k] is the furthest old line reached on diagonal k, old line minus new line.
+  const offset = n + m + 1;
+  const v = new Int32Array(2 * offset + 1);
+  const trace: Int32Array[] = [];
+  for (let d = 0; d <= Math.min(n + m, MAX_EDITS); d++) {
+    trace.push(v.slice(offset - d - 1, offset + d + 2));
+    for (let k = -d; k <= d; k += 2) {
+      const down = k === -d || (k !== d && v[offset + k - 1]! < v[offset + k + 1]!);
+      let x = down ? v[offset + k + 1]! : v[offset + k - 1]! + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+      v[offset + k] = x;
+      if (x >= n && y >= m) return backtrack(a, b, trace);
     }
   }
+  return [
+    ...a.map((text): [Sign, string] => ["-", text]),
+    ...b.map((text): [Sign, string] => ["+", text]),
+  ];
+}
+
+/** Walks the search back from the end; `trace[d]` holds diagonals -d-1 to d+1 as they were before step d. */
+function backtrack(
+  a: readonly string[],
+  b: readonly string[],
+  trace: readonly Int32Array[],
+): [Sign, string][] {
   const out: [Sign, string][] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n || j < m) {
-    if (i < n && j < m && a[i] === b[j]) {
-      out.push([" ", a[i++]!]);
-      j++;
-    } else if (j === m || (i < n && common[(i + 1) * width + j]! >= common[i * width + j + 1]!)) {
-      out.push(["-", a[i++]!]);
-    } else {
-      out.push(["+", b[j++]!]);
+  let x = a.length;
+  let y = b.length;
+  for (let d = trace.length - 1; d >= 0; d--) {
+    const v = trace[d]!;
+    const furthest = (k: number): number => v[k + d + 1]!;
+    const k = x - y;
+    const down = k === -d || (k !== d && furthest(k - 1) < furthest(k + 1));
+    const before = down ? k + 1 : k - 1;
+    const beforeX = furthest(before);
+    const beforeY = beforeX - before;
+    while (x > beforeX && y > beforeY) {
+      out.push([" ", a[--x]!]);
+      y--;
     }
+    if (d > 0) out.push(down ? ["+", b[--y]!] : ["-", a[--x]!]);
   }
-  return out;
+  return out.reverse();
 }
 
 function numbered(edits: readonly [Sign, string][]): Line[] {
@@ -103,7 +123,6 @@ function numbered(edits: readonly [Sign, string][]): Line[] {
   });
 }
 
-/** First and last index of each run of changes with its context, runs that touch merged. */
 function runs(lines: readonly Line[]): [number, number][] {
   const out: [number, number][] = [];
   lines.forEach(({ sign }, n) => {
@@ -118,27 +137,37 @@ function runs(lines: readonly Line[]): [number, number][] {
 }
 
 /**
- * Where each line's excerpt starts. In a block of changes the k-th removed line pairs with the k-th
- * added one, and both start just before where they first differ, so a long line shows its change.
+ * Where each line's excerpt starts. A changed line longer than LINE_CAP starts just before where it first
+ * differs from the line across its block, within REACH places of its own, that shares the longest start.
+ * The reach finds the pair when lines were added or removed above it, and bounds the comparisons.
  */
 function windowStarts(lines: readonly Line[]): number[] {
   const starts = lines.map(() => 0);
   let removed: number[] = [];
   let added: number[] = [];
-  const pair = (): void => {
-    for (const [k, old] of removed.slice(0, added.length).entries()) {
-      const start = Math.max(0, sharedPrefix(lines[old]!.text, lines[added[k]!]!.text) - LEAD);
-      starts[old] = start;
-      starts[added[k]!] = start;
+  const settle = (): void => {
+    for (const [own, across] of [
+      [removed, added],
+      [added, removed],
+    ] as const) {
+      own.forEach((n, k) => {
+        const { text } = lines[n]!;
+        if (text.length <= LINE_CAP) return;
+        let shared = 0;
+        for (const other of across.slice(Math.max(0, k - REACH), k + REACH + 1)) {
+          shared = Math.max(shared, sharedPrefix(text, lines[other]!.text));
+        }
+        starts[n] = Math.min(Math.max(0, shared - LEAD), text.length - LINE_CAP);
+      });
     }
     removed = [];
     added = [];
   };
   lines.forEach(({ sign }, n) => {
-    if (sign === " ") pair();
+    if (sign === " ") settle();
     else (sign === "-" ? removed : added).push(n);
   });
-  pair();
+  settle();
   return starts;
 }
 
