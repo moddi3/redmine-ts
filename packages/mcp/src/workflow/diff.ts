@@ -1,7 +1,6 @@
 // A line diff for a journal's change to long text, such as an edited description.
 
-import { CHANGE_CAP, LINE_CAP } from "./clip.ts";
-import type { Clip } from "./clip.ts";
+import { CHANGE_CAP, clip } from "./clip.ts";
 
 type Sign = " " | "-" | "+";
 
@@ -14,13 +13,18 @@ interface Line {
 
 const CONTEXT = 1;
 
+/** A line of a change's diff shows at most this many characters. */
+export const LINE_CAP = 350;
+
 /** A changed long line shows this many characters before its first difference and after its last. */
 const LEAD = 40;
 
 /** Past this many edits, the search stops where it got furthest, and every line after that counts as changed. */
 const MAX_EDITS = 1000;
 
-export function lineDiff(from: string, to: string, cut: Clip): string {
+/** `rest` says where to read all of a diff that is cut; without it, nothing is. */
+export function lineDiff(from: string, to: string, rest: string | undefined): string {
+  const cut: Clip = (text, cap, start) => clip(text, cap, rest, start);
   const lines = numbered(edits(split(from), split(to)));
   if (lines.every((line) => line.sign === " ")) {
     return from === to ? "No change." : "Only line endings changed.";
@@ -186,6 +190,8 @@ function counterpart(lines: readonly Line[], n: number): Shared | undefined {
   }
   return best;
 }
+
+type Clip = (text: string, cap: number, start?: number) => string;
 
 interface Shared {
   prefix: number;

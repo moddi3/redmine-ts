@@ -6,12 +6,13 @@
 
 import type { Issue } from "@redmine-ts/sdk";
 import type { Client } from "../tools.ts";
-import { LINE_CAP } from "./clip.ts";
-import type { Clip } from "./clip.ts";
 import { bestEffort } from "./define.ts";
 import { lineDiff } from "./diff.ts";
 import { projectMembers } from "./lookups.ts";
 import type { Lookups } from "./lookups.ts";
+
+/** A description on one line up to this long keeps from and to. */
+export const FROM_TO_CAP = 350;
 
 export type Journal = NonNullable<Issue["journals"]>[number];
 type Detail = Journal["details"][number];
@@ -75,25 +76,25 @@ function referencedIds(journals: readonly Journal[]): Map<Kind, Set<string>> {
   return ids;
 }
 
-/** `customFields` names the issue's custom fields by id. */
+/** `customFields` names the issue's custom fields by id, and `rest` says where to read all of a cut diff. */
 export function changesOf(
   journal: Journal,
   names: Names,
   customFields: ReadonlyMap<string, string>,
-  cut: Clip,
+  rest: string | undefined,
 ): Change[] {
-  return journal.details.map((detail) => change(detail, names, customFields, cut));
+  return journal.details.map((detail) => change(detail, names, customFields, rest));
 }
 
 function change(
   detail: Detail,
   names: Names,
   customFields: ReadonlyMap<string, string>,
-  cut: Clip,
+  rest: string | undefined,
 ): Change {
   const field = fieldLabel(detail, customFields);
   const { old_value: from, new_value: to } = detail;
-  if (showsAsDiff(detail)) return { field, diff: lineDiff(from ?? "", to ?? "", cut) };
+  if (showsAsDiff(detail)) return { field, diff: lineDiff(from ?? "", to ?? "", rest) };
   const render = renderer(detail, names);
   const show = (value: string | null): string | null =>
     value === null || value === "" ? value : render(value);
@@ -104,7 +105,7 @@ function showsAsDiff({ property, name, old_value, new_value }: Detail): boolean 
   const values = [old_value ?? "", new_value ?? ""];
   if (property === "cf") return values.some(spansLines);
   if (property === "attr" && name === "description") {
-    return values.some((value) => spansLines(value) || value.length > LINE_CAP);
+    return values.some((value) => spansLines(value) || value.length > FROM_TO_CAP);
   }
   return false;
 }

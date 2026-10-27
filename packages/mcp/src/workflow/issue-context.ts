@@ -8,10 +8,9 @@ import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
 import type { Client, ToolSpec } from "../tools.ts";
 import { UNTRUSTED } from "../user-text.ts";
-import { clip, clipJournal, LINE_CAP, TEXT_CAP } from "./clip.ts";
-import type { Clip } from "./clip.ts";
+import { clip, journalRest, TEXT_CAP } from "./clip.ts";
 import { bestEffort, defineTool, ToolError } from "./define.ts";
-import { changesOf, RELATION_PHRASES, resolveNames } from "./journals.ts";
+import { changesOf, FROM_TO_CAP, RELATION_PHRASES, resolveNames } from "./journals.ts";
 import type { Lookups } from "./lookups.ts";
 
 export const DEFAULT_JOURNALS = 20;
@@ -139,7 +138,7 @@ const IssueContextSchema = z.object({
               diff: z
                 .string()
                 .describe(
-                  `In place of from and to for a description on several lines or over ${LINE_CAP} characters, or a custom field on several lines. The changed lines, - old and + new, with one unchanged line around each run. A line cut after its start begins with …, and a line or diff cut short ends with a clip marker. A journal in full is not cut.`,
+                  `In place of from and to for a description on several lines or over ${FROM_TO_CAP} characters, or a custom field on several lines. The changed lines, - old and + new, with one unchanged line around each run. A line cut after its start begins with …, and a line or diff cut short ends with a clip marker. A journal in full is not cut.`,
                 ),
             }),
           ]),
@@ -246,15 +245,15 @@ async function issueContext(
       ? {}
       : { watchers: issue.watchers.map(({ id, name }) => ({ id, name })) }),
     journals: shown.map((journal) => {
-      const cut: Clip = whole.has(journal.id) ? (text) => text : clipJournal(issue.id, journal.id);
+      const rest = whole.has(journal.id) ? undefined : journalRest(issue.id, journal.id);
       return {
         id: journal.id,
         note: all.indexOf(journal) + 1,
         user: journal.user?.name ?? null,
         created_on: journal.created_on,
-        notes: cut(journal.notes ?? "", TEXT_CAP),
+        notes: clip(journal.notes ?? "", TEXT_CAP, rest),
         private_notes: journal.private_notes ?? false,
-        changes: changesOf(journal, names, customFields, cut),
+        changes: changesOf(journal, names, customFields, rest),
       };
     }),
     journals_total: all.length,

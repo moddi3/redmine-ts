@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { CHANGE_CAP, clip, LINE_CAP } from "../../src/workflow/clip.ts";
-import type { Clip } from "../../src/workflow/clip.ts";
-import { lineDiff } from "../../src/workflow/diff.ts";
+import { CHANGE_CAP } from "../../src/workflow/clip.ts";
+import { LINE_CAP, lineDiff } from "../../src/workflow/diff.ts";
 
-const CLIPPED: Clip = (text, cap, start) => clip(text, cap, "Read the rest elsewhere.", start);
-const WHOLE: Clip = (text) => text;
+const CLIPPED = "Read the rest elsewhere.";
+const WHOLE = undefined;
 const MARKER = /^\[clipped: (\d+) more characters\. Read the rest elsewhere\.\]$/;
 
 function mulberry32(seed: number): () => number {
