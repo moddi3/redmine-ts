@@ -6,16 +6,18 @@ import { localFiles } from "../src/node.ts";
 /** Server settings beyond the client config: `filesDir` becomes the server's files directory. */
 export interface ServerSettings {
   filesDir?: string;
+  dangerouslyRevealApiKeys?: boolean;
 }
 
 /** A real MCP client talking to the server over the SDK's in-memory transport pair. */
 export async function connect(
   config: RedmineConfig,
-  { filesDir }: ServerSettings = {},
+  { filesDir, dangerouslyRevealApiKeys }: ServerSettings = {},
 ): Promise<Client> {
   const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
   const files = filesDir === undefined ? undefined : localFiles(filesDir);
-  const server = createRedmineMcpServer(config, { files });
+  const options = { files, dangerouslyRevealApiKeys };
+  const server = createRedmineMcpServer(config, options);
   await server.connect(serverEnd);
   const client = new Client({ name: "redmine-mcp-tests", version: "0.0.0" });
   await client.connect(clientEnd);

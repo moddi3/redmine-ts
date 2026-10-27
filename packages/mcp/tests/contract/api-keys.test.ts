@@ -9,6 +9,17 @@ import { connectTo, describeServers } from "./servers.ts";
 // ajv-formats is CommonJS with its plugin on `default`.
 const addFormats = addFormatsModule as unknown as typeof addFormatsModule.default;
 
+const HIDDEN = "[hidden by @redmine-ts/mcp]";
+
+function apiKeyValues(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value.flatMap(apiKeyValues);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, field]) => [
+    ...(key === "api_key" ? [field] : []),
+    ...apiKeyValues(field),
+  ]);
+}
+
 function apiKeyPaths(value: unknown, at = "$"): string[] {
   if (Array.isArray(value)) return value.flatMap((item, i) => apiKeyPaths(item, `${at}[${i}]`));
   if (typeof value !== "object" || value === null) return [];
@@ -29,22 +40,24 @@ describeServers("API keys", (server) => {
   let adminId: number;
   let userId: number;
 
-  function keyLocations(result: Awaited<ReturnType<Client["callTool"]>>): string[] {
+  function keysIn(result: Awaited<ReturnType<Client["callTool"]>>): string[] {
     const sent = JSON.stringify(result);
-    return [
-      ...apiKeyPaths(result.structuredContent).map((path) => `structuredContent ${path}`),
-      ...apiKeyPaths(lastJson(result)).map((path) => `text block ${path}`),
-      ...[server.adminKey, server.userKey].filter((key) => sent.includes(key)).map(() => "a key"),
-    ];
+    return [server.adminKey, server.userKey].filter((key) => sent.includes(key)).map(() => "a key");
   }
 
-  async function exposed(on: Client, name: string, args: Record<string, unknown>) {
+  async function returned(on: Client, name: string, args: Record<string, unknown>) {
     const result = await on.callTool({ name, arguments: args });
     expect(result.isError, `${name}: ${texts(result).join("\n")}`).toBeFalsy();
     const validate = ajv.compile(tools.find((tool) => tool.name === name)!.outputSchema!);
     expect(validate(result.structuredContent) ? [] : validate.errors, name).toEqual([]);
-    return keyLocations(result);
+    expect(keysIn(result), name).toEqual([]);
+    return {
+      structuredContent: apiKeyValues(result.structuredContent),
+      text: apiKeyValues(lastJson(result)),
+    };
   }
+
+  const placeholder = { structuredContent: [HIDDEN], text: [HIDDEN] };
 
   beforeAll(async () => {
     asAdmin = await connectTo(server);
@@ -69,22 +82,24 @@ describeServers("API keys", (server) => {
     }
   });
 
-  it("leaves the key out of users_current and my_account_get", async () => {
+  it("returns the placeholder from users_current and my_account_get", async () => {
     for (const on of [asAdmin, asUser]) {
-      expect(await exposed(on, "users_current", {})).toEqual([]);
-      expect(await exposed(on, "my_account_get", {})).toEqual([]);
+      expect(await returned(on, "users_current", {})).toEqual(placeholder);
+      expect(await returned(on, "my_account_get", {})).toEqual(placeholder);
     }
   });
 
-  it("leaves the key out of users_get for the key's own user and, with an admin key, another user", async () => {
-    expect(await exposed(asUser, "users_get", { user_id: userId })).toEqual([]);
-    expect(await exposed(asAdmin, "users_get", { user_id: adminId })).toEqual([]);
-    expect(await exposed(asAdmin, "users_get", { user_id: userId })).toEqual([]);
+  it("returns the placeholder from users_get for the key's own user and, with an admin key, another user", async () => {
+    expect(await returned(asUser, "users_get", { user_id: userId })).toEqual(placeholder);
+    expect(await returned(asAdmin, "users_get", { user_id: adminId })).toEqual(placeholder);
+    expect(await returned(asAdmin, "users_get", { user_id: userId })).toEqual(placeholder);
   });
 
-  it("leaves the key out of raw_request on the same paths", async () => {
+  it("returns the placeholder from raw_request on the same paths", async () => {
     for (const path of ["users/current.json", "my/account.json", `users/${userId}.json`]) {
-      expect(await exposed(asAdmin, "raw_request", { method: "GET", path }), path).toEqual([]);
+      expect(await returned(asAdmin, "raw_request", { method: "GET", path }), path).toEqual(
+        placeholder,
+      );
     }
   });
 
@@ -97,6 +112,6 @@ describeServers("API keys", (server) => {
       name: "raw_request",
       arguments: { method: "GET", path: "users/current.xml" },
     });
-    expect(keyLocations(result)).toEqual([]);
+    expect(keysIn(result)).toEqual([]);
   });
 });

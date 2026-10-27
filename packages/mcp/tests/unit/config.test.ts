@@ -94,6 +94,19 @@ describe("parseCli", () => {
     expect(JSON.stringify(command)).not.toContain(KEY);
   });
 
+  it("reveals API keys with --dangerously-reveal-api-keys over stdio and refuses it over HTTP", () => {
+    expect(parseCli(["--dangerously-reveal-api-keys"], env)).toMatchObject({
+      kind: "serve",
+      dangerouslyRevealApiKeys: true,
+    });
+    expect(
+      parseCli(["--http", "--dangerously-reveal-api-keys"], { REDMINE_URL: env.REDMINE_URL }),
+    ).toMatchObject({
+      kind: "error",
+      message: expect.stringContaining("--dangerously-reveal-api-keys"),
+    });
+  });
+
   it("refuses an unknown flag and answers --help", () => {
     expect(parseCli(["--write"], env).kind).toBe("error");
     expect(parseCli(["--help"], {})).toEqual({ kind: "help" });
