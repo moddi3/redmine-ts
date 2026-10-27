@@ -1,6 +1,6 @@
 // Symptom-based response fixes. Never keyed by server version: patch releases regress and fix things
 // (hours "8/1" in 6.0.1, fixed in 6.0.2), and the server does not report its version. Each fix must be a
-// no-op on correct data, so it is safe against every server. News comments are the one exception, below.
+// no-op on correct data, so it is safe against every server. Same-second journals and news comments, below, are the two narrow exceptions.
 
 import { isRecord } from "./util.ts";
 
@@ -22,7 +22,7 @@ export const normalizeResponse: Fix = fields({
     ),
   }),
   // Redmine orders comments by created_on, which the API does not send. Id order is the order they were
-  // posted in, and differs only for a comment whose date was changed in the database.
+  // posted in, and differs only for a comment whose date was set or changed in the database.
   news: fields({ comments: byId }),
 });
 
