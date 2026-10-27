@@ -5,7 +5,8 @@
 
 import type { Issue } from "@redmine-ts/sdk";
 import type { Client } from "../tools.ts";
-import { CHANGE_CAP, clip } from "./clip.ts";
+import { CHANGE_CAP } from "./clip.ts";
+import type { Clip } from "./clip.ts";
 import { bestEffort } from "./define.ts";
 import { projectMembers } from "./lookups.ts";
 import type { Lookups } from "./lookups.ts";
@@ -74,26 +75,23 @@ function referencedIds(journals: readonly Journal[]): Map<Kind, Set<string>> {
   return ids;
 }
 
-/**
- * `customFields` names the issue's custom fields by id. `rest` tells an agent where to read a clipped
- * value in full.
- */
+/** `customFields` names the issue's custom fields by id. */
 export function changesOf(
   journal: Journal,
   names: Names,
   customFields: ReadonlyMap<string, string>,
-  rest: string,
+  cut: Clip,
 ): Change[] {
-  return journal.details.map((detail) => change(detail, names, customFields, rest));
+  return journal.details.map((detail) => change(detail, names, customFields, cut));
 }
 
 function change(
   detail: Detail,
   names: Names,
   customFields: ReadonlyMap<string, string>,
-  rest: string,
+  cut: Clip,
 ): Change {
-  const render = renderer(detail, names, rest);
+  const render = renderer(detail, names, cut);
   const show = (value: string | null): string | null =>
     value === null || value === "" ? value : render(value);
   return {
@@ -118,17 +116,13 @@ function fieldLabel({ property, name }: Detail, customFields: ReadonlyMap<string
   }
 }
 
-function renderer(
-  { property, name }: Detail,
-  names: Names,
-  rest: string,
-): (value: string) => string {
+function renderer({ property, name }: Detail, names: Names, cut: Clip): (value: string) => string {
   // The value is the other issue, and `name` is the type as it reads from this one.
   if (property === "relation") return (id) => `${RELATION_PHRASES[name] ?? name} #${id}`;
   // A cf value is the stored value as is, an attachment's is its filename.
   if (property !== "attr") return (value) => value;
   if (name === "parent_id" || name === "child_id") return (id) => `#${id}`;
-  if (name === "description") return (text) => clip(text, CHANGE_CAP, rest);
+  if (name === "description") return (text) => cut(text, CHANGE_CAP);
   const kind = ATTRIBUTES[name]?.kind;
   const known = kind === undefined ? undefined : names.get(kind);
   return (value) => known?.get(value) ?? value;

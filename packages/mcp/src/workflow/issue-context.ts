@@ -8,8 +8,9 @@ import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
 import type { Client, ToolSpec } from "../tools.ts";
 import { UNTRUSTED } from "../user-text.ts";
-import { clip, TEXT_CAP } from "./clip.ts";
-import { bestEffort, defineTool } from "./define.ts";
+import { clip, clipJournal, TEXT_CAP } from "./clip.ts";
+import type { Clip } from "./clip.ts";
+import { bestEffort, defineTool, ToolError } from "./define.ts";
 import { changesOf, RELATION_PHRASES, resolveNames } from "./journals.ts";
 import type { Lookups } from "./lookups.ts";
 
@@ -135,9 +136,11 @@ const IssueContextSchema = z.object({
         ),
       }),
     )
-    .describe("The newest journals, oldest first, with ids in changes resolved to names."),
+    .describe(
+      "The newest journals and those in full, oldest first, with ids in changes resolved to names.",
+    ),
   journals_total: z.int(),
-  journals_omitted: z.int().describe("Older journals left out."),
+  journals_omitted: z.int().describe("Journals left out."),
 });
 
 type IssueContext = z.output<typeof IssueContextSchema>;
@@ -148,7 +151,7 @@ export const issueContextTool: ToolSpec = defineTool({
   description: [
     "Everything needed to work on one issue in one call: the issue with its full description, the statuses it can move to next, relations read from this issue, subtasks with their status, attachment metadata, watchers, and the newest journals as readable diffs with ids resolved to names.",
     "Call it first when asked to work on, triage or summarize an issue, instead of issues_get.",
-    `Descriptions and notes longer than ${TEXT_CAP} characters are clipped with a marker; issues_get returns them whole.`,
+    `Descriptions and notes longer than ${TEXT_CAP} characters are clipped with a marker that names the call returning them whole.`,
     "Returns {issue, allowed_statuses, relations, children, attachments, watchers, journals, journals_total, journals_omitted}.",
     "Next: issues_transition to change the status by name, issues_update for other fields or a note, attachments_download to read a file.",
   ].join(" "),
@@ -162,11 +165,15 @@ export const issueContextTool: ToolSpec = defineTool({
       .describe(
         `How many of the newest journals to include, ${DEFAULT_JOURNALS} by default, at most ${MAX_JOURNALS}. 0 leaves them out.`,
       ),
+    full: z
+      .array(z.int().positive())
+      .default([])
+      .describe("Ids of journals to return unclipped, even if older than the newest `journals`."),
   }),
   output: IssueContextSchema,
   ...BY_METHOD.GET,
-  run: async (rm, { issue_id, journals }, { lookups }) => ({
-    structured: await issueContext(rm, lookups, issue_id, journals),
+  run: async (rm, { issue_id, journals, full }, { lookups }) => ({
+    structured: await issueContext(rm, lookups, issue_id, journals, full),
   }),
 });
 
@@ -175,10 +182,21 @@ async function issueContext(
   lookups: Lookups,
   issue_id: number,
   journals: number,
+  full: readonly number[],
 ): Promise<IssueContext> {
   const issue = await rm.issues.get({ issue_id, include: [...INCLUDES] });
   const all = issue.journals ?? [];
-  const shown = journals === 0 ? [] : all.slice(-journals);
+  const whole = new Set(full);
+  const unknown = [...whole].filter((id) => !all.some((journal) => journal.id === id));
+  if (unknown.length > 0) {
+    throw new ToolError(
+      `Issue ${issue.id} has no journal ${unknown.join(" or ")} that this API key can read. Journal ids come from journals[].id or a clip marker.`,
+      { kind: "unknown_journal", issue_id: issue.id, journal_ids: unknown },
+    );
+  }
+  const shown = all.filter(
+    (journal, index) => index >= all.length - journals || whole.has(journal.id),
+  );
   const [names, children] = await Promise.all([
     resolveNames(rm, lookups, issue, shown),
     childrenOf(rm, issue),
@@ -188,7 +206,6 @@ async function issueContext(
     Object.entries(issue).filter(([key]) => !(INCLUDES as readonly string[]).includes(key)),
   );
   const { description } = issue;
-  const rest = `Call issues_get with issue_id ${issue.id} and include ["journals"] for all of it.`;
   return {
     issue: {
       ...fields,
@@ -218,15 +235,18 @@ async function issueContext(
     ...(issue.watchers === undefined
       ? {}
       : { watchers: issue.watchers.map(({ id, name }) => ({ id, name })) }),
-    journals: shown.map((journal) => ({
-      id: journal.id,
-      note: all.indexOf(journal) + 1,
-      user: journal.user?.name ?? null,
-      created_on: journal.created_on,
-      notes: clip(journal.notes ?? "", TEXT_CAP, rest),
-      private_notes: journal.private_notes ?? false,
-      changes: changesOf(journal, names, customFields, rest),
-    })),
+    journals: shown.map((journal) => {
+      const cut: Clip = whole.has(journal.id) ? (text) => text : clipJournal(issue.id, journal.id);
+      return {
+        id: journal.id,
+        note: all.indexOf(journal) + 1,
+        user: journal.user?.name ?? null,
+        created_on: journal.created_on,
+        notes: cut(journal.notes ?? "", TEXT_CAP),
+        private_notes: journal.private_notes ?? false,
+        changes: changesOf(journal, names, customFields, cut),
+      };
+    }),
     journals_total: all.length,
     journals_omitted: all.length - shown.length,
   };
@@ -281,7 +301,7 @@ export async function issueMarkdown(
   lookups: Lookups,
   issue_id: number,
 ): Promise<string> {
-  return markdown(await issueContext(rm, lookups, issue_id, DEFAULT_JOURNALS));
+  return markdown(await issueContext(rm, lookups, issue_id, DEFAULT_JOURNALS, []));
 }
 
 function markdown(context: IssueContext): string {
