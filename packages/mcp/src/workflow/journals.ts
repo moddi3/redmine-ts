@@ -1,23 +1,23 @@
 // Journal details as a readable diff. Redmine sends each change as {property, name, old_value,
 // new_value} with ids in strings, such as status_id from "1" to "2". Each becomes {field, from, to}
 // with a label and names, fetching only the lookups the details reference; an id no lookup resolves
-// stays raw.
+// stays raw. Text on several lines or longer than one diff line, such as a description, becomes
+// {field, diff} instead.
 
 import type { Issue } from "@redmine-ts/sdk";
 import type { Client } from "../tools.ts";
-import { CHANGE_CAP, clip } from "./clip.ts";
+import { CHANGE_CAP, clip, LINE_CAP } from "./clip.ts";
 import { bestEffort } from "./define.ts";
+import { lineDiff } from "./diff.ts";
 import { projectMembers } from "./lookups.ts";
 import type { Lookups } from "./lookups.ts";
 
 export type Journal = NonNullable<Issue["journals"]>[number];
 type Detail = Journal["details"][number];
 
-export interface Change {
-  field: string;
-  from: string | null;
-  to: string | null;
-}
+export type Change =
+  | { field: string; from: string | null; to: string | null }
+  | { field: string; diff: string };
 
 /** What an attribute's id points at. */
 export type Kind = "status" | "tracker" | "priority" | "user" | "category" | "version" | "project";
@@ -93,14 +93,19 @@ function change(
   customFields: ReadonlyMap<string, string>,
   rest: string,
 ): Change {
-  const render = renderer(detail, names, rest);
+  const field = fieldLabel(detail, customFields);
+  const { old_value: from, new_value: to } = detail;
+  if (isLong(from) || isLong(to)) {
+    return { field, diff: clip(lineDiff(from ?? "", to ?? ""), CHANGE_CAP, rest) };
+  }
+  const render = renderer(detail, names);
   const show = (value: string | null): string | null =>
     value === null || value === "" ? value : render(value);
-  return {
-    field: fieldLabel(detail, customFields),
-    from: show(detail.old_value),
-    to: show(detail.new_value),
-  };
+  return { field, from: show(from), to: show(to) };
+}
+
+function isLong(value: string | null): boolean {
+  return value !== null && (value.length > LINE_CAP || /[\r\n]/.test(value));
 }
 
 function fieldLabel({ property, name }: Detail, customFields: ReadonlyMap<string, string>): string {
@@ -118,17 +123,12 @@ function fieldLabel({ property, name }: Detail, customFields: ReadonlyMap<string
   }
 }
 
-function renderer(
-  { property, name }: Detail,
-  names: Names,
-  rest: string,
-): (value: string) => string {
+function renderer({ property, name }: Detail, names: Names): (value: string) => string {
   // The value is the other issue, and `name` is the type as it reads from this one.
   if (property === "relation") return (id) => `${RELATION_PHRASES[name] ?? name} #${id}`;
   // A cf value is the stored value as is, an attachment's is its filename.
   if (property !== "attr") return (value) => value;
   if (name === "parent_id" || name === "child_id") return (id) => `#${id}`;
-  if (name === "description") return (text) => clip(text, CHANGE_CAP, rest);
   const kind = ATTRIBUTES[name]?.kind;
   const known = kind === undefined ? undefined : names.get(kind);
   return (value) => known?.get(value) ?? value;

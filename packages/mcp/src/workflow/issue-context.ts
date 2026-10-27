@@ -8,7 +8,7 @@ import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
 import type { Client, ToolSpec } from "../tools.ts";
 import { UNTRUSTED } from "../user-text.ts";
-import { clip, TEXT_CAP } from "./clip.ts";
+import { clip, LINE_CAP, TEXT_CAP } from "./clip.ts";
 import { bestEffort, defineTool } from "./define.ts";
 import { changesOf, RELATION_PHRASES, resolveNames } from "./journals.ts";
 import type { Lookups } from "./lookups.ts";
@@ -126,7 +126,17 @@ const IssueContextSchema = z.object({
         notes: z.string(),
         private_notes: z.boolean(),
         changes: z.array(
-          z.object({ field: z.string(), from: z.string().nullable(), to: z.string().nullable() }),
+          z.union([
+            z.object({ field: z.string(), from: z.string().nullable(), to: z.string().nullable() }),
+            z.object({
+              field: z.string(),
+              diff: z
+                .string()
+                .describe(
+                  `Replaces from and to for text on several lines or over ${LINE_CAP} characters. The changed lines, - old and + new, with one unchanged line around each run.`,
+                ),
+            }),
+          ]),
         ),
       }),
     )
@@ -354,8 +364,10 @@ function markdown(context: IssueContext): string {
         "",
         `### ${journal.created_on}, ${journal.user ?? "unknown user"} (journal ${journal.id}${journal.private_notes ? ", private notes" : ""})`,
         "",
-        ...journal.changes.map(
-          ({ field, from, to }) => `- ${field}: ${from || "none"} → ${to || "none"}`,
+        ...journal.changes.flatMap((change) =>
+          "diff" in change
+            ? [`- ${change.field}:`, ...diffBlock(change.diff).map((line) => `  ${line}`)]
+            : [`- ${change.field}: ${change.from || "none"} → ${change.to || "none"}`],
         ),
       );
       if (journal.notes !== "")
@@ -367,6 +379,12 @@ function markdown(context: IssueContext): string {
 
 function section(title: string, body: readonly string[]): string[] {
   return body.length === 0 ? [] : ["", `## ${title}`, "", ...body];
+}
+
+/** A fence longer than any run of backticks in the diff, so no line of the user's text can close it. */
+function diffBlock(diff: string): string[] {
+  const fence = "`".repeat(Math.max(2, ...(diff.match(/`+/g) ?? []).map((run) => run.length)) + 1);
+  return [`${fence}diff`, ...diff.split("\n"), fence];
 }
 
 function quote(text: string): string {
