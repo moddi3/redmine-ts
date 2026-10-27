@@ -61,6 +61,16 @@ export const getProjects = op({
   response: { kind: "list", items: "projects", paged: true },
 });
 
+export const getNews = op({
+  id: "getNews",
+  method: "GET",
+  path: "news/{news_id}.json",
+  pathParams: ["news_id"],
+  query: { include: "csv" },
+  includes: ["attachments", "comments"],
+  response: { kind: "item", unwrap: "news" },
+});
+
 export const getTimeEntry = op({
   id: "getTimeEntry",
   method: "GET",
@@ -223,6 +233,7 @@ export const ops: Readonly<Record<string, AnyOp>> = {
   getIssues,
   getIssueStatuses,
   getProjects,
+  getNews,
   getTimeEntry,
   getTimeEntries,
   updateIssue,

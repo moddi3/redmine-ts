@@ -25,6 +25,10 @@ vi.mock("../../src/generated/slots.ts", async () => ({
 }));
 
 const issue = { id: 42, subject: "Printer on fire" };
+const journalsNewestFirst = [
+  { id: 2, created_on: "2026-10-27T10:00:01Z" },
+  { id: 1, created_on: "2026-10-27T10:00:00Z" },
+];
 
 /** createRedmine over a fake fetch. The client type is the placeholder's, so methods are reached through `any`. */
 function client(respond: Responder, config: Record<string, unknown> = {}) {
@@ -203,6 +207,15 @@ describe("access", () => {
 });
 
 describe("rm.with", () => {
+  test("a derived client gets the response fixes, such as journals oldest first", async () => {
+    const { rm } = client(() => json({ issue: { ...issue, journals: journalsNewestFirst } }));
+    const derived = await rm
+      .with({ timeoutMs: 1000 })
+      .issues.get({ issue_id: 42, include: ["journals"] });
+
+    expect(derived.journals.map((entry: { id: number }) => entry.id)).toEqual([1, 2]);
+  });
+
   test("a derived client carries its defaults and the original does not", async () => {
     const { rm, requests } = client(keyOf("admin", () => empty()));
     await rm.with({ as: "jsmith" }).issues.update({ issue_id: 1, notes: "n" });
@@ -275,6 +288,17 @@ describe("rm.with", () => {
 });
 
 describe("rm.request", () => {
+  test("gets the response fixes of typed calls, such as journals oldest first", async () => {
+    const { rm } = client(() => json({ issue: { ...issue, journals: journalsNewestFirst } }));
+    const raw = await rm.request({
+      method: "GET",
+      path: "issues/42.json",
+      query: { include: "journals" },
+    });
+
+    expect(raw.issue.journals.map((entry: { id: number }) => entry.id)).toEqual([1, 2]);
+  });
+
   test("reaches a plugin path under the subpath with auth, query and parsed JSON", async () => {
     const { rm, requests } = client(() => json({ boards: [{ id: 1 }] }));
     const result = await rm.request({
