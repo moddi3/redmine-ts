@@ -89,9 +89,12 @@ export function createRedmineMcpServer(
 ): Server {
   const { files, observe, dangerouslyRevealApiKeys } = options;
   const access = config.access ?? "full";
-  const rm = createRedmine(
-    observe === undefined ? config : { ...config, fetch: observed(config.fetch, observe) },
-  );
+  const rm = createRedmine({
+    ...config,
+    // The tools' output, such as journals oldest first, relies on the SDK's response fixes.
+    normalize: true,
+    ...(observe === undefined ? {} : { fetch: observed(config.fetch, observe) }),
+  });
   const context: ToolContext = { lookups: createLookups(rm), files };
   const redact = redactor(config.auth, dangerouslyRevealApiKeys === true);
   const tools = [...workflowTools(access, files?.dir), ...catalogTools];
