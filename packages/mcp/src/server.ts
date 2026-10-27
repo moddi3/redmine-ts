@@ -94,7 +94,7 @@ export function createRedmineMcpServer(
   );
   const context: ToolContext = { lookups: createLookups(rm), files };
   const redact = redactor(config.auth, dangerouslyRevealApiKeys === true);
-  const tools = [...workflowTools(access, files !== undefined), ...catalogTools];
+  const tools = [...workflowTools(access, files?.dir), ...catalogTools];
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const listed = tools.filter((tool) => isListed(tool, access, config.version)).map(definition);
 

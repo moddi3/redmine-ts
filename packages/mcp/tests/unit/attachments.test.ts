@@ -3,12 +3,14 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { localFiles } from "../../src/node.ts";
 import { lastJson, texts } from "../connect.ts";
 import { callError, callOk, json, sent, serve } from "./harness.ts";
 import type { Route, Seen } from "./harness.ts";
@@ -154,13 +156,17 @@ describe("attachments_upload", () => {
   describe("from the files directory", () => {
     let root: string;
     let dir: string;
+    let real: string;
 
     beforeEach(() => {
       root = mkdtempSync(join(tmpdir(), "redmine-mcp-upload-"));
       dir = join(root, "files");
       mkdirSync(join(dir, "logs"), { recursive: true });
+      real = realpathSync(dir);
+      mkdirSync(join(root, "files-other"));
       writeFileSync(join(dir, "logs", "app.log"), "line 1\n");
       writeFileSync(join(root, "secret.txt"), "secret");
+      writeFileSync(join(root, "files-other", "a.txt"), "other");
       symlinkSync(join(root, "secret.txt"), join(dir, "link.txt"));
       writeFileSync(join(dir, "huge.bin"), new Uint8Array(5 * 1024 * 1024 + 1));
     });
@@ -171,10 +177,62 @@ describe("attachments_upload", () => {
       expect(new TextDecoder().decode(uploads(seen)[0]?.bytes)).toBe("line 1\n");
     });
 
+    it.each(["dir", "real"] as const)(
+      "uploads a file by its absolute path through the %s path of the directory",
+      async (form) => {
+        const { client, seen } = await serve(ROUTES, {}, { filesDir: dir });
+        await callOk(client, "attachments_upload", {
+          filename: "app.log",
+          path: `${form === "dir" ? dir : real}/logs/app.log`,
+        });
+        expect(new TextDecoder().decode(uploads(seen)[0]?.bytes)).toBe("line 1\n");
+      },
+    );
+
+    it("names the directory in the path description as attachments_save returns it", async () => {
+      const { client } = await serve(ROUTES, {}, { filesDir: dir });
+      const saved = await callOk(client, "attachments_save", { id: 30 });
+      const named = dirname((saved.structuredContent as { path: string }).path);
+      expect(named).toBe(real);
+      const upload = (await client.listTools()).tools.find(
+        (tool) => tool.name === "attachments_upload",
+      );
+      expect(upload?.inputSchema.properties?.path).toMatchObject({
+        description: expect.stringContaining(`"${named}"`),
+      });
+    });
+
+    it("names the resolved directory when the configured path is a symlink", async () => {
+      const linked = join(root, "linked");
+      symlinkSync(dir, linked);
+      const { client, seen } = await serve(ROUTES, {}, { filesDir: linked });
+      const upload = (await client.listTools()).tools.find(
+        (tool) => tool.name === "attachments_upload",
+      );
+      expect(upload?.inputSchema.properties?.path).toMatchObject({
+        description: expect.stringContaining(`"${real}"`),
+      });
+      await callOk(client, "attachments_upload", {
+        filename: "app.log",
+        path: `${linked}/logs/app.log`,
+      });
+      expect(new TextDecoder().decode(uploads(seen)[0]?.bytes)).toBe("line 1\n");
+      const result = await callError(client, "attachments_upload", {
+        filename: "x",
+        path: "link.txt",
+      });
+      expect(texts(result)[0]).toContain(`resolves outside the files directory "${real}"`);
+    });
+
+    it("throws when the directory does not exist", () => {
+      expect(() => localFiles(join(root, "missing"))).toThrow();
+    });
+
     it.each([
       ["../secret.txt", "resolves outside the files directory"],
       ["link.txt", "resolves outside the files directory"],
       ["logs/../../secret.txt", "resolves outside the files directory"],
+      ["../files-other/a.txt", "resolves outside the files directory"],
       ["missing.txt", "does not exist in the files directory"],
       ["logs", "is not a regular file"],
       ["huge.bin", "over this server's 5.0 MB upload limit"],
@@ -185,13 +243,28 @@ describe("attachments_upload", () => {
       expect(seen).toEqual([]);
     });
 
-    it("refuses an absolute path outside the directory", async () => {
+    it.each([
+      ["missing.txt", "does not exist in the files directory"],
+      ["../secret.txt", "resolves outside the files directory"],
+    ])("names the directory when it refuses %s", async (path, message) => {
+      const { client } = await serve(ROUTES, {}, { filesDir: dir });
+      const result = await callError(client, "attachments_upload", { filename: "x", path });
+      expect(texts(result)[0]).toContain(`${message} "${real}"`);
+    });
+
+    it.each([
+      ["secret.txt", "resolves outside the files directory"],
+      ["files/../secret.txt", "resolves outside the files directory"],
+      ["files/link.txt", "resolves outside the files directory"],
+      ["files-other/a.txt", "resolves outside the files directory"],
+      ["files-other/missing.txt", "does not exist in the files directory"],
+    ])("refuses the absolute path of %s before sending: %s", async (path, message) => {
       const { client, seen } = await serve(ROUTES, {}, { filesDir: dir });
       const result = await callError(client, "attachments_upload", {
         filename: "x",
-        path: join(root, "secret.txt"),
+        path: `${root}/${path}`,
       });
-      expect(texts(result)[0]).toContain("resolves outside the files directory");
+      expect(texts(result)[0]).toContain(`${message} "${real}"`);
       expect(seen).toEqual([]);
     });
   });

@@ -203,9 +203,9 @@ describe("workflow tools in tools/list", () => {
   });
 
   it("builds each kind of tool set once, so servers share schema objects and their validators", () => {
-    expect(workflowTools("full", false)).toBe(workflowTools("full", false));
-    expect(workflowTools("read-only", true)).toBe(workflowTools("read-only", true));
-    expect(workflowTools("full", false)[0]).toBe(workflowTools("read-only", true)[0]);
+    expect(workflowTools("full", undefined)).toBe(workflowTools("full", undefined));
+    expect(workflowTools("read-only", dir)).toBe(workflowTools("read-only", dir));
+    expect(workflowTools("full", undefined)[0]).toBe(workflowTools("read-only", dir)[0]);
   });
 
   it("offers path to attachments_upload only with a files directory", async () => {

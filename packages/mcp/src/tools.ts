@@ -29,6 +29,8 @@ export interface Annotations {
  * system at all.
  */
 export interface LocalFiles {
+  /** The directory's absolute path with symlinks resolved, as tool descriptions, errors and saved paths name it. */
+  readonly dir: string;
   /** A regular file inside the directory, refused with kind invalid_input before anything is read otherwise. */
   open(path: string): Promise<{ size: number; bytes(): Promise<Uint8Array> }>;
   /** Writes `body` to a new file named after `filename` that never replaces an existing one. */
