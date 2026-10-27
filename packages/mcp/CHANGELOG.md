@@ -1,5 +1,54 @@
 # @redmine-ts/mcp
 
+## 0.4.0
+
+### Minor Changes
+
+- 8bab487: `issue_context` and the `redmine://issues/{id}` resource now show a journal's change to the description, or to a custom field on several lines, as the lines that changed. Before, an edited description came as `from` and `to`, each cut at 500 characters, so a change past the first 500 characters did not show. A long text custom field came whole.
+
+  When the old or new description spans lines or is longer than 350 characters, or a custom field value spans lines, the change now comes as `{field, diff}` in place of `{field, from, to}`, such as `{"field": "Description", "diff": "@@ line 13 @@\n  13. Step 13\n- 14. Step 14\n+ 14. Step fourteen\n  15. Step 15"}`. The diff has one unchanged line around each run of changes, with the removed lines first. A changed line longer than 350 characters is paired with the line across its run that shares the most text with it. It shows 40 characters on each side of every place where the two differ, with `…` in place of each part left out, and is cut at 350 characters only when those parts do not fit. Any other line longer than 350 characters shows its start. The diff stops at 1000 characters, and a diff that leaves anything out ends with one clip marker. A journal named in `full` shows its diff uncut, with every line whole. CRLF and LF line breaks compare equal. The resource shows the diff in a fenced block under the field's name.
+
+  Other changes keep `{field, from, to}`. A client that reads `from` and `to` on every change needs to handle `diff` too.
+
+- d1a305e: With a files directory, the description of `attachments_upload`'s `path` now names the directory, and so do the errors for a path that does not exist in it or resolves outside it. Before, an agent could not tell where the directory was, so it passed a file from its own working directory and got an error that did not say where to put it. The server names the directory with its symlinks resolved, as in the paths `attachments_save` returns. The description also says that `path` takes an absolute path inside the directory, which the server already accepted. A path must still resolve inside the directory after symlinks are followed.
+
+  `LocalFiles` has a new `dir` property with that path. `localFiles` now resolves the directory when it is called, so it throws when the directory does not exist.
+
+- 1b0a0fe: `issue_context` takes `full`, the ids of journals to return unclipped. It still makes one `issues.get` request. A journal in `full` is returned even when it is older than the newest `journals`, and an id that is not a journal of the issue is refused with `unknown_journal`.
+
+  A clipped note or changed value now ends with a marker that names this call, such as `Call issue_context with issue_id 7, journals 0 and full [1042] for all of it.` Before, the marker said to call `issues_get` with `include: ["journals"]`, which returns every journal with every raw detail. A clipped description still names `issues_get`, which returns the issue without journals.
+
+- 80ce6ab: `issue_context` now gives each journal a `note`, its N in the issue page's `#note-N`, so an agent can find the journal that "see #note-68" means. The count starts at 1 with the oldest journal the API key may see. Journals that the `journals` cap leaves out still count. The `redmine://issues/{id}` resource puts the number in each journal heading, as in `### #note-68, 2026-01-15T09:30:00Z, Jane Doe (journal 1042)`.
+
+  Redmine numbers all journals of an issue before it hides some of them. It hides other users' private notes from a user who may not view them, and a journal without notes whose changes the user may not see, such as a relation to an issue that the user cannot see or that was deleted later, or a custom field the user cannot see. After a hidden journal, `note` is lower than Redmine's number, for an admin key too in the second case. The output schema says so.
+
+- 6431738: The OAuth authorization server now admits a Client ID Metadata Document that declares `token_endpoint_auth_method: "private_key_jwt"`, as ChatGPT's does. Before, it refused such a document at the consent page, so ChatGPT could not sign in through it.
+
+  - The document must give its public keys in exactly one of `jwks` and `jwks_uri`. A `token_endpoint_auth_signing_alg`, when present, must be `RS256`, `PS256` or `ES256`. Every other method is still refused, and the message names the methods the server takes.
+  - The server seals the method into the code and into every refresh token of the sign-in. Each token request for them must then send a `client_assertion` of type `urn:ietf:params:oauth:client-assertion-type:jwt-bearer`, as RFC 7523 describes. The server checks it with the keys of the client's current document: the alg, the key named by `kid`, `iss` and `sub` equal to the `client_id`, `aud` equal to the issuer or the token endpoint, `exp` at most an hour away, `nbf` and `iat`, and a `jti` that works once. RSA keys need at least 2048 bits. A failed check gets 401 `invalid_client` before the code is spent or Redmine is asked. `client_id` may be left out of such a request, as RFC 7521 allows.
+  - The server fetches a key set through `oauth.fetchClientMetadata`, without redirects, within 5 seconds and 16 KiB, and keeps it for 5 minutes. A key set that cannot be fetched is not kept, and the token request gets 502 `server_error`. A `kid` that the kept set lacks fetches it again at most once a minute. One process fetches at most 4 key sets at once.
+  - Public clients behave as before. Their token requests fetch nothing and may not send a `client_assertion`.
+  - The authorization server metadata now lists `private_key_jwt` in `token_endpoint_auth_methods_supported`, after `none`, and adds `token_endpoint_auth_signing_alg_values_supported`. Dynamic Client Registration still registers public clients only, and its refusal of a key-based method now points to a metadata document.
+  - `jose` is a new dependency. It verifies the assertion with WebCrypto, on Node, Bun and Workers.
+
+- c430735: Results no longer carry working Redmine API keys. Before, `users_current`, `my_account_get` and `users_get` returned the calling user's own API key. With an admin key, `users_get` returned the API key of any user, and `users_create` returned the new user's key. `raw_request` returned the same keys from the same paths. Each key went into the agent's context and transcript.
+
+  The server now replaces each `api_key` value, at any depth, with `[hidden by @redmine-ts/mcp]` in tool results, in error results and in the `redmine://issues/{id}` resource. The field stays, so the output schemas do not change. The server also replaces the API key or OAuth access token it sends to Redmine wherever a response repeats it. `--dangerously-reveal-api-keys`, over stdio only, and the `dangerouslyRevealApiKeys` option of `createRedmineMcpServer` turn this off. `@redmine-ts/sdk` still returns `api_key` as Redmine sends it.
+
+### Patch Changes
+
+- bb569d5: `issue_context`, `issues_get`, `raw_request`, and the `redmine://issues/{id}` resource now return an issue's journals oldest first, whatever the API key's user chose for **Display comments** in Redmine. The SDK now sets that order, so `include: ["changesets"]` and the comments from `news_get` come oldest first too.
+
+  Redmine sends these lists newest first when that user reads comments in reverse chronological order. In that case `issue_context` kept the oldest journals under its `journals` cap instead of the newest, and listed them newest first.
+
+- 13c51a9: `createRedmineMcpServer` and `createRedmineMcpHandler` keep the SDK's response fixes on even when the config passes `normalize: false`. With them off, `issue_context` kept the oldest journals for a key whose user reads comments newest first, as before the fix for #49. The CLI was not affected, because it has no `normalize` option.
+- d0dbb5b: `issues_list` and `time_entries_list` now accept a `where.project_id` with a list of ids, `{not}`, `"mine"`, `"bookmarks"` or a `{raw}` such as `1|2`, as their schemas offer. Before, Redmine answered 404 to each of them, and the error result sent the agent to check ids that were valid. An identifier in a list of two or more or under `{not}` now gets an error result that asks for ids. Next to such a `project_id`, a custom field with `{raw}`, or with a value that starts with an operator character, gets an error result that asks for an operator object. A filter that Redmine offers only inside one project, such as `category_id`, and a saved query's `query_id` get an error result there too. The `project_id` description now says which forms include subprojects. The fix is in `@redmine-ts/sdk`.
+- 69eae32: `issue_context` and the `redmine://issues/{id}` resource now label a subtask change "Subtask" and show the subtask as `#123`, as Redmine's issue page does. Redmine records this change on the parent issue as a `child_id` detail when someone adds a subtask to the issue or removes one. Before, `issue_context` showed it as `{"field": "child_id", "from": null, "to": "123"}`.
+- Updated dependencies [d49ab0f]
+- Updated dependencies [d0dbb5b]
+- Updated dependencies [5dc6521]
+  - @redmine-ts/sdk@0.5.0
+
 ## 0.3.2
 
 ### Patch Changes
