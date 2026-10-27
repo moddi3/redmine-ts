@@ -1,6 +1,6 @@
 # Contract-test Redmine servers
 
-Real Redmine servers in Docker for SDK contract tests. Each uses the image's built-in SQLite, so there is no database container.
+Real Redmine servers in Docker for SDK contract tests. Each uses the image's built-in SQLite, so there is no database container. `DATABASE_URL` in `docker/compose.yaml` gives SQLite a 5-second busy timeout, which the image's `database.yml` lacks. Without it, parallel test files that write at once get 500s with `database is locked`.
 
 ## Commands
 

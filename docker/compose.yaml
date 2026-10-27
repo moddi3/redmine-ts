@@ -11,14 +11,23 @@ configs:
         run Rails.application
       end
 
+# The image's database.yml sets no SQLite busy timeout, so a write that meets another one, such as a
+# request while Redmine deletes a project in the background, fails at once with "database is locked".
+# Rails merges DATABASE_URL's options into database.yml. A file mounted over it would sit in config/,
+# which the image's entrypoint chowns as root.
+x-database: &database
+  DATABASE_URL: sqlite3:sqlite/redmine.db?timeout=5000
+
 services:
   redmine70:
     image: redmine:7.0
     ports: ["3070:3000"]
+    environment: *database
 
   redmine61:
     image: redmine:6.1
     ports: ["3061:3000"]
+    environment: *database
 
   redmine70-subpath:
     image: redmine:7.0
@@ -28,4 +37,5 @@ services:
       - source: subpath_ru
         target: /subpath.ru
     environment:
+      <<: *database
       RAILS_RELATIVE_URL_ROOT: /redmine
