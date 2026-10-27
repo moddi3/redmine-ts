@@ -341,7 +341,7 @@ function merge(windows: readonly Span[]): Span[] {
   const out: Span[] = [];
   for (const [from, to] of [...windows].sort((a, b) => a[0] - b[0])) {
     const last = out.at(-1);
-    if (last !== undefined && from <= last[1]) last[1] = Math.max(last[1], to);
+    if (last !== undefined && from <= last[1] + 1) last[1] = Math.max(last[1], to);
     else out.push([from, to]);
   }
   return out;
