@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import { compileWhere, createListing } from "../../src/core/listing.ts";
 import type { Page } from "../../src/core/listing.ts";
+import type { AnyOp } from "../../src/core/op.ts";
 import { failure, json, testEngine } from "./fixtures/fake-fetch.ts";
 import type { Responder } from "./fixtures/fake-fetch.ts";
 import * as ops from "./fixtures/registry.ts";
@@ -48,7 +49,9 @@ describe("compileWhere", () => {
       { status_id: "c" },
     ],
   ])("compiles %s", (_name, where, wire) => {
-    expect(compileWhere(ops.getIssues, where)).toEqual(wire);
+    const compiled = Object.entries(compileWhere(ops.getIssues, where));
+
+    expect(Object.fromEntries(compiled.map(([key, c]) => [key, c.wire]))).toEqual(wire);
   });
 
   test.each([
@@ -81,6 +84,237 @@ describe("compileWhere", () => {
     expect(() => compileWhere(ops.getIssues, { assigned_to_id: { gte: 3 } })).toThrowError(
       /= ! \* !\*/,
     );
+  });
+});
+
+async function sentQuery(
+  op: AnyOp,
+  where: object,
+  input: object = {},
+): Promise<Record<string, string[]>> {
+  const { list, requests } = testEngine(() =>
+    json({ issues: [], time_entries: [], total_count: 0, offset: 0, limit: 100 }),
+  );
+  await list(op, { ...input, where }).page();
+  const query: Record<string, string[]> = {};
+  for (const [key, value] of requests[0]?.url.searchParams ?? []) (query[key] ??= []).push(value);
+  return query;
+}
+
+describe("project_id beyond one id or identifier", () => {
+  const page = { offset: ["0"], limit: ["100"] };
+  const openIssues = { "op[status_id]": ["o"], "v[status_id][]": [""] };
+
+  test.each([
+    ["one id", { project_id: 5 }, "5"],
+    ["one identifier", { project_id: "web-app" }, "web-app"],
+    ["a list of one id", { project_id: [5] }, "5"],
+  ])(
+    "sends %s as project_id, the project Redmine scopes the request to",
+    async (_name, where, id) => {
+      expect(await sentQuery(ops.getIssues, where)).toEqual({ project_id: [id], ...page });
+    },
+  );
+
+  test.each([
+    ["a list of ids", { project_id: [1, 2] }, "=", ["1", "2"]],
+    ["{ not }", { project_id: { not: 1 } }, "!", ["1"]],
+    ['"mine"', { project_id: "mine" }, "=", ["mine"]],
+    ['{ not: "mine" }', { project_id: { not: "mine" } }, "!", ["mine"]],
+    ["raw", { project_id: { raw: "!1|2" } }, "!", ["1", "2"]],
+  ])(
+    "sends %s in the long form, from open issues as the short form starts",
+    async (_name, where, op, values) => {
+      expect(await sentQuery(ops.getIssues, where)).toEqual({
+        "f[]": ["project_id", "status_id"],
+        "op[project_id]": [op],
+        "v[project_id][]": values,
+        ...openIssues,
+        ...page,
+      });
+    },
+  );
+
+  test("moves every other filter along, split the way Redmine splits a short one", async () => {
+    expect(
+      await sentQuery(ops.getIssues, {
+        project_id: [1, 2],
+        status_id: "any",
+        assigned_to_id: { none: true },
+        updated_on: { raw: "<t-30" },
+        issue_id: [4, 9],
+        done_ratio: { between: [50, 10] },
+        cf_12: ["S1", "S2"],
+      }),
+    ).toEqual({
+      "f[]": [
+        "project_id",
+        "status_id",
+        "assigned_to_id",
+        "updated_on",
+        "issue_id",
+        "done_ratio",
+        "cf_12",
+      ],
+      "op[project_id]": ["="],
+      "v[project_id][]": ["1", "2"],
+      "op[status_id]": ["*"],
+      "v[status_id][]": [""],
+      "op[assigned_to_id]": ["!*"],
+      "v[assigned_to_id][]": [""],
+      "op[updated_on]": ["<t-"],
+      "v[updated_on][]": ["30"],
+      "op[issue_id]": ["="],
+      "v[issue_id][]": ["4,9"],
+      "op[done_ratio]": ["><"],
+      "v[done_ratio][]": ["50", "10"],
+      "op[cf_12]": ["="],
+      "v[cf_12][]": ["S1", "S2"],
+      ...page,
+    });
+  });
+
+  test("reads a plain value on a standard filter the way Redmine reads its short form", async () => {
+    expect(
+      await sentQuery(ops.getIssues, {
+        project_id: [1, 2],
+        status_id: "*",
+        assigned_to_id: "!*",
+        updated_on: ">=2026-10-01",
+      }),
+    ).toEqual({
+      "f[]": ["project_id", "status_id", "assigned_to_id", "updated_on"],
+      "op[project_id]": ["="],
+      "v[project_id][]": ["1", "2"],
+      "op[status_id]": ["*"],
+      "v[status_id][]": [""],
+      "op[assigned_to_id]": ["!*"],
+      "v[assigned_to_id][]": [""],
+      "op[updated_on]": [">="],
+      "v[updated_on][]": ["2026-10-01"],
+      ...page,
+    });
+  });
+
+  test("sends a custom field condition with its own operator, its values split as Redmine splits", async () => {
+    expect(
+      await sentQuery(ops.getIssues, {
+        project_id: [1, 2],
+        cf_3: "medium",
+        cf_4: { gte: "2026-01-01" },
+        cf_5: { contains: "a|b" },
+        cf_6: ["S1", "S2|S3"],
+      }),
+    ).toEqual({
+      "f[]": ["project_id", "cf_3", "cf_4", "cf_5", "cf_6", "status_id"],
+      "op[project_id]": ["="],
+      "v[project_id][]": ["1", "2"],
+      "op[cf_3]": ["="],
+      "v[cf_3][]": ["medium"],
+      "op[cf_4]": [">="],
+      "v[cf_4][]": ["2026-01-01"],
+      "op[cf_5]": ["~"],
+      "v[cf_5][]": ["a", "b"],
+      "op[cf_6]": ["="],
+      "v[cf_6][]": ["S1", "S2", "S3"],
+      ...openIssues,
+      ...page,
+    });
+  });
+
+  test.each([
+    ["raw next to a list", { project_id: [1, 2], cf_3: { raw: "*~alpha" } }],
+    ["raw next to { not }", { project_id: { not: 1 }, cf_4: { raw: ">t-7" } }],
+    ["a value that starts with an operator", { project_id: [1, 2], cf_3: "*~alpha" }],
+    ["a list that starts with one", { project_id: "mine", cf_4: ["!S2", "S3"] }],
+  ])(
+    "refuses %s on a custom field, since Redmine reads it by the field's format",
+    async (_name, where) => {
+      const { list, requests } = testEngine(issueServer(5));
+      const error = await failure(list(ops.getIssues, { where }).all());
+
+      expect(error.kind).toBe("invalid_input");
+      expect(error.message).toMatch(/cf_[34]/);
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  test("refuses a filter Redmine offers only inside one project, since it would drop it", async () => {
+    const { list, requests } = testEngine(issueServer(5));
+    const error = await failure(
+      list(ops.getIssues, { where: { project_id: [1, 2], category_id: 4 } }).all(),
+    );
+
+    expect(error.kind).toBe("invalid_input");
+    expect(error.message).toMatch(/category_id/);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("refuses a saved query, since Redmine runs it without reading the long form's filters", async () => {
+    const { list, requests } = testEngine(issueServer(5));
+    const error = await failure(
+      list(ops.getIssues, { query_id: 3, where: { project_id: [1, 2] } }).all(),
+    );
+
+    expect(error.kind).toBe("invalid_input");
+    expect(error.message).toMatch(/query_id/);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("sends a saved query next to one project as before", async () => {
+    expect(await sentQuery(ops.getIssues, { project_id: 5 }, { query_id: 3 })).toEqual({
+      project_id: ["5"],
+      query_id: ["3"],
+      ...page,
+    });
+  });
+
+  test("drops the empty values after a trailing pipe in raw, as Redmine's split does", async () => {
+    expect(await sentQuery(ops.getIssues, { project_id: { raw: "1|2|" } })).toEqual({
+      "f[]": ["project_id", "status_id"],
+      "op[project_id]": ["="],
+      "v[project_id][]": ["1", "2"],
+      ...openIssues,
+      ...page,
+    });
+  });
+
+  test("adds no status filter to time entries, whose default matches every entry", async () => {
+    expect(await sentQuery(ops.getTimeEntries, { project_id: [1, 2] })).toEqual({
+      "f[]": ["project_id"],
+      "op[project_id]": ["="],
+      "v[project_id][]": ["1", "2"],
+      ...page,
+    });
+  });
+
+  test("keyset paging sends its id bound in the long form too", async () => {
+    const { list, requests } = testEngine((request) => {
+      const from = Number(request.url.searchParams.get("v[issue_id][]") ?? 0);
+      const matching = [3, 8, 12].filter((id) => id >= from);
+      const issues = matching.slice(0, 2).map((id) => ({ id }));
+      return json({ issues, total_count: matching.length, offset: 0, limit: 2 });
+    });
+    const all = await list(ops.getIssues, {
+      where: { project_id: [1, 2] },
+      paging: "keyset",
+      pageSize: 2,
+    }).all();
+
+    expect(all).toEqual([{ id: 3 }, { id: 8 }, { id: 12 }]);
+    expect(requests.map((r) => r.url.searchParams.get("v[issue_id][]"))).toEqual([null, "9"]);
+    expect(requests.map((r) => r.url.searchParams.get("op[issue_id]"))).toEqual([null, ">="]);
+  });
+
+  test.each([
+    ["identifiers in a list", { project_id: ["web-app", "api"] }],
+    ["an identifier under { not }", { project_id: { not: "web-app" } }],
+  ])("refuses %s before any request, since Redmine would match nothing", async (_name, where) => {
+    const { list, requests } = testEngine(issueServer(5));
+    const error = await failure(list(ops.getIssues, { where }).all());
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
   });
 });
 

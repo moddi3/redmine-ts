@@ -31,14 +31,16 @@ export const getIssues = op({
   id: "getIssues",
   method: "GET",
   path: "issues.json",
-  query: { include: "csv" },
+  query: { include: "csv", query_id: "scalar" },
   filters: {
+    project_id: { ops: ["=", "!"] },
+    category_id: { ops: ["=", "!", "*", "!*"], scoped: true },
     status_id: {
       ops: ["=", "!", "o", "c", "*"],
       words: { open: "o", closed: "c", any: "*" },
     },
     assigned_to_id: { ops: ["=", "!", "*", "!*"] },
-    updated_on: { ops: ["=", ">=", "<=", "><", "!*", "*"] },
+    updated_on: { ops: ["=", ">=", "<=", "><", "<t-", "!*", "*"] },
     subject: { ops: ["=", "~", "!~", "^", "$"] },
     issue_id: { ops: ["=", "!", ">="], join: "," },
     done_ratio: { ops: ["=", ">=", "><"], join: "," },
@@ -73,6 +75,7 @@ export const getTimeEntries = op({
   id: "getTimeEntries",
   method: "GET",
   path: "time_entries.json",
+  filters: { project_id: { ops: ["=", "!"] } },
   response: { kind: "list", items: "time_entries", paged: true },
 });
 

@@ -23,6 +23,8 @@ export interface FilterSpec {
    * that reads only its first value and splits that on commas (issue_id, parent_id, relations) sets ",".
    */
   readonly join?: ",";
+  /** Redmine offers the filter only in a query scoped to one project and drops it from any other. */
+  readonly scoped?: true;
 }
 
 /**

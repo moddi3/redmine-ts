@@ -1046,7 +1046,7 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             project_id: {
               description:
-                "Filter by project.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `!mine`",
+                "Filter by project. One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `!mine`",
               anyOf: [scalar, scalars, opRaw, opNot],
             },
             subproject_id: {
@@ -2502,7 +2502,7 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             project_id: {
               description:
-                "Filter by project.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `!mine`",
+                "Filter by project. One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `!mine`",
               anyOf: [scalar, scalars, opRaw, opNot],
             },
             spent_on: {

@@ -16,7 +16,7 @@ export interface GetIssuesWhere {
    */
   issue_id?: Cond<string | number, "range" | "presence">;
   /**
-   * Filter by project.
+   * Filter by project. One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Special values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)
@@ -920,7 +920,7 @@ export interface GetTimeEntriesWhere {
    */
   user_id?: Cond<string | number, "not" | "presence">;
   /**
-   * Filter by project.
+   * Filter by project. One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Special values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)

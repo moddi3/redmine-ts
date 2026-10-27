@@ -16,7 +16,10 @@ export type CondText =
   | { starts_with: string }
   | { ends_with: string };
 export type CondPresence = { any: true } | { none: true };
-/** Escape hatch, sent verbatim after `field=`. For relative dates ("<t-30") and rarer operators. */
+/**
+ * Escape hatch in Redmine's short syntax, sent verbatim after `field=`. For relative dates ("<t-30") and rarer
+ * operators. Next to a `project_id` other than one id, it is read into the long form, or refused on a custom field.
+ */
 export type CondRaw = { raw: string };
 
 /**
@@ -44,6 +47,11 @@ const TEXT_AND_RANGE: ReadonlyMap<string, string> = new Map([
   ["ends_with", "$"],
 ]);
 
+export interface Compiled {
+  readonly code: string | null;
+  readonly wire: string;
+}
+
 /**
  * Pure: where -> wire query. Throws invalid_input before the network on an unknown key or an operator
  * the server does not document for that field, because Redmine silently ignores both and returns everything.
@@ -51,8 +59,8 @@ const TEXT_AND_RANGE: ReadonlyMap<string, string> = new Map([
 export function compileWhere(
   op: AnyOp,
   where: Readonly<Record<string, unknown>>,
-): Record<string, string> {
-  const query: Record<string, string> = {};
+): Record<string, Compiled> {
+  const query: Record<string, Compiled> = {};
   for (const [key, cond] of Object.entries(where)) {
     if (cond === undefined) continue;
     const spec =
@@ -69,17 +77,106 @@ export function compileWhere(
         op.id,
       );
     }
-    query[key] = wire;
+    query[key] = { code, wire };
   }
   return query;
 }
 
-/** `code` is the operator Redmine must document for the field, null for `raw` which is trusted. */
-function compileCond(
-  cond: unknown,
-  spec: FilterSpec,
-  at: string,
-): { code: string | null; wire: string } {
+const PROJECT_WORDS: ReadonlySet<string> = new Set(["mine", "bookmarks"]);
+
+/**
+ * Redmine reads `project_id` as the one project to scope the request to before it reads any filter, and
+ * answers 404 for any other value, such as `1|2`, `!1` or `mine`. The long form (`f[]`, `op[k]`, `v[k][]`)
+ * leaves that param unset, and Redmine ignores every short-form filter once `f[]` is present.
+ */
+export function longForm(
+  op: AnyOp,
+  where: Readonly<Record<string, Compiled>>,
+  query: Readonly<Record<string, string>>,
+): [string, string][] | undefined {
+  const project = where.project_id?.wire;
+  if (project === undefined || (/^[\w-]+$/.test(project) && !PROJECT_WORDS.has(project))) {
+    return undefined;
+  }
+  const filters: Record<string, Compiled> = { ...where };
+  // The short form of an issue query starts from open issues, the long form from no filter.
+  if (own(op.filters, "status_id") && filters.status_id === undefined) {
+    filters.status_id = { code: "o", wire: "o" };
+  }
+  const entries: [string, string][] = [];
+  // A filter the client adds itself, such as the keyset bound `issue_id>=N`, moves into the long form with the rest.
+  for (const [key, value] of Object.entries(query)) {
+    if (own(op.filters, key)) filters[key] = { code: null, wire: value };
+    else entries.push([key, value]);
+  }
+  for (const [key, filter] of Object.entries(filters)) {
+    const { operator, values } = longCondition(op, key, filter);
+    if (key === "project_id") checkProjects(op, values);
+    entries.push(["f[]", key], [`op[${key}]`, operator]);
+    for (const value of values) entries.push([`v[${key}][]`, value]);
+  }
+  return entries;
+}
+
+function checkProjects(op: AnyOp, values: readonly string[]): void {
+  const stray = values.find((v) => !/^\d+$/.test(v) && !PROJECT_WORDS.has(v));
+  if (stray !== undefined) {
+    throw invalidInput(
+      `with more than one value, {not} or raw, project_id takes ids, "mine" and "bookmarks", not "${stray}"; an identifier works only as the one value`,
+      op.id,
+    );
+  }
+}
+
+/**
+ * The short form sends a condition as `key=value`, which Redmine reads back with its operator table for the
+ * field's type. The spec's operators match that table for every standard filter, so the long form reads the
+ * value the same way.
+ */
+function longCondition(
+  op: AnyOp,
+  key: string,
+  { code, wire }: Compiled,
+): { operator: string; values: string[] } {
+  const spec = own(op.filters, key);
+  if (spec?.scoped) {
+    throw invalidInput(
+      `filter "${key}" on ${op.id} works only next to one project_id, because Redmine offers it only inside one project and drops it from any other query; send one request per project`,
+      op.id,
+    );
+  }
+  if (spec !== undefined) return addShortFilter(spec.ops, wire);
+  if (code === null || (code === "=" && /^[<>!*~^$]/.test(wire))) {
+    throw invalidInput(
+      `filter "${key}" on ${op.id}: next to a project_id other than one id, a custom field takes no raw text and no value that starts with an operator character, because Redmine reads those by the field's format; use an operator object such as {not}, {contains}, {gte} or {any: true}, or one request per project`,
+      op.id,
+    );
+  }
+  return addShortFilter([code], wire);
+}
+
+/** A port of Redmine's `Query#add_short_filter`, which reads one short-form value. */
+function addShortFilter(
+  ops: readonly string[],
+  wire: string,
+): { operator: string; values: string[] } {
+  const operator = [...ops]
+    .sort()
+    .reverse()
+    .find((o) => wire.startsWith(o));
+  if (operator === undefined) return { operator: "=", values: split(wire) };
+  const rest = wire.slice(operator.length);
+  return { operator, values: rest.trim() === "" ? [""] : split(rest) };
+}
+
+/** Ruby's `split("|")`, which drops trailing empty values. */
+function split(text: string): string[] {
+  const values = text.split("|");
+  while (values.at(-1) === "") values.pop();
+  return values;
+}
+
+function compileCond(cond: unknown, spec: FilterSpec, at: string): Compiled {
   if (!isRecord(cond)) return { code: "=", wire: joinValues(cond, at, spec.join, spec.words) };
   const keys = Object.keys(cond).filter((k) => cond[k] !== undefined);
   const [name] = keys;

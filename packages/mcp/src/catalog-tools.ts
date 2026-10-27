@@ -106,7 +106,7 @@ const FORMS: Readonly<Record<string, string>> = {
   ends_with: '{ends_with: "text"}',
   any: "{any: true} for any value set",
   none: "{none: true} for no value",
-  raw: '{raw: "..."} sent to Redmine verbatim, such as a relative date',
+  raw: '{raw: "..."} in Redmine\'s own syntax, such as a relative date',
 };
 
 const OK: JsonSchema = {
