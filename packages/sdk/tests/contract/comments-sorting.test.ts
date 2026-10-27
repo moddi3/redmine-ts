@@ -2,7 +2,7 @@ import { expect, it } from "vite-plus/test";
 import { createRedmine } from "../../src/index.ts";
 import { clientFor, cleanups, describeServers, freshProject, unique } from "./helpers.ts";
 
-/** A Redmine web session. Redmine takes news comments only from its HTML form, which accepts no API key. */
+/** Redmine takes news comments only from its HTML form, which accepts no API key. */
 async function signIn(baseUrl: string, username: string, password: string) {
   const cookies = new Map<string, string>();
   async function send(path: string, form?: Record<string, string>): Promise<Response> {

@@ -4,7 +4,6 @@
 
 import { isRecord } from "./util.ts";
 
-/** Returns its input when there is nothing to fix, so an unchanged response is never copied. */
 type Fix = (value: unknown) => unknown;
 
 /** Applied to every decoded JSON response when `normalize` is on. Takes the wire envelope, returns a copy only when it changed. */
@@ -49,7 +48,7 @@ function each(fix: Fix): Fix {
 /**
  * Redmine builds these lists oldest first and reverses the whole list for a user whose "Display
  * comments" preference is newest first. The REST API does not send that preference, so the order
- * comes from the list itself. Redmine reversed it when its first entry is later than its last.
+ * comes from the list itself.
  */
 function oldestFirst(
   later: (first: Record<string, unknown>, last: Record<string, unknown>) => boolean,
@@ -62,13 +61,13 @@ function oldestFirst(
   };
 }
 
-/** The sign of `a - b`, or 0 when either is not a number. */
 function compare(a: unknown, b: unknown): number {
-  return typeof a === "number" && typeof b === "number" ? Math.sign(a - b) || 0 : 0;
+  return typeof a === "number" && typeof b === "number" ? Math.sign(a - b) : 0;
 }
 
 function time(value: unknown): number | undefined {
-  return typeof value === "string" ? Date.parse(value) : undefined;
+  const ms = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(ms) ? undefined : ms;
 }
 
 const HOURS = /^\s*(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?\s*$/;
