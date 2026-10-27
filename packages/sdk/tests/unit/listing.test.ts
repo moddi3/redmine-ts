@@ -168,6 +168,81 @@ describe("project_id beyond one id or identifier", () => {
     });
   });
 
+  test("reads a plain value on a standard filter the way Redmine reads its short form", async () => {
+    expect(
+      await sentQuery(ops.getIssues, {
+        project_id: [1, 2],
+        status_id: "*",
+        assigned_to_id: "!*",
+        updated_on: ">=2026-10-01",
+      }),
+    ).toEqual({
+      "f[]": ["project_id", "status_id", "assigned_to_id", "updated_on"],
+      "op[project_id]": ["="],
+      "v[project_id][]": ["1", "2"],
+      "op[status_id]": ["*"],
+      "v[status_id][]": [""],
+      "op[assigned_to_id]": ["!*"],
+      "v[assigned_to_id][]": [""],
+      "op[updated_on]": [">="],
+      "v[updated_on][]": ["2026-10-01"],
+      ...page,
+    });
+  });
+
+  test("sends a custom field condition with its own operator, its values split as Redmine splits", async () => {
+    expect(
+      await sentQuery(ops.getIssues, {
+        project_id: [1, 2],
+        cf_3: "medium",
+        cf_4: { gte: "2026-01-01" },
+        cf_5: { contains: "a|b" },
+        cf_6: ["S1", "S2|S3"],
+      }),
+    ).toEqual({
+      "f[]": ["project_id", "cf_3", "cf_4", "cf_5", "cf_6", "status_id"],
+      "op[project_id]": ["="],
+      "v[project_id][]": ["1", "2"],
+      "op[cf_3]": ["="],
+      "v[cf_3][]": ["medium"],
+      "op[cf_4]": [">="],
+      "v[cf_4][]": ["2026-01-01"],
+      "op[cf_5]": ["~"],
+      "v[cf_5][]": ["a", "b"],
+      "op[cf_6]": ["="],
+      "v[cf_6][]": ["S1", "S2", "S3"],
+      ...openIssues,
+      ...page,
+    });
+  });
+
+  test.each([
+    ["raw next to a list", { project_id: [1, 2], cf_3: { raw: "*~alpha" } }],
+    ["raw next to { not }", { project_id: { not: 1 }, cf_4: { raw: ">t-7" } }],
+    ["a value that starts with an operator", { project_id: [1, 2], cf_3: "*~alpha" }],
+    ["a list that starts with one", { project_id: "mine", cf_4: ["!S2", "S3"] }],
+  ])(
+    "refuses %s on a custom field, since Redmine reads it by the field's format",
+    async (_name, where) => {
+      const { list, requests } = testEngine(issueServer(5));
+      const error = await failure(list(ops.getIssues, { where }).all());
+
+      expect(error.kind).toBe("invalid_input");
+      expect(error.message).toMatch(/cf_[34]/);
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  test("drops the empty values after a trailing pipe in raw, as Redmine's split does", async () => {
+    expect(await sentQuery(ops.getIssues, { project_id: { raw: "1|2|" } })).toEqual({
+      "f[]": ["project_id", "status_id"],
+      "op[project_id]": ["="],
+      "v[project_id][]": ["1", "2"],
+      ...openIssues,
+      ...page,
+    });
+  });
+
   test("adds no status filter to time entries, whose default matches every entry", async () => {
     expect(await sentQuery(ops.getTimeEntries, { project_id: [1, 2] })).toEqual({
       "f[]": ["project_id"],

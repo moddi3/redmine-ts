@@ -12,6 +12,7 @@ import {
 
 describeServers("project_id filters other than one id", (server) => {
   const admin = clientFor(server);
+  const severity = `cf_${server.customFields.Severity}`;
   const cleanup = cleanups();
   const needle = unique("pf");
   let member: string;
@@ -59,6 +60,10 @@ describeServers("project_id filters other than one id", (server) => {
       return { id, identifier, open, closed: shut, entry: entry.id };
     };
     a = await project(true);
+    await admin.issues.update({
+      issue_id: a.open,
+      custom_fields: [{ id: server.customFields.Severity, value: "S2" }],
+    });
     b = await project(true);
     c = await project(false);
     const sub = await admin.projects.create({
@@ -89,6 +94,10 @@ describeServers("project_id filters other than one id", (server) => {
       a.closed,
       b.closed,
     ]);
+    expect(await issues({ project_id: [a.id, b.id], status_id: "c" })).toEqual([
+      a.closed,
+      b.closed,
+    ]);
   });
 
   it("{ not } excludes the project and keeps the other filters", async () => {
@@ -111,6 +120,26 @@ describeServers("project_id filters other than one id", (server) => {
     expect(
       await issues({ project_id: { raw: `!${a.id}` }, subject: { contains: needle } }),
     ).toEqual([b.open, c.open, child.open]);
+  });
+
+  it("a raw condition reads as Redmine's split, which drops empty values after a trailing pipe", async () => {
+    expect(await issues({ project_id: { raw: `${a.id}|${c.id}|` } })).toEqual([a.open, c.open]);
+  });
+
+  it("a custom field condition next to a list of ids", async () => {
+    expect(await issues({ project_id: [a.id, b.id], [severity]: "S2" })).toEqual([a.open]);
+    expect(await issues({ project_id: [a.id, b.id], [severity]: "S1|S2" })).toEqual([a.open]);
+  });
+
+  it("a custom field takes no raw text or operator characters next to a list of ids", async () => {
+    for (const cond of [{ raw: "*~alpha" }, { raw: ">t-7" }, "*~alpha", "!S2"]) {
+      const error = await admin.issues
+        .list({ where: { project_id: [a.id, b.id], [severity]: cond } })
+        .all()
+        .catch((e: unknown) => e);
+
+      expect(RedmineError.is(error, "invalid_input")).toBe(true);
+    }
   });
 
   it("keyset paging walks every page of a list of ids", async () => {
