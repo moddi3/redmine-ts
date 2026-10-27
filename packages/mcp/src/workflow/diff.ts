@@ -19,6 +19,7 @@ const CONTEXT = 1;
 /** A changed long line shows from this many characters before its first difference. */
 const LEAD = 40;
 
+/** Far enough across a block to pair a line with lines added or removed above it, near enough to bound the comparisons. */
 const REACH = 3;
 
 /** Past this many edits, the search stops and every line between the common head and tail counts as changed. */
@@ -64,21 +65,19 @@ function edits(a: readonly string[], b: readonly string[]): [Sign, string][] {
 function middle(a: readonly string[], b: readonly string[]): [Sign, string][] {
   const n = a.length;
   const m = b.length;
-  // v[offset + k] is the furthest old line reached on diagonal k, old line minus new line.
-  const offset = n + m + 1;
-  const v = new Int32Array(2 * offset + 1);
-  const trace: Int32Array[] = [];
+  const reached = new Diagonals(n + m + 1);
+  const trace: Diagonals[] = [];
   for (let d = 0; d <= Math.min(n + m, MAX_EDITS); d++) {
-    trace.push(v.slice(offset - d - 1, offset + d + 2));
+    trace.push(reached.around(d));
     for (let k = -d; k <= d; k += 2) {
-      const down = k === -d || (k !== d && v[offset + k - 1]! < v[offset + k + 1]!);
-      let x = down ? v[offset + k + 1]! : v[offset + k - 1]! + 1;
+      const down = k === -d || (k !== d && reached.get(k - 1) < reached.get(k + 1));
+      let x = down ? reached.get(k + 1) : reached.get(k - 1) + 1;
       let y = x - k;
       while (x < n && y < m && a[x] === b[y]) {
         x++;
         y++;
       }
-      v[offset + k] = x;
+      reached.set(k, x);
       if (x >= n && y >= m) return backtrack(a, b, trace);
     }
   }
@@ -88,22 +87,21 @@ function middle(a: readonly string[], b: readonly string[]): [Sign, string][] {
   ];
 }
 
-/** Walks the search back from the end; `trace[d]` holds diagonals -d-1 to d+1 as they were before step d. */
+/** The search's moves from the end back to the start, `trace[d]` being the diagonals before step d. */
 function backtrack(
   a: readonly string[],
   b: readonly string[],
-  trace: readonly Int32Array[],
+  trace: readonly Diagonals[],
 ): [Sign, string][] {
   const out: [Sign, string][] = [];
   let x = a.length;
   let y = b.length;
   for (let d = trace.length - 1; d >= 0; d--) {
-    const v = trace[d]!;
-    const furthest = (k: number): number => v[k + d + 1]!;
+    const reached = trace[d]!;
     const k = x - y;
-    const down = k === -d || (k !== d && furthest(k - 1) < furthest(k + 1));
+    const down = k === -d || (k !== d && reached.get(k - 1) < reached.get(k + 1));
     const before = down ? k + 1 : k - 1;
-    const beforeX = furthest(before);
+    const beforeX = reached.get(before);
     const beforeY = beforeX - before;
     while (x > beforeX && y > beforeY) {
       out.push([" ", a[--x]!]);
@@ -112,6 +110,30 @@ function backtrack(
     if (d > 0) out.push(down ? ["+", b[--y]!] : ["-", a[--x]!]);
   }
   return out.reverse();
+}
+
+/** The furthest old line the search reached on each diagonal k, old line minus new line, for k within ±radius. */
+class Diagonals {
+  private readonly radius: number;
+  private readonly x: Int32Array;
+
+  constructor(radius: number, x = new Int32Array(2 * radius + 1)) {
+    this.radius = radius;
+    this.x = x;
+  }
+
+  get(k: number): number {
+    return this.x[k + this.radius]!;
+  }
+
+  set(k: number, x: number): void {
+    this.x[k + this.radius] = x;
+  }
+
+  /** A copy of diagonals -d-1 to d+1, all that step d reads. */
+  around(d: number): Diagonals {
+    return new Diagonals(d + 1, this.x.slice(this.radius - d - 1, this.radius + d + 2));
+  }
 }
 
 function numbered(edits: readonly [Sign, string][]): Line[] {
@@ -139,7 +161,6 @@ function runs(lines: readonly Line[]): [number, number][] {
 /**
  * Where each line's excerpt starts. A changed line longer than LINE_CAP starts just before where it first
  * differs from the line across its block, within REACH places of its own, that shares the longest start.
- * The reach finds the pair when lines were added or removed above it, and bounds the comparisons.
  */
 function windowStarts(lines: readonly Line[]): number[] {
   const starts = lines.map(() => 0);
