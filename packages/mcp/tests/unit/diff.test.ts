@@ -292,8 +292,8 @@ function check({ old, next, from, to, edited }: Case): string[] {
       return out;
     }, []);
     for (const block of blocks) {
-      for (const removed of block.filter((row) => row.sign === "-" && row.budget === LINE_CAP)) {
-        for (const added of block.filter((row) => row.sign === "+" && row.budget === LINE_CAP)) {
+      for (const removed of block.filter((row) => row.sign === "-")) {
+        for (const added of block.filter((row) => row.sign === "+")) {
           if (removed.text !== added.text && removed.shown === added.shown) {
             fail(`- line ${removed.line} and + line ${added.line} read the same`);
           }
