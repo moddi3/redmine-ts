@@ -1,5 +1,26 @@
 # @redmine-ts/sdk
 
+## 0.5.0
+
+### Minor Changes
+
+- d49ab0f: `issues.get` returns `journals` and `changesets` oldest first, and `news.get` returns `comments` oldest first, for every API key. `rm.request` and clients from `rm.with` return the same order.
+
+  Before, the order followed the **Display comments** setting of the key's user. Redmine builds each list oldest first and reverses all of it for a user who reads comments in reverse chronological order. The REST API does not send that setting, so the client reverses a list when its first entry is later than its last. Journals compare by `created_on`, then `id`. Changesets compare by `committed_on`, and two with the same time stay as sent, because the API sends no changeset id. Comments come in `id` order, because the API sends no comment date. That is the order they were posted in, and it differs from Redmine's order only for a comment whose date was set or changed in the database, such as by an import.
+
+  To show newest first in a UI, reverse the list. To keep Redmine's order, pass `normalize: false`.
+
+### Patch Changes
+
+- d0dbb5b: `issues.list` and `timeEntries.list` now accept a `project_id` filter with a list of ids, `{ not }`, `"mine"`, `"bookmarks"` or a `raw` condition such as `1|2`. Before, Redmine answered 404 to each of them, because it reads `project_id` as the one project to scope the request to. The client now sends such a request in Redmine's long filter form (`f[]`, `op[...]`, `v[...][]`) with every other filter of the `where`. For issues, it adds the open-status filter that the short form starts from, so the results still leave out closed issues unless `status_id` says otherwise.
+
+  - One id or one identifier goes out as before and still includes the issues of subprojects, and so does a list with one id. A list of two or more ids does not include them, the same as the project filter in Redmine's issue list. `{ not: id }` excludes only that project, not its subprojects.
+  - A standard filter next to such a `project_id` reads its value the way Redmine reads the short form. A custom field there takes an object condition or a plain value. Its `raw`, or a plain value that starts with `<`, `>`, `!`, `*`, `~`, `^` or `$`, fails with `invalid_input`, because Redmine reads those by the field's format, which the client does not know.
+  - `category_id` and `subproject_id`, and `issue.category_id` on time entries, fail with `invalid_input` next to such a `project_id`. Redmine offers them only inside one project and drops them from any other query, so the results would leave the filter out. `query_id` fails the same way, because Redmine runs a saved query without reading the long form's filters, `project_id` included.
+  - An identifier in a list of two or more ids or under `{ not }` now fails with `invalid_input` before the request. Redmine compares those values with project ids and would match nothing.
+
+- 5dc6521: The README names the spec tag this release is generated from, `7.0.2-r1`, instead of `7.0.1-r1`. It now opens with what the client catches before a request, and names Bun 1.4.4 as the version CI tests.
+
 ## 0.4.0
 
 ### Minor Changes
