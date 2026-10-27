@@ -24,6 +24,10 @@ const attr = (name: string, old_value: string | null, new_value: string | null) 
   new_value,
 });
 
+/** The marker that ends text cut short in a journal of issue 7. */
+const clipped = (omitted: number) =>
+  `\n[clipped: ${omitted} more characters. Call issues_get with issue_id 7 and include ["journals"] for all of it.]`;
+
 /** 23 plain notes, then one journal that changes every kind of field. */
 const JOURNALS = [
   ...Array.from({ length: 23 }, (_, n) => journal(n + 1, [], `Note ${n + 1}`)),
@@ -205,7 +209,10 @@ describe("issue_context", () => {
       { field: "Project", from: "2", to: "Web" },
       { field: "Parent task", from: null, to: "#6" },
       { field: "% Done", from: "0", to: "30" },
-      { field: "Description", diff: `@@ line 1 @@\n- ${"x".repeat(200)}…\n+ short` },
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- ${"x".repeat(350)}…${clipped(4650)}\n+ short`,
+      },
       { field: "Severity", from: "S2", to: "S1" },
       { field: "Custom field 99", from: null, to: "x" },
       { field: "File", from: null, to: "build.log" },
@@ -450,6 +457,7 @@ describe("journal changes to long or multi-line text", () => {
       "@@ line 1 @@\n  one\n- two\n+ 2\n  three",
     ],
     ["only the line endings", "one\ntwo", "one\r\ntwo", "Only line endings changed."],
+    ["the same text", "one\r\ntwo", "one\r\ntwo", "No change."],
     ["no old text", null, "one\r\ntwo", "@@ line 1 @@\n+ one\n+ two"],
     ["an emptied text", "one\r\ntwo", "", "@@ line 1 @@\n- one\n- two"],
     [
@@ -462,18 +470,49 @@ describe("journal changes to long or multi-line text", () => {
     expect(await diffOf(old_value, new_value)).toEqual([{ field: "Description", diff }]);
   });
 
-  it("shows a long line from 40 characters before its change, 200 characters at most", async () => {
+  it("shows a long line from 40 characters before its change to 40 after it, with the clip marker", async () => {
     const before = "lorem ".repeat(500);
     const after = " ipsum".repeat(500);
-    const shown = (word: string) => `…${before.slice(-40)}${word}${after.slice(0, 157)}…`;
+    const shown = (word: string) =>
+      `…${before.slice(-40)}${word}${after.slice(0, 40)}…${clipped(5920)}`;
     expect(await diffOf(`${before}old${after}`, `${before}new${after}`)).toEqual([
       { field: "Description", diff: `@@ line 1 @@\n- ${shown("old")}\n+ ${shown("new")}` },
     ]);
   });
 
-  it("shows a line that fits in 200 characters whole, wherever it changed", async () => {
+  it("shows both changes in a long line edited in two places", async () => {
     const line =
-      "14. The export should include the columns: name, email, phone, created date, and status.";
+      "The weekly digest goes to every subscriber on the main list. It carries product news, the blog roundup and a short survey, and its footer links the preference center. When a message bounces, the system retries delivery three times before it marks the address as invalid and moves it to the suppression list, and the team lead gets a report each Monday.";
+    const twice = line
+      .replace("every subscriber", "every active subscriber")
+      .replace("three times", "five times");
+    const [change] = (await diffOf(line, twice)) as { diff: string }[];
+    expect(change!.diff).toMatch(/\n- [^\n]*every subscriber[^\n]*three times[^\n]*…\n\[clipped: /);
+    expect(change!.diff).toMatch(
+      /\n\+ [^\n]*every active subscriber[^\n]*five times[^\n]*…\n\[clipped: /,
+    );
+  });
+
+  it("shows a long line from before its first change to after its last, cut at 350 characters", async () => {
+    const words = Array.from({ length: 200 }, (_, n) => `w${String(n).padStart(3, "0")} `).join("");
+    const near = words.replace("w040", "W040").replace("w080", "W080");
+    expect(await diffOf(words, near)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- …${words.slice(160, 441)}…${clipped(719)}\n+ …${near.slice(160, 441)}…${clipped(719)}`,
+      },
+    ]);
+    const far = words.replace("w010", "W010").replace("w150", "W150");
+    expect(await diffOf(words, far)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- …${words.slice(10, 360)}…${clipped(650)}\n+ …${far.slice(10, 360)}…${clipped(650)}`,
+      },
+    ]);
+  });
+
+  it("shows a line that fits in 350 characters whole, wherever it changed", async () => {
+    const line = `14. The export should include ${"the columns name, email, phone and created date, ".repeat(6)}and status.`;
     const fixed = line.replace("status", "state");
     expect(await diffOf(edited({ 14: line }), edited({ 14: fixed }))).toEqual([
       {
@@ -483,28 +522,49 @@ describe("journal changes to long or multi-line text", () => {
     ]);
   });
 
-  it("shows the last 200 characters of a long line changed near its end", async () => {
-    const words = "Subject words ".repeat(15);
+  it("shows a long line changed near its end from 40 characters before the change", async () => {
+    const words = "Subject words ".repeat(30);
     expect(await diffOf(`${words}end`, `${words}fin`)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- …${`${words}end`.slice(-200)}\n+ …${`${words}fin`.slice(-200)}`,
+        diff: `@@ line 1 @@\n- …${words.slice(-40)}end${clipped(380)}\n+ …${words.slice(-40)}fin${clipped(380)}`,
+      },
+    ]);
+  });
+
+  it("ends an unchanged line it cuts with the clip marker", async () => {
+    const heading = "c".repeat(500);
+    expect(await diffOf(`${heading}\r\nshort`, `${heading}\r\nshorter`)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n  ${"c".repeat(350)}…${clipped(150)}\n- short\n+ shorter`,
       },
     ]);
   });
 
   it.each([
-    ["removed above it", "## Heading\r\n", ""],
-    ["added above it", "start\r\n", "start\r\nNew note line\r\n"],
-  ])("shows the change in a long line with a line %s", async (_, above, newAbove) => {
+    ["a line removed above it", "## Heading\r\n", ""],
+    ["a line added above it", "start\r\n", "start\r\nNew note line\r\n"],
+    ["four lines added above it", "start\r\n", "start\r\na\r\nb\r\nc\r\nd\r\n"],
+  ])("shows the change in a long line with %s", async (_, above, newAbove) => {
     const paragraph = "word ".repeat(200);
     const changed = `${paragraph.slice(0, 300)}CHANGED${paragraph.slice(307)}`;
     const [change] = (await diffOf(
       `${above}${paragraph}\r\nend`,
       `${newAbove}${changed}\r\nend`,
     )) as { diff: string }[];
-    expect(change!.diff).toContain(`\n- …${paragraph.slice(260, 460)}…\n`);
-    expect(change!.diff).toContain(`\n+ …${changed.slice(260, 460)}…\n`);
+    expect(change!.diff).toContain(`\n- …${paragraph.slice(260, 347)}…${clipped(913)}\n`);
+    expect(change!.diff).toContain(`\n+ …${changed.slice(260, 347)}…${clipped(913)}\n`);
+  });
+
+  it("shows a long line with no counterpart from its start, with the clip marker", async () => {
+    const paragraph = "word ".repeat(200);
+    expect(await diffOf("intro", `intro\r\n${paragraph}`)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n  intro\n+ ${paragraph.slice(0, 350)}…${clipped(650)}`,
+      },
+    ]);
   });
 
   it("never cuts a long line inside a character's surrogate pair", async () => {
@@ -513,7 +573,7 @@ describe("journal changes to long or multi-line text", () => {
     expect(await diffOf(`${smiles}😀${rest}`, `${smiles}😁${rest}`)).toEqual([
       {
         field: "Description",
-        diff: `@@ line 1 @@\n- …${"😀".repeat(21)}x${"😀".repeat(78)}…\n+ …${"😀".repeat(20)}😁x${"😀".repeat(78)}…`,
+        diff: `@@ line 1 @@\n- …${"😀".repeat(21)}x${"😀".repeat(19)}…${clipped(422)}\n+ …${"😀".repeat(20)}😁x${"😀".repeat(19)}…${clipped(422)}`,
       },
     ]);
   });
@@ -540,6 +600,15 @@ describe("journal changes to long or multi-line text", () => {
     ]);
   });
 
+  it("starts with the changes it found in a text with more than 1000 edits", async () => {
+    const lines = Array.from({ length: 5000 }, (_, n) => `line ${n + 1}`);
+    const after = lines.map((line, n) => (n % 8 === 5 ? `${line} edited` : line));
+    const [change] = (await diffOf(lines.join("\r\n"), after.join("\r\n"))) as { diff: string }[];
+    expect(change!.diff).toMatch(
+      /^@@ line 5 @@\n  line 5\n- line 6\n\+ line 6 edited\n  line 7\n@@ line 13 @@\n  line 13\n- line 14\n\+ line 14 edited\n/,
+    );
+  });
+
   it("clips a diff longer than 1000 characters with the clip marker", async () => {
     const old = Array.from({ length: 100 }, (_, n) => `old line ${n + 1}`);
     const rewritten = old.map((line) => line.replace("old", "new"));
@@ -564,21 +633,26 @@ describe("journal changes to long or multi-line text", () => {
     ]);
   });
 
-  it("keeps from and to for a description on one line of up to 200 characters, and for a subject or a file name of any length", async () => {
-    const long = "y".repeat(200);
+  it("keeps from and to for a description on one line of up to 350 characters, and for a subject, a file name or a custom field on one line of any length", async () => {
+    const long = "y".repeat(350);
     const subject = "s".repeat(255);
     const filename = `${"f".repeat(250)}.xlsx`;
+    const option = `Option ${"with a long label ".repeat(13)}A`;
+    const text = "n".repeat(450);
     expect(
-      await changesFor(attr("description", "Login fails", long), attr("subject", "a", subject), {
-        property: "attachment",
-        name: "30",
-        old_value: null,
-        new_value: filename,
-      }),
+      await changesFor(
+        attr("description", "Login fails", long),
+        attr("subject", "a", subject),
+        { property: "attachment", name: "30", old_value: null, new_value: filename },
+        { property: "cf", name: "3", old_value: option, new_value: `${option}B` },
+        { property: "cf", name: "99", old_value: null, new_value: text },
+      ),
     ).toEqual([
       { field: "Description", from: "Login fails", to: long },
       { field: "Subject", from: "a", to: subject },
       { field: "File", from: null, to: filename },
+      { field: "Severity", from: option, to: `${option}B` },
+      { field: "Custom field 99", from: null, to: text },
     ]);
   });
 
