@@ -624,6 +624,13 @@ describe("journal changes to long or multi-line text", () => {
         diff: `@@ line 1 @@\n- …${words.slice(160, 291)}…\n+ …${near.slice(160, 291)}…${clipped(2 * (1000 - 131))}`,
       },
     ]);
+    const apart = words.replace("w040", "W040").replace("w056", "w0X6");
+    expect(await diffOf(words, apart)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- …${words.slice(160, 323)}…\n+ …${apart.slice(160, 323)}…${clipped(2 * (1000 - 163))}`,
+      },
+    ]);
     const far = words.replace("w010", "W010").replace("w150", "W150");
     expect(await diffOf(words, far)).toEqual([
       {
