@@ -201,7 +201,7 @@ describe("a bearer request Redmine refuses", () => {
       const result = await client.callTool({ name: "issue_statuses_list", arguments: {} });
       expect(refreshed).toBe(1);
       expect(result.isError).toBeUndefined();
-      expect(texts(result)[0]).toContain("New for Bearer ");
+      expect(texts(result)[0]).toContain("New for Bearer [hidden by @redmine-ts/mcp]");
       expect(seen).toEqual(["Bearer dead", "Bearer redmine-token-of-alice"]);
     },
   );
