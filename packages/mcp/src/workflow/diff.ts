@@ -1,8 +1,14 @@
 // A line diff for a journal's change to long text, such as an edited description.
 
-import { CHANGE_CAP, clip } from "./clip.ts";
+import { CHANGE_CAP, marker } from "./clip.ts";
 
 type Sign = " " | "-" | "+";
+
+/** `count` lines or characters in a row that an edit script keeps, removes or adds. */
+type Run = [sign: Sign, count: number];
+
+/** Whether line or character `x` of the old text is line or character `y` of the new one. */
+type Same = (x: number, y: number) => boolean;
 
 interface Line {
   sign: Sign;
@@ -11,62 +17,115 @@ interface Line {
   at: number;
 }
 
+/** Characters `from` up to `to` of a line. */
+type Span = [from: number, to: number];
+
+/** Where a changed line differs from its partner, and from lines whose excerpts would read the same as its own. */
+interface Changes {
+  partner: Span[];
+  others: Span[];
+}
+
 const CONTEXT = 1;
 
-/** A line of a change's diff shows at most this many characters. */
+/** A line of a change's diff shows at most this many characters, … included. */
 export const LINE_CAP = 350;
 
-/** A changed long line shows this many characters before its first difference and after its last. */
+/** A long line shows this many characters on each side of a place where it differs from its partner. */
 const LEAD = 40;
 
-/** Past this many edits, the search stops where it got furthest, and every line after that counts as changed. */
+/** Past this many edits, the search stops where it got furthest, and every line or character after that counts as changed. */
 const MAX_EDITS = 1000;
 
 /** `rest` says where to read all of a diff that is cut; without it, nothing is. */
 export function lineDiff(from: string, to: string, rest: string | undefined): string {
-  const cut: Clip = (text, cap, start) => clip(text, cap, rest, start);
-  const lines = numbered(edits(split(from), split(to)));
+  const lines = numbered(split(from), split(to));
   if (lines.every((line) => line.sign === " ")) {
     return from === to ? "No change." : "Only line endings changed.";
   }
+  const all = whole(lines);
+  if (rest === undefined) return all;
   let diff = "";
-  for (const [first, last] of runs(lines)) {
-    diff += `${diff === "" ? "" : "\n"}@@ line ${lines[first]!.at} @@`;
+  let shown = 0;
+  rows: for (const [first, last] of hunks(lines)) {
+    const header = `${diff === "" ? "" : "\n"}@@ line ${lines[first]!.at} @@`;
+    if (diff.length + header.length + 4 > CHANGE_CAP) break;
+    diff += header;
+    shown += header.length;
+    let changes = new Map<number, Changes>();
     for (let n = first; n <= last; n++) {
-      const insideCap = diff.length < CHANGE_CAP;
-      const same = insideCap ? counterpart(lines, n) : undefined;
-      diff += `\n${lines[n]!.sign} ${excerpt(lines[n]!.text, same, cut)}`;
+      const { sign, text } = lines[n]!;
+      if (sign !== " " && (n === first || lines[n - 1]!.sign === " ")) {
+        changes = blockChanges(lines, n, CHANGE_CAP - diff.length);
+      }
+      const room = CHANGE_CAP - diff.length - 3;
+      if (room < 1) break rows;
+      const windows = visible(text, Math.min(LINE_CAP, room), changes.get(n));
+      diff += `\n${sign} ${excerpt(text, windows)}`;
+      shown += 3 + windows.reduce((sum, [start, end]) => sum + end - start, 0);
     }
   }
-  return cut(diff, CHANGE_CAP);
+  return shown === all.length ? diff : `${diff}${marker(all.length - shown, rest)}`;
 }
 
 function split(text: string): string[] {
   return text === "" ? [] : text.split(/\r\n|\r|\n/);
 }
 
-function edits(a: readonly string[], b: readonly string[]): [Sign, string][] {
-  let head = 0;
-  while (head < a.length && head < b.length && a[head] === b[head]) head++;
-  let tail = 0;
-  while (
-    tail < a.length - head &&
-    tail < b.length - head &&
-    a[a.length - 1 - tail] === b[b.length - 1 - tail]
-  )
-    tail++;
-  const same = (lines: readonly string[]): [Sign, string][] => lines.map((text) => [" ", text]);
-  return [
-    ...same(a.slice(0, head)),
-    ...middle(a.slice(head, a.length - tail), b.slice(head, b.length - tail)),
-    ...same(a.slice(a.length - tail)),
-  ];
+function numbered(a: readonly string[], b: readonly string[]): Line[] {
+  const lines: Line[] = [];
+  let x = 0;
+  let y = 0;
+  for (const [sign, count] of script(a.length, b.length, (i, j) => a[i] === b[j])) {
+    for (let n = 0; n < count; n++) {
+      lines.push({ sign, text: sign === "+" ? b[y]! : a[x]!, at: y + 1 });
+      if (sign !== "+") x++;
+      if (sign !== "-") y++;
+    }
+  }
+  return lines;
 }
 
-/** Myers' shortest edit script, for lines between the common head and tail. */
-function middle(a: readonly string[], b: readonly string[]): [Sign, string][] {
-  const n = a.length;
-  const m = b.length;
+/** The shortest edit script from `n` old lines or characters to `m` new ones, each block of changes as its removals, then its additions. */
+function script(n: number, m: number, same: Same): Run[] {
+  const [head, tail] = ends(n, m, same);
+  const runs: Run[] = [];
+  add(runs, " ", head);
+  for (const [sign, count] of middle(same, head, n - tail, m - tail)) {
+    add(runs, sign, count);
+  }
+  add(runs, " ", tail);
+  return runs;
+}
+
+/** How many lines or characters the old and new text share at their start, and then at their end. */
+function ends(n: number, m: number, same: Same): [head: number, tail: number] {
+  let head = 0;
+  while (head < n && head < m && same(head, head)) head++;
+  let tail = 0;
+  while (tail < n - head && tail < m - head && same(n - 1 - tail, m - 1 - tail)) tail++;
+  return [head, tail];
+}
+
+function chars(a: string, b: string): Same {
+  return (x, y) => a.charCodeAt(x) === b.charCodeAt(y);
+}
+
+function add(runs: Run[], sign: Sign, count: number): void {
+  if (count === 0) return;
+  const last = runs.at(-1);
+  if (sign === "-" && last?.[0] === "+") {
+    const before = runs.at(-2);
+    if (before?.[0] === "-") before[1] += count;
+    else runs.splice(-1, 0, ["-", count]);
+  } else if (last?.[0] === sign) last[1] += count;
+  else runs.push([sign, count]);
+}
+
+/** Myers' shortest edit script from the old text's `start` up to `endA` to the new text's `start` up to `endB`. */
+function middle(same: Same, start: number, endA: number, endB: number): Run[] {
+  const n = endA - start;
+  const m = endB - start;
   const most = Math.min(n + m, MAX_EDITS);
   const reached = new Diagonals(most + 1);
   const trace: Diagonals[] = [];
@@ -76,12 +135,12 @@ function middle(a: readonly string[], b: readonly string[]): [Sign, string][] {
       const down = k === -d || (k !== d && reached.get(k - 1) < reached.get(k + 1));
       let x = down ? reached.get(k + 1) : reached.get(k - 1) + 1;
       let y = x - k;
-      while (x < n && y < m && a[x] === b[y]) {
+      while (x < n && y < m && same(start + x, start + y)) {
         x++;
         y++;
       }
       reached.set(k, x);
-      if (x >= n && y >= m) return backtrack(a, b, trace, n, m);
+      if (x >= n && y >= m) return backtrack(trace, n, m);
     }
   }
   let x = 0;
@@ -93,22 +152,12 @@ function middle(a: readonly string[], b: readonly string[]): [Sign, string][] {
       y = kx - k;
     }
   }
-  return [
-    ...backtrack(a, b, trace, x, y),
-    ...a.slice(x).map((text): [Sign, string] => ["-", text]),
-    ...b.slice(y).map((text): [Sign, string] => ["+", text]),
-  ];
+  return [...backtrack(trace, x, y), ["-", n - x], ["+", m - y]];
 }
 
-/** The search's moves from old line `endX` and new line `endY` back to the start, `trace[d]` being the diagonals before step d. */
-function backtrack(
-  a: readonly string[],
-  b: readonly string[],
-  trace: readonly Diagonals[],
-  endX: number,
-  endY: number,
-): [Sign, string][] {
-  const out: [Sign, string][] = [];
+/** The search's moves from `endX` and `endY` back to the start, `trace[d]` being the diagonals before step d. */
+function backtrack(trace: readonly Diagonals[], endX: number, endY: number): Run[] {
+  const out: Run[] = [];
   let x = endX;
   let y = endY;
   for (let d = trace.length - 1; d >= 0; d--) {
@@ -117,17 +166,19 @@ function backtrack(
     const down = k === -d || (k !== d && reached.get(k - 1) < reached.get(k + 1));
     const before = down ? k + 1 : k - 1;
     const beforeX = reached.get(before);
-    const beforeY = beforeX - before;
-    while (x > beforeX && y > beforeY) {
-      out.push([" ", a[--x]!]);
-      y--;
-    }
-    if (d > 0) out.push(down ? ["+", b[--y]!] : ["-", a[--x]!]);
+    const kept = Math.max(0, Math.min(x - beforeX, y - (beforeX - before)));
+    out.push([" ", kept]);
+    x -= kept;
+    y -= kept;
+    if (d === 0) continue;
+    out.push(down ? ["+", 1] : ["-", 1]);
+    if (down) y--;
+    else x--;
   }
   return out.reverse();
 }
 
-/** The furthest old line the search reached on each diagonal k, old line minus new line, for k within ±radius. */
+/** The furthest point the search reached on each diagonal k, the old index minus the new, for k within ±radius. */
 class Diagonals {
   private readonly radius: number;
   private readonly x: Int32Array;
@@ -151,16 +202,7 @@ class Diagonals {
   }
 }
 
-function numbered(edits: readonly [Sign, string][]): Line[] {
-  let at = 1;
-  return edits.map(([sign, text]) => {
-    const line = { sign, text, at };
-    if (sign !== "-") at++;
-    return line;
-  });
-}
-
-function runs(lines: readonly Line[]): [number, number][] {
+function hunks(lines: readonly Line[]): [number, number][] {
   const out: [number, number][] = [];
   lines.forEach(({ sign }, n) => {
     if (sign === " ") return;
@@ -173,49 +215,161 @@ function runs(lines: readonly Line[]): [number, number][] {
   return out;
 }
 
+function whole(lines: readonly Line[]): string {
+  return hunks(lines)
+    .map(([first, last]) =>
+      [
+        `@@ line ${lines[first]!.at} @@`,
+        ...lines.slice(first, last + 1).map(({ sign, text }) => `${sign} ${text}`),
+      ].join("\n"),
+    )
+    .join("\n");
+}
+
 /**
- * For a changed long line, what it shares at the start and end with the line across its block of
- * changes that shares the most with it.
+ * What the long lines of the block of changes from `start` show. Each shows where it differs from its
+ * partner, the line across the block that shares the most with it at its start and end, one to one,
+ * the earlier lines first on a tie. Each of them takes at least LEAD of the `room` left, so only that
+ * many look for a partner. A `-` and a `+` line whose excerpts would read the same also show where
+ * they differ from each other.
  */
-function counterpart(lines: readonly Line[], n: number): Shared | undefined {
-  const { sign, text } = lines[n]!;
-  if (sign === " " || text.length <= LINE_CAP) return undefined;
-  let first = n;
-  while (first > 0 && lines[first - 1]!.sign !== " ") first--;
-  let best: Shared | undefined;
-  for (let k = first; k < lines.length && lines[k]!.sign !== " "; k++) {
-    if (lines[k]!.sign === sign) continue;
-    const same = shared(text, lines[k]!.text);
-    if (best === undefined || same.prefix + same.suffix > best.prefix + best.suffix) best = same;
+function blockChanges(lines: readonly Line[], start: number, room: number): Map<number, Changes> {
+  let end = start;
+  while (end < lines.length && lines[end]!.sign !== " ") end++;
+  const long: number[] = [];
+  for (let n = start; n < end && long.length * LEAD < room; n++) {
+    if (lines[n]!.text.length > LINE_CAP) long.push(n);
   }
-  return best;
+  const pairs: [shared: number, removed: number, added: number][] = [];
+  for (const n of long) {
+    for (let k = start; k < end; k++) {
+      if (lines[k]!.sign === lines[n]!.sign) continue;
+      const [removed, added] = lines[n]!.sign === "-" ? [n, k] : [k, n];
+      const [a, b] = [lines[removed]!.text, lines[added]!.text];
+      const [head, tail] = ends(a.length, b.length, chars(a, b));
+      pairs.push([head + tail, removed, added]);
+    }
+  }
+  pairs.sort((a, b) => b[0] - a[0] || a[1] - b[1] || a[2] - b[2]);
+  const changes = new Map<number, Changes>();
+  const differ = (removed: number, added: number, kind: keyof Changes) => {
+    const spans = differences(lines[removed]!.text, lines[added]!.text);
+    for (const [n, own] of [
+      [removed, spans[0]],
+      [added, spans[1]],
+    ] as const) {
+      const known = changes.get(n) ?? { partner: [], others: [] };
+      known[kind].push(...own);
+      changes.set(n, known);
+    }
+  };
+  for (const [, removed, added] of pairs) {
+    if (!changes.has(removed) && !changes.has(added)) differ(removed, added, "partner");
+  }
+  const shown = (n: number) =>
+    excerpt(lines[n]!.text, visible(lines[n]!.text, LINE_CAP, changes.get(n)));
+  for (const removed of long.filter((n) => lines[n]!.sign === "-")) {
+    for (const added of long.filter((n) => lines[n]!.sign === "+")) {
+      if (lines[removed]!.text !== lines[added]!.text && shown(removed) === shown(added)) {
+        differ(removed, added, "others");
+      }
+    }
+  }
+  return changes;
 }
 
-type Clip = (text: string, cap: number, start?: number) => string;
-
-interface Shared {
-  prefix: number;
-  suffix: number;
+/** Where `a` and `b` differ: for each run of changes, its span in `a` and its span in `b`. */
+function differences(a: string, b: string): [Span[], Span[]] {
+  const old: Span[] = [];
+  const next: Span[] = [];
+  let x = 0;
+  let y = 0;
+  let previous: Sign = " ";
+  for (const [sign, count] of script(a.length, b.length, chars(a, b))) {
+    if (sign === " ") {
+      x += count;
+      y += count;
+    } else {
+      if (previous === " ") {
+        old.push([x, x]);
+        next.push([y, y]);
+      }
+      if (sign === "-") x += count;
+      else y += count;
+      old.at(-1)![1] = x;
+      next.at(-1)![1] = y;
+    }
+    previous = sign;
+  }
+  return [old, next];
 }
 
-function shared(a: string, b: string): Shared {
-  let prefix = 0;
-  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
-  let suffix = 0;
-  while (
-    suffix < a.length - prefix &&
-    suffix < b.length - prefix &&
-    a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
-  )
-    suffix++;
-  return { prefix, suffix };
+/**
+ * The parts of `text` its excerpt shows in `budget` characters, … included: windows around where it
+ * differs from its partner, then around where it differs from others while they fit, or else its start.
+ */
+function visible(text: string, budget: number, changes?: Changes): Span[] {
+  if (text.length <= budget) return [[0, text.length]];
+  if (changes === undefined || changes.partner.length + changes.others.length === 0) {
+    return fit(text, [[0, text.length]], budget);
+  }
+  let windows = fit(text, merge(around(text, changes.partner)), budget);
+  for (const window of around(text, changes.others)) {
+    const wider = merge([...windows, window]);
+    if (excerpt(text, wider).length <= budget) windows = wider;
+  }
+  return windows;
 }
 
-function excerpt(text: string, same: Shared | undefined, cut: Clip): string {
-  if (text.length <= LINE_CAP) return text;
-  if (same === undefined) return cut(text, LINE_CAP);
-  const { prefix, suffix } = same;
-  const start = Math.max(0, prefix - LEAD);
-  const end = Math.min(text.length - suffix + LEAD, start + LINE_CAP);
-  return cut(text, end - start, start);
+function around(text: string, spans: readonly Span[]): Span[] {
+  return spans.map(([from, to]) => [
+    snap(text, Math.max(0, from - LEAD)),
+    snap(text, Math.min(text.length, to + LEAD)),
+  ]);
+}
+
+/** The windows in order, with those that overlap or touch joined. */
+function merge(windows: readonly Span[]): Span[] {
+  const out: Span[] = [];
+  for (const [from, to] of [...windows].sort((a, b) => a[0] - b[0])) {
+    const last = out.at(-1);
+    if (last !== undefined && from <= last[1]) last[1] = Math.max(last[1], to);
+    else out.push([from, to]);
+  }
+  return out;
+}
+
+/** The windows that fit in `budget` characters, … included, with the first that does not cut short. */
+function fit(text: string, windows: readonly Span[], budget: number): Span[] {
+  const out: Span[] = [];
+  let used = 0;
+  let at = 0;
+  for (const [from, to] of windows) {
+    const gap = from > at ? 1 : 0;
+    if (used + gap + to - from + (to < text.length ? 1 : 0) > budget) {
+      const end = snap(text, from + budget - used - gap - 1);
+      if (end > from) out.push([from, end]);
+      break;
+    }
+    out.push([from, to]);
+    used += gap + to - from;
+    at = to;
+  }
+  return out;
+}
+
+/** `at`, or one less where `at` would split a surrogate pair. */
+function snap(text: string, at: number): number {
+  return at > 0 && at < text.length && /[\uD800-\uDBFF]/.test(text.charAt(at - 1)) ? at - 1 : at;
+}
+
+/** `text` with … in place of each part outside `windows`. */
+function excerpt(text: string, windows: readonly Span[]): string {
+  let out = "";
+  let at = 0;
+  for (const [from, to] of windows) {
+    out += `${from > at ? "…" : ""}${text.slice(from, to)}`;
+    at = to;
+  }
+  return at < text.length ? `${out}…` : out;
 }

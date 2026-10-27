@@ -5,15 +5,18 @@ export const TEXT_CAP = 4000;
 export const CHANGE_CAP = 1000;
 
 /**
- * Text longer than `cap` cut to the `cap` characters from `start`, never inside a surrogate pair, with a
- * marker that says how much is left out and `rest`, where to read all of it. Without `rest` it stays whole.
+ * Text longer than `cap` cut to its first `cap` characters, never inside a surrogate pair, with a marker
+ * that says how much is left out and `rest`, where to read all of it. Without `rest` it stays whole.
  */
-export function clip(text: string, cap: number, rest: string | undefined, start = 0): string {
+export function clip(text: string, cap: number, rest: string | undefined): string {
   if (rest === undefined || text.length <= cap) return text;
-  const from = start > 0 && /[\uDC00-\uDFFF]/.test(text.charAt(start)) ? start - 1 : start;
-  let end = Math.min(from + cap, text.length);
-  if (end < text.length && /[\uD800-\uDBFF]/.test(text.charAt(end - 1))) end--;
-  return `${from > 0 ? "…" : ""}${text.slice(from, end)}\n[clipped: ${text.length - (end - from)} more characters. ${rest}]`;
+  const end = /[\uD800-\uDBFF]/.test(text.charAt(cap - 1)) ? cap - 1 : cap;
+  return `${text.slice(0, end)}${marker(text.length - end, rest)}`;
+}
+
+/** What ends a text that leaves `omitted` characters out, with `rest`, where to read all of it. */
+export function marker(omitted: number, rest: string): string {
+  return `\n[clipped: ${omitted} more characters. ${rest}]`;
 }
 
 /** Where to read all of a journal's text that issue_context cut. */
