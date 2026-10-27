@@ -235,6 +235,17 @@ describe("project_id beyond one id or identifier", () => {
     },
   );
 
+  test("refuses a filter Redmine offers only inside one project, since it would drop it", async () => {
+    const { list, requests } = testEngine(issueServer(5));
+    const error = await failure(
+      list(ops.getIssues, { where: { project_id: [1, 2], category_id: 4 } }).all(),
+    );
+
+    expect(error.kind).toBe("invalid_input");
+    expect(error.message).toMatch(/category_id/);
+    expect(requests).toHaveLength(0);
+  });
+
   test("drops the empty values after a trailing pipe in raw, as Redmine's split does", async () => {
     expect(await sentQuery(ops.getIssues, { project_id: { raw: "1|2|" } })).toEqual({
       "f[]": ["project_id", "status_id"],

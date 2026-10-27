@@ -142,6 +142,25 @@ describeServers("project_id filters other than one id", (server) => {
     }
   });
 
+  it("a filter Redmine offers only inside one project is refused next to a list of ids", async () => {
+    const category = await admin.issueCategories.create({ project_id: a.id, name: needle });
+    await admin.issues.update({ issue_id: a.open, category_id: category.id });
+
+    expect(await issues({ project_id: a.id, category_id: category.id })).toEqual([a.open]);
+    const dropped: IssueWhere[] = [
+      { project_id: [a.id, b.id], category_id: category.id },
+      { project_id: { not: c.id }, subproject_id: { none: true } },
+    ];
+    for (const where of dropped) {
+      const error = await admin.issues
+        .list({ where })
+        .all()
+        .catch((e: unknown) => e);
+
+      expect(RedmineError.is(error, "invalid_input")).toBe(true);
+    }
+  });
+
   it("keyset paging walks every page of a list of ids", async () => {
     const walked = await admin.issues
       .list({ where: { project_id: [a.id, b.id, c.id] }, pageSize: 1, paging: "keyset" })
