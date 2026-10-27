@@ -1,12 +1,12 @@
 // Journal details as a readable diff. Redmine sends each change as {property, name, old_value,
 // new_value} with ids in strings, such as status_id from "1" to "2". Each becomes {field, from, to}
 // with a label and names, fetching only the lookups the details reference; an id no lookup resolves
-// stays raw. A description or custom field value on several lines or longer than one diff line becomes
-// {field, diff} instead.
+// stays raw. A description on several lines or longer than one diff line, or a custom field value on
+// several lines, becomes {field, diff} instead.
 
 import type { Issue } from "@redmine-ts/sdk";
 import type { Client } from "../tools.ts";
-import { CHANGE_CAP, clip, LINE_CAP } from "./clip.ts";
+import { LINE_CAP } from "./clip.ts";
 import { bestEffort } from "./define.ts";
 import { lineDiff } from "./diff.ts";
 import { projectMembers } from "./lookups.ts";
@@ -95,21 +95,25 @@ function change(
 ): Change {
   const field = fieldLabel(detail, customFields);
   const { old_value: from, new_value: to } = detail;
-  if (holdsLongText(detail) && (isLong(from) || isLong(to))) {
-    return { field, diff: clip(lineDiff(from ?? "", to ?? ""), CHANGE_CAP, rest) };
-  }
+  if (showsAsDiff(detail)) return { field, diff: lineDiff(from ?? "", to ?? "", rest) };
   const render = renderer(detail, names);
   const show = (value: string | null): string | null =>
     value === null || value === "" ? value : render(value);
   return { field, from: show(from), to: show(to) };
 }
 
-function holdsLongText({ property, name }: Detail): boolean {
-  return property === "cf" || (property === "attr" && name === "description");
+/** A description on several lines or longer than one diff line, or a custom field on several lines. */
+function showsAsDiff({ property, name, old_value, new_value }: Detail): boolean {
+  const values = [old_value ?? "", new_value ?? ""];
+  if (property === "cf") return values.some(spansLines);
+  if (property === "attr" && name === "description") {
+    return values.some((value) => spansLines(value) || value.length > LINE_CAP);
+  }
+  return false;
 }
 
-function isLong(value: string | null): boolean {
-  return value !== null && (value.length > LINE_CAP || /[\r\n]/.test(value));
+function spansLines(value: string): boolean {
+  return /[\r\n]/.test(value);
 }
 
 function fieldLabel({ property, name }: Detail, customFields: ReadonlyMap<string, string>): string {

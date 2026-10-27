@@ -1,9 +1,10 @@
 // A line diff for a journal's change to long text, such as an edited description. Lines split on any
 // line break, so text typed in a browser (CRLF) and text sent over the API (LF) compare equal. Each run
 // of changed lines shows with one unchanged line around it, under "@@ line N @@" with N the number of
-// the run's first line in the new text.
+// the run's first line in the new text. A line longer than LINE_CAP is cut, and so is a diff longer than
+// CHANGE_CAP, each ending with the clip marker.
 
-import { LINE_CAP } from "./clip.ts";
+import { CHANGE_CAP, clip, clipMarker, LINE_CAP } from "./clip.ts";
 
 type Sign = " " | "-" | "+";
 
@@ -16,27 +17,28 @@ interface Line {
 
 const CONTEXT = 1;
 
-/** A changed long line shows from this many characters before its first difference. */
+/** A changed long line shows this many characters before its first difference and after its last. */
 const LEAD = 40;
 
-/** Far enough across a block to pair a line with lines added or removed above it, near enough to bound the comparisons. */
-const REACH = 3;
-
-/** Past this many edits, the search stops and every line between the common head and tail counts as changed. */
+/** Past this many edits, the search stops where it got furthest, and every line after that counts as changed. */
 const MAX_EDITS = 1000;
 
-export function lineDiff(from: string, to: string): string {
+/** `rest` goes in the clip marker and says where to read what was cut. */
+export function lineDiff(from: string, to: string, rest: string): string {
   const lines = numbered(edits(split(from), split(to)));
-  if (lines.every((line) => line.sign === " ")) return "Only line endings changed.";
-  const starts = windowStarts(lines);
-  return runs(lines)
-    .flatMap(([first, last]) => [
-      `@@ line ${lines[first]!.at} @@`,
-      ...lines
-        .slice(first, last + 1)
-        .map((line, n) => `${line.sign} ${excerpt(line.text, starts[first + n]!)}`),
-    ])
-    .join("\n");
+  if (lines.every((line) => line.sign === " ")) {
+    return from === to ? "No change." : "Only line endings changed.";
+  }
+  let diff = "";
+  for (const [first, last] of runs(lines)) {
+    diff += `${diff === "" ? "" : "\n"}@@ line ${lines[first]!.at} @@`;
+    for (let n = first; n <= last; n++) {
+      // Only a line that starts inside the cap searches its block, which bounds the work.
+      const same = diff.length < CHANGE_CAP ? counterpart(lines, n) : undefined;
+      diff += `\n${lines[n]!.sign} ${excerpt(lines[n]!.text, same, rest)}`;
+    }
+  }
+  return clip(diff, CHANGE_CAP, rest);
 }
 
 function split(text: string): string[] {
@@ -65,9 +67,10 @@ function edits(a: readonly string[], b: readonly string[]): [Sign, string][] {
 function middle(a: readonly string[], b: readonly string[]): [Sign, string][] {
   const n = a.length;
   const m = b.length;
-  const reached = new Diagonals(n + m + 1);
+  const most = Math.min(n + m, MAX_EDITS);
+  const reached = new Diagonals(most + 1);
   const trace: Diagonals[] = [];
-  for (let d = 0; d <= Math.min(n + m, MAX_EDITS); d++) {
+  for (let d = 0; d <= most; d++) {
     trace.push(reached.around(d));
     for (let k = -d; k <= d; k += 2) {
       const down = k === -d || (k !== d && reached.get(k - 1) < reached.get(k + 1));
@@ -78,24 +81,36 @@ function middle(a: readonly string[], b: readonly string[]): [Sign, string][] {
         y++;
       }
       reached.set(k, x);
-      if (x >= n && y >= m) return backtrack(a, b, trace);
+      if (x >= n && y >= m) return backtrack(a, b, trace, n, m);
+    }
+  }
+  let x = 0;
+  let y = 0;
+  for (let k = -most; k <= most; k += 2) {
+    const kx = reached.get(k);
+    if (kx <= n && kx - k <= m && 2 * kx - k > x + y) {
+      x = kx;
+      y = kx - k;
     }
   }
   return [
-    ...a.map((text): [Sign, string] => ["-", text]),
-    ...b.map((text): [Sign, string] => ["+", text]),
+    ...backtrack(a, b, trace, x, y),
+    ...a.slice(x).map((text): [Sign, string] => ["-", text]),
+    ...b.slice(y).map((text): [Sign, string] => ["+", text]),
   ];
 }
 
-/** The search's moves from the end back to the start, `trace[d]` being the diagonals before step d. */
+/** The search's moves from old line `endX` and new line `endY` back to the start, `trace[d]` being the diagonals before step d. */
 function backtrack(
   a: readonly string[],
   b: readonly string[],
   trace: readonly Diagonals[],
+  endX: number,
+  endY: number,
 ): [Sign, string][] {
   const out: [Sign, string][] = [];
-  let x = a.length;
-  let y = b.length;
+  let x = endX;
+  let y = endY;
   for (let d = trace.length - 1; d >= 0; d--) {
     const reached = trace[d]!;
     const k = x - y;
@@ -159,49 +174,54 @@ function runs(lines: readonly Line[]): [number, number][] {
 }
 
 /**
- * Where each line's excerpt starts. A changed line longer than LINE_CAP starts just before where it first
- * differs from the line across its block, within REACH places of its own, that shares the longest start.
+ * For a changed long line, what it shares at the start and end with the line across its block of
+ * changes that shares the most with it.
  */
-function windowStarts(lines: readonly Line[]): number[] {
-  const starts = lines.map(() => 0);
-  let removed: number[] = [];
-  let added: number[] = [];
-  const settle = (): void => {
-    for (const [own, across] of [
-      [removed, added],
-      [added, removed],
-    ] as const) {
-      own.forEach((n, k) => {
-        const { text } = lines[n]!;
-        if (text.length <= LINE_CAP) return;
-        let shared = 0;
-        for (const other of across.slice(Math.max(0, k - REACH), k + REACH + 1)) {
-          shared = Math.max(shared, sharedPrefix(text, lines[other]!.text));
-        }
-        starts[n] = Math.min(Math.max(0, shared - LEAD), text.length - LINE_CAP);
-      });
-    }
-    removed = [];
-    added = [];
-  };
-  lines.forEach(({ sign }, n) => {
-    if (sign === " ") settle();
-    else (sign === "-" ? removed : added).push(n);
-  });
-  settle();
-  return starts;
+function counterpart(lines: readonly Line[], n: number): [number, number] | undefined {
+  const { sign, text } = lines[n]!;
+  if (sign === " " || text.length <= LINE_CAP) return undefined;
+  let first = n;
+  while (first > 0 && lines[first - 1]!.sign !== " ") first--;
+  let best: [number, number] | undefined;
+  for (let k = first; k < lines.length && lines[k]!.sign !== " "; k++) {
+    if (lines[k]!.sign === sign) continue;
+    const same = shared(text, lines[k]!.text);
+    if (best === undefined || same[0] + same[1] > best[0] + best[1]) best = same;
+  }
+  return best;
 }
 
-function sharedPrefix(a: string, b: string): number {
-  let n = 0;
-  while (n < a.length && n < b.length && a[n] === b[n]) n++;
-  return n;
+/** How many characters two lines share at the start, and then at the end. */
+function shared(a: string, b: string): [number, number] {
+  let prefix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
+  let suffix = 0;
+  while (
+    suffix < a.length - prefix &&
+    suffix < b.length - prefix &&
+    a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+  )
+    suffix++;
+  return [prefix, suffix];
 }
 
-/** LINE_CAP characters of `text` from `start`, with … where it is cut, never inside a surrogate pair. */
-function excerpt(text: string, start: number): string {
-  const from = start > 0 && /[\uDC00-\uDFFF]/.test(text.charAt(start)) ? start - 1 : start;
-  let to = Math.min(text.length, from + LINE_CAP);
-  if (to < text.length && /[\uD800-\uDBFF]/.test(text.charAt(to - 1))) to--;
-  return `${from > 0 ? "…" : ""}${text.slice(from, to)}${to < text.length ? "…" : ""}`;
+/**
+ * A line longer than LINE_CAP cut with … and the clip marker, never inside a surrogate pair. Given what it
+ * shares with its counterpart, it shows from LEAD characters before the first difference to LEAD after
+ * the last, at most LINE_CAP of them. A line with no counterpart shows its first LINE_CAP.
+ */
+function excerpt(text: string, same: [number, number] | undefined, rest: string): string {
+  if (text.length <= LINE_CAP) return text;
+  let start = 0;
+  let end = LINE_CAP;
+  if (same !== undefined) {
+    const [prefix, suffix] = same;
+    start = Math.max(0, prefix - LEAD);
+    if (start > 0 && /[\uDC00-\uDFFF]/.test(text.charAt(start))) start--;
+    end = Math.min(text.length - suffix + LEAD, start + LINE_CAP);
+  }
+  end = Math.min(end, text.length);
+  if (end < text.length && /[\uD800-\uDBFF]/.test(text.charAt(end - 1))) end--;
+  const shown = `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+  return `${shown}${clipMarker(text.length - (end - start), rest)}`;
 }
