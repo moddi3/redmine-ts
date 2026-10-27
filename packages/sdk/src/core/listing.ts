@@ -44,6 +44,12 @@ const TEXT_AND_RANGE: ReadonlyMap<string, string> = new Map([
   ["ends_with", "$"],
 ]);
 
+/** `code` is the operator Redmine must document for the field, null for `raw` which is trusted. */
+export interface Compiled {
+  readonly code: string | null;
+  readonly wire: string;
+}
+
 /**
  * Pure: where -> wire query. Throws invalid_input before the network on an unknown key or an operator
  * the server does not document for that field, because Redmine silently ignores both and returns everything.
@@ -51,11 +57,13 @@ const TEXT_AND_RANGE: ReadonlyMap<string, string> = new Map([
 export function compileWhere(
   op: AnyOp,
   where: Readonly<Record<string, unknown>>,
-): Record<string, string> {
-  const query: Record<string, string> = {};
+): Record<string, Compiled> {
+  const query: Record<string, Compiled> = {};
   for (const [key, cond] of Object.entries(where)) {
     if (cond === undefined) continue;
-    const spec = filterSpec(op, key);
+    const spec =
+      own(op.filters, key) ??
+      (op.customFieldFilters && /^cf_\d+$/.test(key) ? CUSTOM_FIELD : undefined);
     if (!spec) {
       const known = Object.keys(op.filters).join(", ") || "none";
       throw invalidInput(`unknown filter "${key}" on ${op.id}, known: ${known}`, op.id);
@@ -67,16 +75,9 @@ export function compileWhere(
         op.id,
       );
     }
-    query[key] = wire;
+    query[key] = { code, wire };
   }
   return query;
-}
-
-function filterSpec(op: AnyOp, key: string): FilterSpec | undefined {
-  return (
-    own(op.filters, key) ??
-    (op.customFieldFilters && /^cf_\d+$/.test(key) ? CUSTOM_FIELD : undefined)
-  );
 }
 
 const PROJECT_WORDS: ReadonlySet<string> = new Set(["mine", "bookmarks"]);
@@ -84,26 +85,30 @@ const PROJECT_WORDS: ReadonlySet<string> = new Set(["mine", "bookmarks"]);
 /**
  * Redmine reads `project_id` as the one project to scope the request to before it reads any filter, and
  * answers 404 for any other value, such as `1|2`, `!1` or `mine`. The long form (`f[]`, `op[k]`, `v[k][]`)
- * leaves that param unset, and Redmine ignores every short-form filter once `f[]` is present.
+ * leaves that param unset, and Redmine ignores every short-form filter once `f[]` is present. `query` holds
+ * the client's own params, a filter among them in the short form (the keyset bound).
  */
 export function longForm(
   op: AnyOp,
+  where: Readonly<Record<string, Compiled>>,
   query: Readonly<Record<string, string>>,
 ): [string, string][] | undefined {
-  const project = query.project_id;
-  if (project === undefined || !own(op.filters, "project_id")) return undefined;
-  if (/^[\w-]+$/.test(project) && !PROJECT_WORDS.has(project)) return undefined;
-  const filters: Record<string, string> = { ...query };
+  const project = where.project_id?.wire;
+  if (project === undefined || (/^[\w-]+$/.test(project) && !PROJECT_WORDS.has(project))) {
+    return undefined;
+  }
+  const filters: Record<string, Compiled> = { ...where };
   // The short form of an issue query starts from open issues, the long form from no filter.
-  if (own(op.filters, "status_id") && filters.status_id === undefined) filters.status_id = "o";
+  if (own(op.filters, "status_id") && filters.status_id === undefined) {
+    filters.status_id = { code: "o", wire: "o" };
+  }
   const entries: [string, string][] = [];
-  for (const [key, wire] of Object.entries(filters)) {
-    const spec = filterSpec(op, key);
-    if (spec === undefined) {
-      entries.push([key, wire]);
-      continue;
-    }
-    const { operator, values } = addShortFilter(spec, wire);
+  for (const [key, value] of Object.entries(query)) {
+    if (own(op.filters, key)) filters[key] = { code: null, wire: value };
+    else entries.push([key, value]);
+  }
+  for (const [key, filter] of Object.entries(filters)) {
+    const { operator, values } = read(op, key, filter);
     const stray =
       key === "project_id"
         ? values.find((v) => !/^\d+$/.test(v) && !PROJECT_WORDS.has(v))
@@ -120,23 +125,50 @@ export function longForm(
   return entries;
 }
 
+/**
+ * The short form sends a condition as `key=value`, which Redmine reads back with its operator table for the
+ * field's type. The spec's operators match that table for every standard filter, so the long form reads the
+ * value the same way. A custom field's type is unknown here, so it reads with the one operator its condition
+ * names. Raw text, or a value that starts with an operator character, has no reading without that table.
+ */
+function read(
+  op: AnyOp,
+  key: string,
+  { code, wire }: Compiled,
+): { operator: string; values: string[] } {
+  const spec = own(op.filters, key);
+  if (spec !== undefined) return addShortFilter(spec.ops, wire);
+  if (code === null || (code === "=" && /^[<>!*~^$]/.test(wire))) {
+    throw invalidInput(
+      `filter "${key}" on ${op.id}: next to a project_id other than one id, a custom field takes no raw text and no value that starts with an operator character, because Redmine reads those by the field's format; use an operator object such as {contains}, {gte} or {any: true}, or one request per project`,
+      op.id,
+    );
+  }
+  return addShortFilter([code], wire);
+}
+
 /** A port of Redmine's `Query#add_short_filter`, which reads one short-form value. */
-function addShortFilter(spec: FilterSpec, wire: string): { operator: string; values: string[] } {
-  const operator = [...spec.ops]
+function addShortFilter(
+  ops: readonly string[],
+  wire: string,
+): { operator: string; values: string[] } {
+  const operator = [...ops]
     .sort()
     .reverse()
     .find((o) => wire.startsWith(o));
-  if (operator === undefined) return { operator: "=", values: wire.split("|") };
+  if (operator === undefined) return { operator: "=", values: split(wire) };
   const rest = wire.slice(operator.length);
-  return { operator, values: rest === "" ? [""] : rest.split("|") };
+  return { operator, values: rest.trim() === "" ? [""] : split(rest) };
 }
 
-/** `code` is the operator Redmine must document for the field, null for `raw` which is trusted. */
-function compileCond(
-  cond: unknown,
-  spec: FilterSpec,
-  at: string,
-): { code: string | null; wire: string } {
+/** Ruby's `split("|")`, which drops trailing empty values. */
+function split(text: string): string[] {
+  const values = text.split("|");
+  while (values.at(-1) === "") values.pop();
+  return values;
+}
+
+function compileCond(cond: unknown, spec: FilterSpec, at: string): Compiled {
   if (!isRecord(cond)) return { code: "=", wire: joinValues(cond, at, spec.join, spec.words) };
   const keys = Object.keys(cond).filter((k) => cond[k] !== undefined);
   const [name] = keys;

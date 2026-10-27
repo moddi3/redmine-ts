@@ -3,7 +3,7 @@
 
 import type { RetryPolicy } from "./config.ts";
 import { RedmineError, type RedmineErrorData } from "./errors.ts";
-import { compileWhere, longForm, type Page } from "./listing.ts";
+import { type Compiled, compileWhere, longForm, type Page } from "./listing.ts";
 import type { AnyOp, QueryStyle } from "./op.ts";
 import { normalizeResponse } from "./quirks.ts";
 import { invalidInput, isRecord } from "./util.ts";
@@ -36,16 +36,20 @@ export function planRequest(
   const params = url.searchParams;
   for (const [key, style] of Object.entries(op.query))
     appendQuery(params, op, key, style, input[key]);
-  let filters: Record<string, string> = {};
+  let filters: Record<string, Compiled> = {};
   // A raw request may have a real query parameter named `where`; only an op without one has filters there.
   if (input.where !== undefined && !Object.hasOwn(op.query, "where")) {
     if (!isRecord(input.where)) throw invalidInput("`where` must be an object", op.id);
     filters = compileWhere(op, input.where);
   }
-  const query = { ...filters, ...extra.query };
-  const long = longForm(op, query);
-  if (long === undefined) for (const [key, value] of Object.entries(query)) params.set(key, value);
-  else for (const [key, value] of long) params.append(key, value);
+  const query = extra.query ?? {};
+  const long = longForm(op, filters, query);
+  if (long === undefined) {
+    for (const [key, { wire }] of Object.entries(filters)) params.set(key, wire);
+    for (const [key, value] of Object.entries(query)) params.set(key, value);
+  } else {
+    for (const [key, value] of long) params.append(key, value);
+  }
 
   const headers: Record<string, string> = {
     Accept: op.response.kind === "binary" ? "*/*" : "application/json",

@@ -49,7 +49,9 @@ describe("compileWhere", () => {
       { status_id: "c" },
     ],
   ])("compiles %s", (_name, where, wire) => {
-    expect(compileWhere(ops.getIssues, where)).toEqual(wire);
+    const compiled = Object.entries(compileWhere(ops.getIssues, where));
+
+    expect(Object.fromEntries(compiled.map(([key, c]) => [key, c.wire]))).toEqual(wire);
   });
 
   test.each([
