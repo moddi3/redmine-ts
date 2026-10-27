@@ -318,15 +318,17 @@ describe("journals that Redmine sends newest first, for a key whose user reads c
 
   it("issues_get orders them by created_on, then id, as Redmine does", async () => {
     const backdated = { ...journal(26, [], "Imported"), created_on: "2026-09-30T10:00:00Z" };
+    const sameSecond = { ...journal(27, [], "Imported too"), created_on: backdated.created_on };
     const { client } = await serve({
       ...ROUTES,
       "GET /issues/7.json": () =>
-        json({ issue: { ...ISSUE, journals: [...JOURNALS.toReversed(), backdated] } }),
+        json({ issue: { ...ISSUE, journals: [...JOURNALS.toReversed(), sameSecond, backdated] } }),
     });
     const issue = (await callOk(client, "issues_get", { issue_id: 7, include: ["journals"] }))
       .structuredContent as { journals: { id: number }[] };
     expect(issue.journals.map((entry) => entry.id)).toEqual([
       26,
+      27,
       ...JOURNALS.map((entry) => entry.id),
     ]);
   });
