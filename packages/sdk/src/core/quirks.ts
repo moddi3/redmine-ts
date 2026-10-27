@@ -4,32 +4,80 @@
 
 import { isRecord } from "./util.ts";
 
+/** Returns its input when there is nothing to fix, so an unchanged response is never copied. */
+type Fix = (value: unknown) => unknown;
+
 /** Applied to every decoded JSON response when `normalize` is on. Takes the wire envelope, returns a copy only when it changed. */
-export function normalizeResponse(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  const { time_entry: one, time_entries: many } = value;
-  const fixedOne = isRecord(one) ? fixHours(one) : one;
-  const fixedMany = Array.isArray(many) ? many.map((e) => (isRecord(e) ? fixHours(e) : e)) : many;
-  if (fixedOne === one && !changed(many, fixedMany)) return value;
-  return {
-    ...value,
-    ...(one === undefined ? {} : { time_entry: fixedOne }),
-    ...(many === undefined ? {} : { time_entries: fixedMany }),
+export const normalizeResponse: Fix = fields({
+  time_entry: fields({ hours }),
+  time_entries: each(fields({ hours })),
+  issue: fields({
+    journals: oldestFirst(
+      (first, last) =>
+        (compare(time(first.created_on), time(last.created_on)) || compare(first.id, last.id)) > 0,
+    ),
+    // Redmine breaks ties by changeset id, which the API does not send.
+    changesets: oldestFirst(
+      (first, last) => compare(time(first.committed_on), time(last.committed_on)) > 0,
+    ),
+  }),
+  // Redmine orders comments by created_on, which the API does not send.
+  news: fields({ comments: oldestFirst((first, last) => compare(first.id, last.id) > 0) }),
+});
+
+function fields(fixes: Readonly<Record<string, Fix>>): Fix {
+  return (value) => {
+    if (!isRecord(value)) return value;
+    let copy: Record<string, unknown> | undefined;
+    for (const [key, fix] of Object.entries(fixes)) {
+      if (!Object.hasOwn(value, key)) continue;
+      const fixed = fix(value[key]);
+      if (fixed !== value[key]) (copy ??= { ...value })[key] = fixed;
+    }
+    return copy ?? value;
   };
 }
 
-function changed(before: unknown, after: unknown): boolean {
-  return Array.isArray(before) && Array.isArray(after) && before.some((e, i) => e !== after[i]);
+function each(fix: Fix): Fix {
+  return (value) => {
+    if (!Array.isArray(value)) return value;
+    const fixed = value.map(fix);
+    return fixed.some((entry, i) => entry !== value[i]) ? fixed : value;
+  };
+}
+
+/**
+ * Redmine builds these lists oldest first and reverses the whole list for a user whose "Display
+ * comments" preference is newest first. The REST API does not send that preference, so the list
+ * itself tells: Redmine reversed it when its first entry is later than its last.
+ */
+function oldestFirst(
+  later: (first: Record<string, unknown>, last: Record<string, unknown>) => boolean,
+): Fix {
+  return (value) => {
+    if (!Array.isArray(value)) return value;
+    const first: unknown = value[0];
+    const last: unknown = value.at(-1);
+    return isRecord(first) && isRecord(last) && later(first, last) ? value.toReversed() : value;
+  };
+}
+
+/** 1, -1 or 0, and 0 when either side is not a number. */
+function compare(a: unknown, b: unknown): number {
+  return typeof a === "number" && typeof b === "number" ? Math.sign(a - b) || 0 : 0;
+}
+
+function time(value: unknown): number | undefined {
+  return typeof value === "string" ? Date.parse(value) : undefined;
 }
 
 const HOURS = /^\s*(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?\s*$/;
 
-function fixHours(entry: Record<string, unknown>): Record<string, unknown> {
-  const { hours } = entry;
-  if (typeof hours !== "string") return entry;
-  const match = HOURS.exec(hours);
+function hours(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const match = HOURS.exec(value);
   const numerator = Number(match?.[1]);
   const denominator = match?.[2] === undefined ? 1 : Number(match[2]);
-  if (!match || denominator === 0) return entry;
-  return { ...entry, hours: numerator / denominator };
+  if (!match || denominator === 0) return value;
+  return numerator / denominator;
 }
