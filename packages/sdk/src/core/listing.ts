@@ -55,9 +55,7 @@ export function compileWhere(
   const query: Record<string, string> = {};
   for (const [key, cond] of Object.entries(where)) {
     if (cond === undefined) continue;
-    const spec =
-      own(op.filters, key) ??
-      (op.customFieldFilters && /^cf_\d+$/.test(key) ? CUSTOM_FIELD : undefined);
+    const spec = filterSpec(op, key);
     if (!spec) {
       const known = Object.keys(op.filters).join(", ") || "none";
       throw invalidInput(`unknown filter "${key}" on ${op.id}, known: ${known}`, op.id);
@@ -72,6 +70,65 @@ export function compileWhere(
     query[key] = wire;
   }
   return query;
+}
+
+function filterSpec(op: AnyOp, key: string): FilterSpec | undefined {
+  return (
+    own(op.filters, key) ??
+    (op.customFieldFilters && /^cf_\d+$/.test(key) ? CUSTOM_FIELD : undefined)
+  );
+}
+
+const PROJECT_WORDS: ReadonlySet<string> = new Set(["mine", "bookmarks"]);
+
+/**
+ * Redmine reads `project_id` as the one project to scope the request to before it reads any filter, and
+ * answers 404 for any other value, such as `1|2`, `!1` or `mine`. The long form (`f[]`, `op[k]`, `v[k][]`)
+ * leaves that param unset, and Redmine ignores every short-form filter once `f[]` is present.
+ */
+export function longForm(
+  op: AnyOp,
+  query: Readonly<Record<string, string>>,
+): [string, string][] | undefined {
+  const project = query.project_id;
+  if (project === undefined || !own(op.filters, "project_id")) return undefined;
+  if (/^[\w-]+$/.test(project) && !PROJECT_WORDS.has(project)) return undefined;
+  const filters: Record<string, string> = { ...query };
+  // The short form of an issue query starts from open issues, the long form from no filter.
+  if (own(op.filters, "status_id") && filters.status_id === undefined) filters.status_id = "o";
+  const entries: [string, string][] = [];
+  for (const [key, wire] of Object.entries(filters)) {
+    const spec = filterSpec(op, key);
+    if (spec === undefined) {
+      entries.push([key, wire]);
+      continue;
+    }
+    const { operator, values } = addShortFilter(spec, wire);
+    const stray =
+      key === "project_id"
+        ? values.find((v) => !/^\d+$/.test(v) && !PROJECT_WORDS.has(v))
+        : undefined;
+    if (stray !== undefined) {
+      throw invalidInput(
+        `in a list or {not}, project_id takes ids, "mine" and "bookmarks", not "${stray}"; an identifier works only as the one value`,
+        op.id,
+      );
+    }
+    entries.push(["f[]", key], [`op[${key}]`, operator]);
+    for (const value of values) entries.push([`v[${key}][]`, value]);
+  }
+  return entries;
+}
+
+/** A port of Redmine's `Query#add_short_filter`, which reads one short-form value. */
+function addShortFilter(spec: FilterSpec, wire: string): { operator: string; values: string[] } {
+  const operator = [...spec.ops]
+    .sort()
+    .reverse()
+    .find((o) => wire.startsWith(o));
+  if (operator === undefined) return { operator: "=", values: wire.split("|") };
+  const rest = wire.slice(operator.length);
+  return { operator, values: rest === "" ? [""] : rest.split("|") };
 }
 
 /** `code` is the operator Redmine must document for the field, null for `raw` which is trusted. */

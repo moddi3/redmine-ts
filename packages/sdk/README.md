@@ -83,6 +83,8 @@ The operators are `not`, `gte`, `lte`, `between`, `contains`, `not_contains`, `s
 
 An array goes on the wire as `a|b`, which Redmine splits for most filters. A few id filters read only the first value and split it on commas: `issue_id`, `parent_id`, `child_id`, `done_ratio`, the relation filters (`relates`, `blocks`, and the rest), and `issue.parent_id` on time entries. For those the client sends `a,b`, so `where: { issue_id: [4, 9] }` returns both issues. The input is the same array either way.
 
+Redmine reads `project_id` as the one project to scope the request to, and answers 404 to `project_id=1|2`. So when `project_id` is anything but one id or identifier, such as a list, `{ not }` or `"mine"`, the client sends the whole `where` in Redmine's long form, such as `f[]=project_id&op[project_id]==&v[project_id][]=1&v[project_id][]=2`. One id or identifier includes the issues of subprojects, and a list of ids does not. In a list or `{ not }`, `project_id` takes ids, so an identifier there is `invalid_input`.
+
 Redmine's issue list returns only open issues when `status_id` is absent. Pass `status_id: "any"` to include closed ones.
 
 ### Narrow results with `include`
