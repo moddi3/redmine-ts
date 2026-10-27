@@ -301,6 +301,13 @@ describe("journals that Redmine sends newest first, for a key whose user reads c
     expect(context).toMatchObject({ journals_total: 25, journals_omitted: 23 });
   });
 
+  it("issue_context keeps the newest, oldest first, for a caller that turns normalize off", async () => {
+    const { client } = await serve(NEWEST_FIRST, { normalize: false });
+    const context = (await callOk(client, "issue_context", { issue_id: 7, journals: 2 }))
+      .structuredContent as { journals: { id: number }[] };
+    expect(context.journals.map((entry) => entry.id)).toEqual([24, 25]);
+  });
+
   it("the issue resource shows the newest 20, oldest first", async () => {
     const { client } = await serve(NEWEST_FIRST);
     const { contents } = await client.readResource({ uri: "redmine://issues/7" });
