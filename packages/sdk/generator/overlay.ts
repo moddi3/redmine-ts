@@ -40,6 +40,12 @@ export interface Overlay {
   /** Filter name -> words compiled to operator codes. Words whose code a filter lacks are dropped. */
   filterWords: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /**
+   * Filters IssueQuery and TimeEntryQuery add only `if project`, so a query without one project drops them with
+   * no error. Grouped by query class like commaLists. Observed on 6.1 and 7.0: a `category_id` next to a list of
+   * project ids returned issues of other categories.
+   */
+  projectScoped: readonly { ops: readonly string[]; filters: readonly string[] }[];
+  /**
    * Include values whose key the server leaves out when the collection is empty, so they must stay
    * optional instead of narrowing to required. Observed on Redmine 6.1 and 7.0:
    * .audit/probes/includes.out.txt and .audit/probes/redmine-behavior.out.txt.
@@ -109,6 +115,13 @@ export const overlay: Overlay = {
     { ops: ["getTimeEntries", "getTimeEntriesByProject"], filters: ["issue.parent_id"] },
   ],
   filterWords: { status_id: { open: "o", closed: "c", any: "*" } },
+  projectScoped: [
+    { ops: ["getIssues", "getIssuesByProject"], filters: ["category_id", "subproject_id"] },
+    {
+      ops: ["getTimeEntries", "getTimeEntriesByProject"],
+      filters: ["issue.category_id", "subproject_id"],
+    },
+  ],
   sparseIncludes: [
     "children",
     "relations",

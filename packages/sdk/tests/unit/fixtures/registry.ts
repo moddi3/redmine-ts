@@ -34,7 +34,7 @@ export const getIssues = op({
   query: { include: "csv" },
   filters: {
     project_id: { ops: ["=", "!"] },
-    category_id: { ops: ["=", "!", "*", "!*"] },
+    category_id: { ops: ["=", "!", "*", "!*"], scoped: true },
     status_id: {
       ops: ["=", "!", "o", "c", "*"],
       words: { open: "o", closed: "c", any: "*" },

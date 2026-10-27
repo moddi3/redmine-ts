@@ -167,12 +167,16 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
         CAPS[c].some((code) => codes.includes(code)),
       );
       const join = overlay.commaLists.some((g) => g.ops.includes(id) && g.filters.includes(p.name));
+      const scoped = overlay.projectScoped.some(
+        (g) => g.ops.includes(id) && g.filters.includes(p.name),
+      );
       where.push({
         name: p.name,
         spec: {
           ops: codes,
           ...(Object.keys(words).length > 0 ? { words } : {}),
           ...(join ? { join: "," as const } : {}),
+          ...(scoped ? { scoped: true as const } : {}),
         },
         caps,
         doc: jsDoc(p.description, sinceTag(p["x-since"])),
@@ -476,6 +480,15 @@ function checkOverlay(ops: OpModel[], doc: OpenApi, overlay: Overlay): void {
         if (!op.descriptor.filters[name]?.ops.includes("=")) {
           throw new Error(`overlay.commaLists.${id}: no filter ${name} documents =`);
         }
+      }
+    }
+  }
+  for (const { ops: ids, filters } of overlay.projectScoped) {
+    for (const id of ids) {
+      const op = need("projectScoped", id);
+      for (const name of filters) {
+        if (!op.descriptor.filters[name])
+          throw new Error(`overlay.projectScoped.${id}: no filter ${name}`);
       }
     }
   }

@@ -44,7 +44,6 @@ const TEXT_AND_RANGE: ReadonlyMap<string, string> = new Map([
   ["ends_with", "$"],
 ]);
 
-/** `code` is the operator Redmine must document for the field, null for `raw` which is trusted. */
 export interface Compiled {
   readonly code: string | null;
   readonly wire: string;
@@ -85,8 +84,7 @@ const PROJECT_WORDS: ReadonlySet<string> = new Set(["mine", "bookmarks"]);
 /**
  * Redmine reads `project_id` as the one project to scope the request to before it reads any filter, and
  * answers 404 for any other value, such as `1|2`, `!1` or `mine`. The long form (`f[]`, `op[k]`, `v[k][]`)
- * leaves that param unset, and Redmine ignores every short-form filter once `f[]` is present. `query` holds
- * the client's own params, a filter among them in the short form (the keyset bound).
+ * leaves that param unset, and Redmine ignores every short-form filter once `f[]` is present.
  */
 export function longForm(
   op: AnyOp,
@@ -108,7 +106,7 @@ export function longForm(
     else entries.push([key, value]);
   }
   for (const [key, filter] of Object.entries(filters)) {
-    const { operator, values } = read(op, key, filter);
+    const { operator, values } = longCondition(op, key, filter);
     const stray =
       key === "project_id"
         ? values.find((v) => !/^\d+$/.test(v) && !PROJECT_WORDS.has(v))
@@ -128,15 +126,20 @@ export function longForm(
 /**
  * The short form sends a condition as `key=value`, which Redmine reads back with its operator table for the
  * field's type. The spec's operators match that table for every standard filter, so the long form reads the
- * value the same way. A custom field's type is unknown here, so it reads with the one operator its condition
- * names. Raw text, or a value that starts with an operator character, has no reading without that table.
+ * value the same way.
  */
-function read(
+function longCondition(
   op: AnyOp,
   key: string,
   { code, wire }: Compiled,
 ): { operator: string; values: string[] } {
   const spec = own(op.filters, key);
+  if (spec?.scoped) {
+    throw invalidInput(
+      `filter "${key}" on ${op.id} works only next to one project_id, because Redmine offers it only inside one project and drops it from any other query; send one request per project`,
+      op.id,
+    );
+  }
   if (spec !== undefined) return addShortFilter(spec.ops, wire);
   if (code === null || (code === "=" && /^[<>!*~^$]/.test(wire))) {
     throw invalidInput(
