@@ -13,7 +13,7 @@ import type { CallToolResult, JsonSchemaType, Tool } from "@modelcontextprotocol
 import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { Access, RedmineConfig, RedmineVersion } from "@redmine-ts/sdk";
 import pkg from "../package.json" with { type: "json" };
-import { withoutApiKeys } from "./api-keys.ts";
+import { withoutApiKeys, withoutApiKeysInText } from "./api-keys.ts";
 import { BY_METHOD, catalogTools, DEFAULT_LIMIT, HEAVY_KEYS, MAX_LIMIT } from "./catalog-tools.ts";
 import { ISSUE_TEMPLATE, readIssue } from "./resources.ts";
 import { isListed } from "./tools.ts";
@@ -246,7 +246,10 @@ function redmineFailure(tool: ToolSpec, error: RedmineError): CallToolResult {
         return error.message;
     }
   })();
-  return failure(message, error);
+  return failure(
+    message,
+    data.kind === "http" ? { ...error.toJSON(), body: withoutApiKeysInText(data.body) } : error,
+  );
 }
 
 /** The first 512 characters stand alone, because some clients cut instructions there. */
