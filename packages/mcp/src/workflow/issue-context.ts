@@ -139,7 +139,7 @@ const IssueContextSchema = z.object({
               diff: z
                 .string()
                 .describe(
-                  `In place of from and to for a description on several lines or over ${LINE_CAP} characters, or a custom field on several lines. The changed lines, - old and + new, with one unchanged line around each run. A line or diff cut short ends with a clip marker.`,
+                  `In place of from and to for a description on several lines or over ${LINE_CAP} characters, or a custom field on several lines. The changed lines, - old and + new, with one unchanged line around each run. A line cut after its start begins with …, and a line or diff cut short ends with a clip marker. A journal in full is not cut.`,
                 ),
             }),
           ]),
