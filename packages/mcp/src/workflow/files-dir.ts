@@ -38,17 +38,20 @@ export function localFiles(dir: string): LocalFiles {
   };
 }
 
-/** The real path of a regular file inside `dir`, refused before anything is read or sent otherwise. */
-async function fileInside(dir: string, path: string): Promise<string> {
+/**
+ * The real path of a regular file inside `root`, the files directory with symlinks resolved, refused
+ * before anything is read or sent otherwise.
+ */
+async function fileInside(root: string, path: string): Promise<string> {
   let target: string;
   try {
-    target = await realpath(resolve(dir, path));
+    target = await realpath(resolve(root, path));
   } catch {
-    throw invalidInput(`path "${path}" does not exist in the files directory "${dir}"`);
+    throw invalidInput(`path "${path}" does not exist in the files directory "${root}"`);
   }
-  const inside = relative(dir, target);
+  const inside = relative(root, target);
   if (inside === "" || inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
-    throw invalidInput(`path "${path}" resolves outside the files directory "${dir}"`);
+    throw invalidInput(`path "${path}" resolves outside the files directory "${root}"`);
   }
   if (!(await stat(target)).isFile()) {
     throw invalidInput(`path "${path}" is not a regular file`);
@@ -57,17 +60,17 @@ async function fileInside(dir: string, path: string): Promise<string> {
 }
 
 /**
- * A new file in `dir` named after `filename`, with " (1)", " (2)" and so on before the extension when
- * the name is taken. Opened with O_EXCL, so it never follows or replaces an existing file or symlink.
+ * A new file in `root`, the files directory with symlinks resolved, named after `filename`, with " (1)",
+ * " (2)" and so on before the extension when the name is taken. Opened with O_EXCL, so it never follows or replaces an existing file or symlink.
  */
 async function createUnique(
-  dir: string,
+  root: string,
   filename: string,
   fallback: string,
 ): Promise<{ path: string; file: FileHandle }> {
   const { name, ext } = parse(safeName(filename) ?? fallback);
   for (let n = 0; ; n++) {
-    const path = join(dir, n === 0 ? `${name}${ext}` : `${name} (${n})${ext}`);
+    const path = join(root, n === 0 ? `${name}${ext}` : `${name} (${n})${ext}`);
     try {
       return { path, file: await open(path, "wx") };
     } catch (error) {
