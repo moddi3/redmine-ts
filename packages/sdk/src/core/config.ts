@@ -143,7 +143,10 @@ export interface RedmineConfig<
   /** In-flight requests per client (shared with clients derived through `with`). Default 4. */
   maxConcurrent?: number;
   retry?: Partial<RetryPolicy> | false;
-  /** Symptom-based response fixes, such as hours arriving as "8/1". Default true. */
+  /**
+   * Symptom-based response fixes, such as hours arriving as "8/1", or journals, changesets and news
+   * comments that Redmine reverses for a user who reads comments newest first. Default true.
+   */
   normalize?: boolean;
   /** One observation point for logging and audit. Events never carry credentials. */
   onEvent?: (event: SdkEvent) => void;

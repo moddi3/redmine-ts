@@ -650,7 +650,7 @@ describe("createRedmineMcpHandler with a verifier", () => {
     // redmine:write is no-delete: 76 tools, the deletes hidden.
     expect((await listed.text()).match(/"name":"/g)).toHaveLength(76);
     const called = await call({ Authorization: "Bearer alice" }, "tools/call");
-    expect(await called.text()).toContain("New for Bearer redmine-token-of-alice");
+    expect(await called.text()).toContain("New for Bearer [hidden by @redmine-ts/mcp]");
     expect(seen).toEqual(["Bearer redmine-token-of-alice"]);
   });
 
