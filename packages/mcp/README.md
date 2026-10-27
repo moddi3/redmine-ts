@@ -102,7 +102,7 @@ Six hand-written tools cover what an agent does most, in fewer calls than the ge
 
 `issue_context` turns each journal detail into `{field, from, to}` with names, such as `{"field": "Status", "from": "New", "to": "In Progress"}`. It names statuses, trackers, and priorities from lists cached for 5 minutes, and assignees, categories, versions, and projects from the issue's project, fetched only when a journal needs them. A lookup the key may not read leaves the raw id. Descriptions and notes longer than 4000 characters are cut with a marker that says to call `issues_get` for the full text, and the result says how many older journals it left out.
 
-Each journal's `note` is its N in the issue page's `#note-N`, and the issue resource puts `#note-N` in each journal heading. Redmine numbers all journals of an issue before it hides some of them. It hides other users' private notes from a user who may not view them. It also hides a journal without notes when the user may not see any of its changes, such as a relation to an issue that was deleted later. After a hidden journal, `note` is lower than Redmine's number. The deleted issue lowers it for an admin key too.
+Each journal's `note` is its N in the issue page's `#note-N`, and the issue resource puts `#note-N` in each journal heading. Redmine numbers all journals of an issue before it hides some of them. It hides other users' private notes from a user who may not view them. It also hides a journal without notes when the user may not see any of its changes, such as a relation to an issue that the user cannot see or that was deleted later, or a custom field the user cannot see. After a hidden journal, `note` is lower than Redmine's number. The deleted issue lowers it for an admin key too.
 
 ### Files
 
