@@ -100,6 +100,8 @@ console.log(issue.subject, `${issue.journals.length} journal entries`);
 
 Without `include: ["journals"]`, `issue.journals` is possibly `undefined` and the second line does not compile. Redmine omits some included keys when they are empty, such as `relations` and `children`. Those stay optional.
 
+The client returns an issue's `journals` and `changesets`, and a news item's `comments`, oldest first for every API key. Redmine sends these lists newest first when the key's user sets **Display comments** to **In reverse chronological order** in **My account**. The client's order does not follow that setting. The REST API does not send the setting, so the client reads the order from the list itself. It reverses a list whose first entry is later than its last, and puts news comments, which come without dates, in `id` order. To show newest first in a UI, reverse the list. To keep Redmine's order, pass `normalize: false` to `createRedmine`. That also turns off the client's other response fixes, such as `hours` sent as `"8/1"`.
+
 ## Declare the server version
 
 Redmine does not report its version over the API. You can declare it with `version`, and it is optional:

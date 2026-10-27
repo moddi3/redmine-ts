@@ -287,6 +287,67 @@ describe("issue_context", () => {
   });
 });
 
+describe("journals that Redmine sends newest first, for a key whose user reads comments that way", () => {
+  const NEWEST_FIRST: Record<string, Route> = {
+    ...ROUTES,
+    "GET /issues/7.json": () => json({ issue: { ...ISSUE, journals: JOURNALS.toReversed() } }),
+  };
+
+  it("issue_context keeps the newest, oldest first", async () => {
+    const { client } = await serve(NEWEST_FIRST);
+    const context = (await callOk(client, "issue_context", { issue_id: 7, journals: 2 }))
+      .structuredContent as { journals: { id: number }[] };
+    expect(context.journals.map((entry) => entry.id)).toEqual([24, 25]);
+    expect(context).toMatchObject({ journals_total: 25, journals_omitted: 23 });
+  });
+
+  it("the issue resource shows the newest 20, oldest first", async () => {
+    const { client } = await serve(NEWEST_FIRST);
+    const { contents } = await client.readResource({ uri: "redmine://issues/7" });
+    const [content] = contents as { text: string }[];
+    const ids = [...content!.text.matchAll(/\(journal (\d+)/g)].map((match) => Number(match[1]));
+    expect(ids).toEqual(Array.from({ length: 20 }, (_, n) => n + 6));
+  });
+
+  it("issues_get returns them oldest first", async () => {
+    const { client } = await serve(NEWEST_FIRST);
+    const issue = (await callOk(client, "issues_get", { issue_id: 7, include: ["journals"] }))
+      .structuredContent as { journals: { id: number }[] };
+    expect(issue.journals.map((entry) => entry.id)).toEqual(JOURNALS.map((entry) => entry.id));
+  });
+
+  it("raw_request returns them oldest first", async () => {
+    const { client } = await serve(NEWEST_FIRST);
+    const { response } = (
+      await callOk(client, "raw_request", {
+        method: "GET",
+        path: "issues/7.json",
+        query: { include: "journals" },
+      })
+    ).structuredContent as { response: { issue: { journals: { id: number }[] } } };
+    expect(response.issue.journals.map((entry) => entry.id)).toEqual(
+      JOURNALS.map((entry) => entry.id),
+    );
+  });
+
+  it("issues_get orders them by created_on, then id, as Redmine does", async () => {
+    const backdated = { ...journal(26, [], "Imported"), created_on: "2026-09-30T10:00:00Z" };
+    const sameSecond = { ...journal(27, [], "Imported too"), created_on: backdated.created_on };
+    const { client } = await serve({
+      ...ROUTES,
+      "GET /issues/7.json": () =>
+        json({ issue: { ...ISSUE, journals: [...JOURNALS.toReversed(), sameSecond, backdated] } }),
+    });
+    const issue = (await callOk(client, "issues_get", { issue_id: 7, include: ["journals"] }))
+      .structuredContent as { journals: { id: number }[] };
+    expect(issue.journals.map((entry) => entry.id)).toEqual([
+      26,
+      27,
+      ...JOURNALS.map((entry) => entry.id),
+    ]);
+  });
+});
+
 describe("redmine://issues/{id}", () => {
   it("lists the issue template and no fixed resources", async () => {
     const { client } = await serve(ROUTES);

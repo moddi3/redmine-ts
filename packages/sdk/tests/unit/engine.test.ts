@@ -16,6 +16,7 @@ import {
 } from "./fixtures/fake-fetch.ts";
 import type { Responder } from "./fixtures/fake-fetch.ts";
 import * as ops from "./fixtures/registry.ts";
+import { normalizeResponse } from "../../src/core/quirks.ts";
 
 const issue = { id: 42, subject: "Printer on fire" };
 const ok: Responder = () => json({ issue });
@@ -1016,6 +1017,90 @@ describe("quirks", () => {
       id: 1,
       hours: "8/1",
     });
+  });
+});
+
+describe("lists that Redmine reverses for a user who reads comments newest first", () => {
+  const at = (second: number) => `2026-10-27T10:00:${String(second).padStart(2, "0")}Z`;
+  const journal = (id: number, second: number) => ({ id, created_on: at(second) });
+  const changeset = (revision: string, second: number) => ({ revision, committed_on: at(second) });
+
+  async function journalIds(journals: readonly object[], config = {}) {
+    const { call } = testEngine(() => json({ issue: { id: 42, journals } }), config);
+    const issue = (await call(ops.getIssue, { issue_id: 42, include: ["journals"] })) as {
+      journals: { id: number }[];
+    };
+    return issue.journals.map((entry) => entry.id);
+  }
+
+  test.each([
+    ["newest first", [journal(3, 2), journal(2, 1), journal(1, 0)], [1, 2, 3]],
+    ["oldest first", [journal(1, 0), journal(2, 1), journal(3, 2)], [1, 2, 3]],
+    ["as one entry", [journal(1, 0)], [1]],
+    ["empty", [], []],
+    ["newest first within one second", [journal(3, 0), journal(2, 0), journal(1, 0)], [1, 2, 3]],
+    [
+      "oldest first, with a same-second pair out of id order",
+      [journal(7, 0), journal(6, 0), journal(8, 5)],
+      [7, 6, 8],
+    ],
+    [
+      "newest first, with a same-second pair out of id order",
+      [journal(8, 5), journal(6, 0), journal(7, 0)],
+      [7, 6, 8],
+    ],
+  ])(
+    "issue journals sent %s come back in Redmine's oldest-first order",
+    async (_, sent, expected) => {
+      expect(await journalIds(sent)).toEqual(expected);
+    },
+  );
+
+  test.each([
+    ["newest first", [changeset("c", 2), changeset("b", 1), changeset("a", 0)], ["a", "b", "c"]],
+    ["oldest first", [changeset("a", 0), changeset("b", 1), changeset("c", 2)], ["a", "b", "c"]],
+    ["as one entry", [changeset("a", 0)], ["a"]],
+    ["empty", [], []],
+  ])("issue changesets sent %s come back oldest first", async (_, changesets, expected) => {
+    const { call } = testEngine(() => json({ issue: { id: 42, changesets } }));
+    const issue = (await call(ops.getIssue, { issue_id: 42 })) as {
+      changesets: { revision: string }[];
+    };
+    expect(issue.changesets.map((entry) => entry.revision)).toEqual(expected);
+  });
+
+  test("changesets committed in one second stay as sent, since the API sends no id to order them by", async () => {
+    const changesets = [changeset("b", 0), changeset("a", 0)];
+    const { call } = testEngine(() => json({ issue: { id: 42, changesets } }));
+
+    expect(await call(ops.getIssue, { issue_id: 42 })).toEqual({ id: 42, changesets });
+  });
+
+  test.each([
+    ["newest first", [3, 2, 1], [1, 2, 3]],
+    ["oldest first", [1, 2, 3], [1, 2, 3]],
+    ["as one entry", [1], [1]],
+    ["empty", [], []],
+    ["oldest first, with comment 3 dated before the others", [3, 1, 2], [1, 2, 3]],
+    ["newest first, with comment 3 dated before the others", [2, 1, 3], [1, 2, 3]],
+  ])("news comments sent %s come back in id order", async (_, sent, expected) => {
+    const comments = sent.map((id) => ({ id, content: `Comment ${id}` }));
+    const { call } = testEngine(() => json({ news: { id: 5, comments } }));
+    const news = (await call(ops.getNews, { news_id: 5, include: ["comments"] })) as {
+      comments: { id: number }[];
+    };
+    expect(news.comments.map((entry) => entry.id)).toEqual(expected);
+  });
+
+  test("leaves lists that are already in order as the same object", () => {
+    const issue = { issue: { id: 42, journals: [journal(1, 0), journal(2, 1)] } };
+    const news = { news: { id: 5, comments: [{ id: 1 }, { id: 2 }] } };
+    expect(normalizeResponse(issue)).toBe(issue);
+    expect(normalizeResponse(news)).toBe(news);
+  });
+
+  test("normalize: false keeps the order Redmine sent", async () => {
+    expect(await journalIds([journal(2, 1), journal(1, 0)], { normalize: false })).toEqual([2, 1]);
   });
 });
 

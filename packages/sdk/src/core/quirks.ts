@@ -1,35 +1,92 @@
 // Symptom-based response fixes. Never keyed by server version: patch releases regress and fix things
 // (hours "8/1" in 6.0.1, fixed in 6.0.2), and the server does not report its version. Each fix must be a
-// no-op on correct data, so it is safe against every server.
+// no-op on correct data, so it is safe against every server. Same-second journals and news comments, below, are the two narrow exceptions.
 
 import { isRecord } from "./util.ts";
 
+type Fix = (value: unknown) => unknown;
+
 /** Applied to every decoded JSON response when `normalize` is on. Takes the wire envelope, returns a copy only when it changed. */
-export function normalizeResponse(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  const { time_entry: one, time_entries: many } = value;
-  const fixedOne = isRecord(one) ? fixHours(one) : one;
-  const fixedMany = Array.isArray(many) ? many.map((e) => (isRecord(e) ? fixHours(e) : e)) : many;
-  if (fixedOne === one && !changed(many, fixedMany)) return value;
-  return {
-    ...value,
-    ...(one === undefined ? {} : { time_entry: fixedOne }),
-    ...(many === undefined ? {} : { time_entries: fixedMany }),
+export const normalizeResponse: Fix = fields({
+  time_entry: fields({ hours }),
+  time_entries: each(fields({ hours })),
+  issue: fields({
+    // Notes that a script writes often share a second, and their ids follow Redmine's microsecond order.
+    journals: oldestFirst(
+      (first, last) =>
+        (compare(time(first.created_on), time(last.created_on)) || compare(first.id, last.id)) > 0,
+    ),
+    // Redmine breaks ties by changeset id, which the API does not send.
+    changesets: oldestFirst(
+      (first, last) => compare(time(first.committed_on), time(last.committed_on)) > 0,
+    ),
+  }),
+  // Redmine orders comments by created_on, which the API does not send. Id order is the order they were
+  // posted in, and differs only for a comment whose date was set or changed in the database.
+  news: fields({ comments: byId }),
+});
+
+function fields(fixes: Readonly<Record<string, Fix>>): Fix {
+  return (value) => {
+    if (!isRecord(value)) return value;
+    let copy: Record<string, unknown> | undefined;
+    for (const [key, fix] of Object.entries(fixes)) {
+      if (!Object.hasOwn(value, key)) continue;
+      const fixed = fix(value[key]);
+      if (fixed !== value[key]) (copy ??= { ...value })[key] = fixed;
+    }
+    return copy ?? value;
   };
 }
 
-function changed(before: unknown, after: unknown): boolean {
-  return Array.isArray(before) && Array.isArray(after) && before.some((e, i) => e !== after[i]);
+function each(fix: Fix): Fix {
+  return (value) => {
+    if (!Array.isArray(value)) return value;
+    const fixed = value.map(fix);
+    return fixed.some((entry, i) => entry !== value[i]) ? fixed : value;
+  };
+}
+
+/**
+ * Redmine builds these lists oldest first and reverses the whole list for a user whose "Display
+ * comments" preference is newest first. The REST API does not send that preference, so the order
+ * comes from the list itself.
+ */
+function oldestFirst(
+  later: (first: Record<string, unknown>, last: Record<string, unknown>) => boolean,
+): Fix {
+  return (value) => {
+    if (!Array.isArray(value)) return value;
+    const first: unknown = value[0];
+    const last: unknown = value.at(-1);
+    return isRecord(first) && isRecord(last) && later(first, last) ? value.toReversed() : value;
+  };
+}
+
+function byId(value: unknown): unknown {
+  if (!Array.isArray(value) || !value.every((e) => isRecord(e) && typeof e.id === "number")) {
+    return value;
+  }
+  const sorted = (value as { id: number }[]).toSorted((a, b) => a.id - b.id);
+  return sorted.every((entry, i) => entry === value[i]) ? value : sorted;
+}
+
+function compare(a: unknown, b: unknown): number {
+  return typeof a === "number" && typeof b === "number" ? Math.sign(a - b) : 0;
+}
+
+function time(value: unknown): number | undefined {
+  const ms = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(ms) ? undefined : ms;
 }
 
 const HOURS = /^\s*(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?\s*$/;
 
-function fixHours(entry: Record<string, unknown>): Record<string, unknown> {
-  const { hours } = entry;
-  if (typeof hours !== "string") return entry;
-  const match = HOURS.exec(hours);
+function hours(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const match = HOURS.exec(value);
   const numerator = Number(match?.[1]);
   const denominator = match?.[2] === undefined ? 1 : Number(match[2]);
-  if (!match || denominator === 0) return entry;
-  return { ...entry, hours: numerator / denominator };
+  if (!match || denominator === 0) return value;
+  return numerator / denominator;
 }
