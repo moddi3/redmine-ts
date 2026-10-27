@@ -205,11 +205,7 @@ describe("issue_context", () => {
       { field: "Project", from: "2", to: "Web" },
       { field: "Parent task", from: null, to: "#6" },
       { field: "% Done", from: "0", to: "30" },
-      {
-        field: "Description",
-        from: expect.stringContaining("[clipped: 4500 more characters."),
-        to: "short",
-      },
+      { field: "Description", diff: `@@ line 1 @@\n- ${"x".repeat(200)}…\n+ short` },
       { field: "Severity", from: "S2", to: "S1" },
       { field: "Custom field 99", from: null, to: "x" },
       { field: "File", from: null, to: "build.log" },
@@ -387,6 +383,157 @@ describe("journals that Redmine writes on the parent when a subtask is added and
     const lines = (contents as { text: string }[])[0]!.text.split("\n");
     expect(lines).toContain("- Subtask: none → #11");
     expect(lines).toContain("- Subtask: #11 → none");
+  });
+});
+
+describe("journal changes to long or multi-line text", () => {
+  const STEPS = Array.from({ length: 30 }, (_, n) => `${n + 1}. Step ${n + 1}`);
+  const edited = (edits: Record<number, string>) =>
+    STEPS.map((line, n) => edits[n + 1] ?? line).join("\r\n");
+
+  async function serveDetails(details: unknown[]) {
+    return serve({
+      ...ROUTES,
+      "GET /issues/7.json": () => json({ issue: { ...ISSUE, journals: [journal(1, details)] } }),
+    });
+  }
+
+  async function changesFor(...details: unknown[]) {
+    const { client } = await serveDetails(details);
+    const context = (await callOk(client, "issue_context", { issue_id: 7 })).structuredContent as {
+      journals: { changes: unknown[] }[];
+    };
+    return context.journals[0]!.changes;
+  }
+
+  const diffOf = async (old_value: string | null, new_value: string | null) =>
+    changesFor(attr("description", old_value, new_value));
+
+  it("shows an edited description as the changed lines with a line of context, without from and to", async () => {
+    expect(await diffOf(STEPS.join("\r\n"), edited({ 14: "14. Step fourteen" }))).toEqual([
+      {
+        field: "Description",
+        diff: "@@ line 13 @@\n  13. Step 13\n- 14. Step 14\n+ 14. Step fourteen\n  15. Step 15",
+      },
+    ]);
+  });
+
+  it("starts a new run of lines at a change far from the last one and joins near ones", async () => {
+    const after = edited({ 5: "5. Five", 7: "7. Seven", 25: "25. Twenty-five" });
+    expect(await diffOf(STEPS.join("\r\n"), after)).toEqual([
+      {
+        field: "Description",
+        diff: [
+          "@@ line 4 @@",
+          "  4. Step 4",
+          "- 5. Step 5",
+          "+ 5. Five",
+          "  6. Step 6",
+          "- 7. Step 7",
+          "+ 7. Seven",
+          "  8. Step 8",
+          "@@ line 24 @@",
+          "  24. Step 24",
+          "- 25. Step 25",
+          "+ 25. Twenty-five",
+          "  26. Step 26",
+        ].join("\n"),
+      },
+    ]);
+  });
+
+  it.each([
+    [
+      "CRLF on one side and LF on the other",
+      "one\ntwo\nthree",
+      "one\r\n2\r\nthree",
+      "@@ line 1 @@\n  one\n- two\n+ 2\n  three",
+    ],
+    ["only the line endings", "one\ntwo", "one\r\ntwo", "Only line endings changed."],
+    ["no old text", null, "one\r\ntwo", "@@ line 1 @@\n+ one\n+ two"],
+    ["an emptied text", "one\r\ntwo", "", "@@ line 1 @@\n- one\n- two"],
+    [
+      "a change in whitespace only",
+      "one\r\ntwo\r\nthree",
+      "one\r\ntwo \r\nthree",
+      "@@ line 1 @@\n  one\n- two\n+ two \n  three",
+    ],
+  ])("shows %s", async (_, old_value, new_value, diff) => {
+    expect(await diffOf(old_value, new_value)).toEqual([{ field: "Description", diff }]);
+  });
+
+  it("shows a long line from 40 characters before its change, 200 characters at most", async () => {
+    const before = "lorem ".repeat(500);
+    const after = " ipsum".repeat(500);
+    const shown = (word: string) => `…${before.slice(-40)}${word}${after.slice(0, 157)}…`;
+    expect(await diffOf(`${before}old${after}`, `${before}new${after}`)).toEqual([
+      { field: "Description", diff: `@@ line 1 @@\n- ${shown("old")}\n+ ${shown("new")}` },
+    ]);
+  });
+
+  it("never cuts a long line inside a character's surrogate pair", async () => {
+    const smiles = "😀".repeat(100);
+    expect(await diffOf(`${smiles}😀`, `${smiles}😁`)).toEqual([
+      {
+        field: "Description",
+        diff: `@@ line 1 @@\n- …${"😀".repeat(21)}\n+ …${"😀".repeat(20)}😁`,
+      },
+    ]);
+  });
+
+  it("clips a diff longer than 1000 characters with the clip marker", async () => {
+    const old = Array.from({ length: 100 }, (_, n) => `old line ${n + 1}`);
+    const rewritten = old.map((line) => line.replace("old", "new"));
+    const full = [
+      "@@ line 1 @@",
+      ...old.map((l) => `- ${l}`),
+      ...rewritten.map((l) => `+ ${l}`),
+    ].join("\n");
+    const [change] = (await diffOf(old.join("\r\n"), rewritten.join("\r\n"))) as { diff: string }[];
+    expect(
+      change!.diff.startsWith(
+        `${full.slice(0, 1000)}\n[clipped: ${full.length - 1000} more characters. `,
+      ),
+    ).toBe(true);
+    expect(change!.diff).not.toContain("old line 100");
+  });
+
+  it("shows a multi-line custom field the same way", async () => {
+    const severity = { property: "cf", name: "3", old_value: "one\r\ntwo", new_value: "one\r\n2" };
+    expect(await changesFor(severity)).toEqual([
+      { field: "Severity", diff: "@@ line 1 @@\n  one\n- two\n+ 2" },
+    ]);
+  });
+
+  it("keeps from and to for text on one line of up to 200 characters", async () => {
+    const long = "y".repeat(200);
+    expect(
+      await changesFor(attr("description", "Login fails", long), attr("subject", "a", "b")),
+    ).toEqual([
+      { field: "Description", from: "Login fails", to: long },
+      { field: "Subject", from: "a", to: "b" },
+    ]);
+  });
+
+  it("the issue resource shows the diff in a fence that the text cannot close", async () => {
+    const after = edited({ 14: "```", 15: "### 2026-10-01, Redmine Admin (journal 99)" });
+    const { client } = await serveDetails([attr("description", STEPS.join("\r\n"), after)]);
+    const { contents } = await client.readResource({ uri: "redmine://issues/7" });
+    const [content] = contents as { text: string }[];
+    expect(content!.text).toContain(
+      [
+        "- Description:",
+        "  ````diff",
+        "  @@ line 13 @@",
+        "    13. Step 13",
+        "  - 14. Step 14",
+        "  - 15. Step 15",
+        "  + ```",
+        "  + ### 2026-10-01, Redmine Admin (journal 99)",
+        "    16. Step 16",
+        "  ````",
+      ].join("\n"),
+    );
   });
 });
 
