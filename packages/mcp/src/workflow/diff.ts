@@ -1,8 +1,4 @@
-// A line diff for a journal's change to long text, such as an edited description. Lines split on any
-// line break, so text typed in a browser (CRLF) and text sent over the API (LF) compare equal. Each run
-// of changed lines shows with one unchanged line around it, under "@@ line N @@" with N the number of
-// the run's first line in the new text. A line longer than LINE_CAP and a diff longer than CHANGE_CAP go
-// through the journal's clip, which cuts them or, for a journal returned in full, leaves them whole.
+// A line diff for a journal's change to long text, such as an edited description.
 
 import { CHANGE_CAP, LINE_CAP } from "./clip.ts";
 import type { Clip } from "./clip.ts";
@@ -33,8 +29,8 @@ export function lineDiff(from: string, to: string, cut: Clip): string {
   for (const [first, last] of runs(lines)) {
     diff += `${diff === "" ? "" : "\n"}@@ line ${lines[first]!.at} @@`;
     for (let n = first; n <= last; n++) {
-      // Only a line that starts inside the cap searches its block, which bounds the work.
-      const same = diff.length < CHANGE_CAP ? counterpart(lines, n) : undefined;
+      const insideCap = diff.length < CHANGE_CAP;
+      const same = insideCap ? counterpart(lines, n) : undefined;
       diff += `\n${lines[n]!.sign} ${excerpt(lines[n]!.text, same, cut)}`;
     }
   }
@@ -177,22 +173,26 @@ function runs(lines: readonly Line[]): [number, number][] {
  * For a changed long line, what it shares at the start and end with the line across its block of
  * changes that shares the most with it.
  */
-function counterpart(lines: readonly Line[], n: number): [number, number] | undefined {
+function counterpart(lines: readonly Line[], n: number): Shared | undefined {
   const { sign, text } = lines[n]!;
   if (sign === " " || text.length <= LINE_CAP) return undefined;
   let first = n;
   while (first > 0 && lines[first - 1]!.sign !== " ") first--;
-  let best: [number, number] | undefined;
+  let best: Shared | undefined;
   for (let k = first; k < lines.length && lines[k]!.sign !== " "; k++) {
     if (lines[k]!.sign === sign) continue;
     const same = shared(text, lines[k]!.text);
-    if (best === undefined || same[0] + same[1] > best[0] + best[1]) best = same;
+    if (best === undefined || same.prefix + same.suffix > best.prefix + best.suffix) best = same;
   }
   return best;
 }
 
-/** How many characters two lines share at the start, and then at the end. */
-function shared(a: string, b: string): [number, number] {
+interface Shared {
+  prefix: number;
+  suffix: number;
+}
+
+function shared(a: string, b: string): Shared {
   let prefix = 0;
   while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
   let suffix = 0;
@@ -202,18 +202,14 @@ function shared(a: string, b: string): [number, number] {
     a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
   )
     suffix++;
-  return [prefix, suffix];
+  return { prefix, suffix };
 }
 
-/**
- * A line longer than LINE_CAP, cut. Given what it shares with its counterpart, it shows from LEAD
- * characters before the first difference to LEAD after the last, at most LINE_CAP of them. A line with no
- * counterpart shows its first LINE_CAP.
- */
-function excerpt(text: string, same: [number, number] | undefined, cut: Clip): string {
+function excerpt(text: string, same: Shared | undefined, cut: Clip): string {
   if (text.length <= LINE_CAP) return text;
   if (same === undefined) return cut(text, LINE_CAP);
-  const [prefix, suffix] = same;
+  const { prefix, suffix } = same;
   const start = Math.max(0, prefix - LEAD);
-  return cut(text, Math.min(text.length - suffix + LEAD, start + LINE_CAP) - start, start);
+  const end = Math.min(text.length - suffix + LEAD, start + LINE_CAP);
+  return cut(text, end - start, start);
 }

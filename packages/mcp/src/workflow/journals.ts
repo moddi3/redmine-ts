@@ -100,7 +100,6 @@ function change(
   return { field, from: show(from), to: show(to) };
 }
 
-/** A description on several lines or longer than one diff line, or a custom field on several lines. */
 function showsAsDiff({ property, name, old_value, new_value }: Detail): boolean {
   const values = [old_value ?? "", new_value ?? ""];
   if (property === "cf") return values.some(spansLines);

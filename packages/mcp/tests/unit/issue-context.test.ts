@@ -24,7 +24,6 @@ const attr = (name: string, old_value: string | null, new_value: string | null) 
   new_value,
 });
 
-/** The marker that ends text cut short in a journal of issue 7. */
 const clipped = (omitted: number, journal = 1) =>
   `\n[clipped: ${omitted} more characters. Call issue_context with issue_id 7, journals 0 and full [${journal}] for all of it.]`;
 

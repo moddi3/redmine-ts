@@ -6,17 +6,14 @@ export const CHANGE_CAP = 1000;
 
 /**
  * A line of a change's diff shows at most this many characters, and a description on one line up to this
- * long keeps from and to. Both sides of one changed line, each with its clip marker, fit in CHANGE_CAP.
+ * long keeps from and to.
  */
 export const LINE_CAP = 350;
 
 /** Cuts text to `cap` characters from `start`, or leaves it whole in a journal returned in full. */
 export type Clip = (text: string, cap: number, start?: number) => string;
 
-/**
- * Text longer than `cap` cut to the `cap` characters from `start`, never inside a surrogate pair. A cut
- * before them shows as …, and the marker after them counts every character left out.
- */
+/** Text longer than `cap` cut to the `cap` characters from `start`, never inside a surrogate pair. */
 export function clip(text: string, cap: number, rest: string, start = 0): string {
   if (text.length <= cap) return text;
   const from = start > 0 && /[\uDC00-\uDFFF]/.test(text.charAt(start)) ? start - 1 : start;

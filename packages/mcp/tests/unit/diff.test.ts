@@ -7,8 +7,7 @@ const CLIPPED: Clip = (text, cap, start) => clip(text, cap, "Read the rest elsew
 const WHOLE: Clip = (text) => text;
 const MARKER = /^\[clipped: (\d+) more characters\. Read the rest elsewhere\.\]$/;
 
-/** Mulberry32, so a failing seed reruns the same case. */
-function generator(seed: number): () => number {
+function mulberry32(seed: number): () => number {
   let state = seed;
   return () => {
     state = (state + 0x6d2b79f5) | 0;
@@ -45,12 +44,11 @@ function texts(random: () => number) {
     const cut = Math.floor(random() * 4);
     return `${text.slice(0, at)}${pick(["", "X", "new words"])}${text.slice(at + cut)}`;
   };
-  // Lines that share a long middle make the closest counterpart hard to tell from the others.
   const middle = "m".repeat(300 + Math.floor(random() * 100));
   const tail = () => Array.from({ length: 4 }, () => pick(["a", "b"])).join("");
-  const similar = random() < 0.2;
+  const hardToPair = random() < 0.2;
   const line = (): string =>
-    similar && random() < 0.6
+    hardToPair && random() < 0.6
       ? `${tail()}${middle}${tail()}`
       : random() < 0.35
         ? random() < 0.5
@@ -74,7 +72,6 @@ function texts(random: () => number) {
     );
   const from = join(old);
   const to = join(next);
-  // "\r" then an empty line then "\n" reads back as one CRLF, so the lines are what the text splits into.
   const split = (text: string) => (text === "" ? [] : text.split(/\r\n|\r|\n/));
   return { old: split(from), next: split(to), from, to };
 }
@@ -125,8 +122,8 @@ function check(from: string, to: string, old: readonly string[], next: readonly 
   const { capped, lines, hunks } = read(diff, old, next, diff.length > CHANGE_CAP);
   let cut = 0;
   for (const [n, { shown, marker, actual }] of lines.entries()) {
-    // The cap can fall between the last line it keeps and that line's marker.
-    if (capped && n === lines.length - 1 && marker === undefined) continue;
+    const markerCutOff = capped && n === lines.length - 1 && marker === undefined;
+    if (markerCutOff) continue;
     if (actual.length <= LINE_CAP) {
       expect(shown).toBe(actual);
       expect(marker).toBeUndefined();
@@ -170,7 +167,7 @@ function check(from: string, to: string, old: readonly string[], next: readonly 
 
 describe("lineDiff against a reference LCS", () => {
   it("transforms the old text into the new with the fewest edits, never shows a changed long line as unchanged, and marks every cut, or shows every line whole for a journal in full", () => {
-    const random = generator(53);
+    const random = mulberry32(53);
     let cut = 0;
     for (let n = 0; n < 6000; n++) {
       const { old, next, from, to } = texts(random);
