@@ -50,15 +50,21 @@ export function lineDiff(from: string, to: string, rest: Rest): string {
     diff += header;
     shown += header.length;
     let changes = new Map<number, Changes>();
+    let removed = new Map<string, string>();
     for (let n = first; n <= last; n++) {
       const { sign, text } = lines[n]!;
       if (sign !== " " && (n === first || lines[n - 1]!.sign === " ")) {
         changes = blockChanges(lines, n, CHANGE_CAP - diff.length);
+        removed = new Map();
       }
       const room = CHANGE_CAP - diff.length - 3;
       if (room < 1) break rows;
       const windows = visible(text, Math.min(LINE_CAP, room), changes.get(n));
-      diff += `\n${sign} ${excerpt(text, windows)}`;
+      const row = excerpt(text, windows);
+      // Where no window tells two lines apart, the diff stops, and the marker names the call for all of it.
+      if (sign === "+" && (removed.get(row) ?? text) !== text) break rows;
+      if (sign === "-") removed.set(row, text);
+      diff += `\n${sign} ${row}`;
       shown += 3 + windows.reduce((sum, [start, end]) => sum + end - start, 0);
     }
   }
