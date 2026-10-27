@@ -509,7 +509,6 @@ describe("journal changes to long or multi-line text", () => {
   const diffOf = async (old_value: string | null, new_value: string | null) =>
     changesFor(attr("description", old_value, new_value));
 
-  /** The description's diff as issue_context returns it, and with the journal in full. */
   async function cutAndWhole(old_value: string, new_value: string) {
     const { client } = await serveDetails([attr("description", old_value, new_value)]);
     const diffFor = async (full: number[]) => {

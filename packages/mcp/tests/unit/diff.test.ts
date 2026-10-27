@@ -28,7 +28,6 @@ function fewestEdits(a: readonly string[], b: readonly string[]): number {
   return a.length + b.length - 2 * row[b.length]!;
 }
 
-/** The characters two lines share at their start and at their end, never overlapping. */
 function shared(a: string, b: string) {
   let prefix = 0;
   while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
@@ -102,9 +101,8 @@ function texts(random: () => number): Case {
 }
 
 /**
- * Two to four similar long lines in one block: the same runs of words around two words of each line's
- * own. Either up to four words between those two change in each line, or the two words come from three
- * and change, as in rows of a table.
+ * Two to four lines in one block that share all but two words each, with up to four words between those
+ * two edited, or, as in rows of a table, those two redrawn from three.
  */
 function rows(random: () => number): Case {
   const int = (n: number) => Math.floor(random() * n);
@@ -176,11 +174,10 @@ interface Row {
   /** Its index in the old text, or in the new text for an added line. */
   line: number;
   text: string;
-  /** The characters the diff had room for on this line. */
   budget: number;
 }
 
-/** Each line the diff shows by run, with the line of the old or new text it stands for. */
+/** Each line the diff shows by hunk, with the line of the old or new text it stands for. */
 function read(
   body: string,
   old: readonly string[],
@@ -233,7 +230,7 @@ function fits(shown: string, text: string): boolean {
   return last === "" ? at < text.length : text.endsWith(last) && text.length - last.length > at;
 }
 
-/** The README's pairs in a block: each long line with the line across it that shares the most at its start and end, one to one, the earlier lines first on a tie. */
+/** The README's pairs in a block. */
 function pairs(block: readonly Row[]): [Row, Row][] {
   const candidates: [number, Row, Row][] = [];
   for (const removed of block.filter((row) => row.sign === "-")) {
@@ -256,7 +253,6 @@ function pairs(block: readonly Row[]): [Row, Row][] {
 
 const tally = { cases: 0, cut: 0, shown: 0, hiddenByCut: 0 };
 
-/** What the diffs of one case get wrong. */
 function check({ old, next, from, to, edited }: Case): string[] {
   const problems: string[] = [];
   const fail = (problem: string) => problems.push(problem);

@@ -1,13 +1,12 @@
 // A line diff for a journal's change to long text, such as an edited description.
 
 import { CHANGE_CAP, marker } from "./clip.ts";
+import type { Rest } from "./clip.ts";
 
 type Sign = " " | "-" | "+";
 
-/** `count` lines or characters in a row that an edit script keeps, removes or adds. */
 type Run = [sign: Sign, count: number];
 
-/** Whether line or character `x` of the old text is line or character `y` of the new one. */
 type Same = (x: number, y: number) => boolean;
 
 interface Line {
@@ -17,7 +16,6 @@ interface Line {
   at: number;
 }
 
-/** Characters `from` up to `to` of a line. */
 type Span = [from: number, to: number];
 
 /** Where a changed line differs from its partner, and from lines whose excerpts would read the same as its own. */
@@ -31,14 +29,13 @@ const CONTEXT = 1;
 /** A line of a change's diff shows at most this many characters, … included. */
 export const LINE_CAP = 350;
 
-/** A long line shows this many characters on each side of a place where it differs from its partner. */
+/** A long line shows this many characters on each side of each place it differs from its partner, so it never shows fewer. */
 const LEAD = 40;
 
 /** Past this many edits, the search stops where it got furthest, and every line or character after that counts as changed. */
 const MAX_EDITS = 1000;
 
-/** `rest` says where to read all of a diff that is cut; without it, nothing is. */
-export function lineDiff(from: string, to: string, rest: string | undefined): string {
+export function lineDiff(from: string, to: string, rest: Rest): string {
   const lines = numbered(split(from), split(to));
   if (lines.every((line) => line.sign === " ")) {
     return from === to ? "No change." : "Only line endings changed.";
@@ -98,7 +95,6 @@ function script(n: number, m: number, same: Same): Run[] {
   return runs;
 }
 
-/** How many lines or characters the old and new text share at their start, and then at their end. */
 function ends(n: number, m: number, same: Same): [head: number, tail: number] {
   let head = 0;
   while (head < n && head < m && same(head, head)) head++;
@@ -226,18 +222,13 @@ function whole(lines: readonly Line[]): string {
     .join("\n");
 }
 
-/**
- * What the long lines of the block of changes from `start` show. Each shows where it differs from its
- * partner, the line across the block that shares the most with it at its start and end, one to one,
- * the earlier lines first on a tie. Each of them takes at least LEAD of the `room` left, so only that
- * many look for a partner. A `-` and a `+` line whose excerpts would read the same also show where
- * they differ from each other.
- */
+/** The Changes, by line, of the block of changes from `start`, with its long lines paired as the README says. */
 function blockChanges(lines: readonly Line[], start: number, room: number): Map<number, Changes> {
   let end = start;
   while (end < lines.length && lines[end]!.sign !== " ") end++;
+  const showable = room / LEAD;
   const long: number[] = [];
-  for (let n = start; n < end && long.length * LEAD < room; n++) {
+  for (let n = start; n < end && long.length < showable; n++) {
     if (lines[n]!.text.length > LINE_CAP) long.push(n);
   }
   const pairs: [shared: number, removed: number, added: number][] = [];
@@ -254,14 +245,11 @@ function blockChanges(lines: readonly Line[], start: number, room: number): Map<
   const changes = new Map<number, Changes>();
   const differ = (removed: number, added: number, kind: keyof Changes) => {
     const spans = differences(lines[removed]!.text, lines[added]!.text);
-    for (const [n, own] of [
-      [removed, spans[0]],
-      [added, spans[1]],
-    ] as const) {
+    [removed, added].forEach((n, side) => {
       const known = changes.get(n) ?? { partner: [], others: [] };
-      known[kind].push(...own);
+      known[kind].push(...spans[side]!);
       changes.set(n, known);
-    }
+    });
   };
   for (const [, removed, added] of pairs) {
     if (!changes.has(removed) && !changes.has(added)) differ(removed, added, "partner");
@@ -306,7 +294,8 @@ function differences(a: string, b: string): [Span[], Span[]] {
 
 /**
  * The parts of `text` its excerpt shows in `budget` characters, … included: windows around where it
- * differs from its partner, then around where it differs from others while they fit, or else its start.
+ * differs from its partner, then each window around where it differs from others that still fits, or
+ * else its start.
  */
 function visible(text: string, budget: number, changes?: Changes): Span[] {
   if (text.length <= budget) return [[0, text.length]];
@@ -328,7 +317,6 @@ function around(text: string, spans: readonly Span[]): Span[] {
   ]);
 }
 
-/** The windows in order, with those that overlap or touch joined. */
 function merge(windows: readonly Span[]): Span[] {
   const out: Span[] = [];
   for (const [from, to] of [...windows].sort((a, b) => a[0] - b[0])) {
@@ -339,7 +327,7 @@ function merge(windows: readonly Span[]): Span[] {
   return out;
 }
 
-/** The windows that fit in `budget` characters, … included, with the first that does not cut short. */
+/** The windows that fit in `budget` characters, … included, and the first that does not, cut short. */
 function fit(text: string, windows: readonly Span[], budget: number): Span[] {
   const out: Span[] = [];
   let used = 0;
@@ -363,7 +351,6 @@ function snap(text: string, at: number): number {
   return at > 0 && at < text.length && /[\uD800-\uDBFF]/.test(text.charAt(at - 1)) ? at - 1 : at;
 }
 
-/** `text` with … in place of each part outside `windows`. */
 function excerpt(text: string, windows: readonly Span[]): string {
   let out = "";
   let at = 0;

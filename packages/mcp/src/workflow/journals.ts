@@ -6,12 +6,12 @@
 
 import type { Issue } from "@redmine-ts/sdk";
 import type { Client } from "../tools.ts";
+import type { Rest } from "./clip.ts";
 import { bestEffort } from "./define.ts";
 import { lineDiff } from "./diff.ts";
 import { projectMembers } from "./lookups.ts";
 import type { Lookups } from "./lookups.ts";
 
-/** A description on one line up to this long keeps from and to. */
 export const FROM_TO_CAP = 350;
 
 export type Journal = NonNullable<Issue["journals"]>[number];
@@ -76,12 +76,12 @@ function referencedIds(journals: readonly Journal[]): Map<Kind, Set<string>> {
   return ids;
 }
 
-/** `customFields` names the issue's custom fields by id, and `rest` says where to read all of a cut diff. */
+/** `customFields` names the issue's custom fields by id. */
 export function changesOf(
   journal: Journal,
   names: Names,
   customFields: ReadonlyMap<string, string>,
-  rest: string | undefined,
+  rest: Rest,
 ): Change[] {
   return journal.details.map((detail) => change(detail, names, customFields, rest));
 }
@@ -90,7 +90,7 @@ function change(
   detail: Detail,
   names: Names,
   customFields: ReadonlyMap<string, string>,
-  rest: string | undefined,
+  rest: Rest,
 ): Change {
   const field = fieldLabel(detail, customFields);
   const { old_value: from, new_value: to } = detail;
