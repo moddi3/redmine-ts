@@ -1,6 +1,6 @@
 // Symptom-based response fixes. Never keyed by server version: patch releases regress and fix things
 // (hours "8/1" in 6.0.1, fixed in 6.0.2), and the server does not report its version. Each fix must be a
-// no-op on correct data, so it is safe against every server.
+// no-op on correct data, so it is safe against every server. News comments are the one exception, below.
 
 import { isRecord } from "./util.ts";
 
@@ -11,6 +11,7 @@ export const normalizeResponse: Fix = fields({
   time_entry: fields({ hours }),
   time_entries: each(fields({ hours })),
   issue: fields({
+    // Notes that a script writes often share a second, and their ids follow Redmine's microsecond order.
     journals: oldestFirst(
       (first, last) =>
         (compare(time(first.created_on), time(last.created_on)) || compare(first.id, last.id)) > 0,
@@ -20,8 +21,9 @@ export const normalizeResponse: Fix = fields({
       (first, last) => compare(time(first.committed_on), time(last.committed_on)) > 0,
     ),
   }),
-  // Redmine orders comments by created_on, which the API does not send.
-  news: fields({ comments: oldestFirst((first, last) => compare(first.id, last.id) > 0) }),
+  // Redmine orders comments by created_on, which the API does not send. Id order is the order they were
+  // posted in, and differs only for a comment whose date was changed in the database.
+  news: fields({ comments: byId }),
 });
 
 function fields(fixes: Readonly<Record<string, Fix>>): Fix {
@@ -59,6 +61,14 @@ function oldestFirst(
     const last: unknown = value.at(-1);
     return isRecord(first) && isRecord(last) && later(first, last) ? value.toReversed() : value;
   };
+}
+
+function byId(value: unknown): unknown {
+  if (!Array.isArray(value) || !value.every((e) => isRecord(e) && typeof e.id === "number")) {
+    return value;
+  }
+  const sorted = (value as { id: number }[]).toSorted((a, b) => a.id - b.id);
+  return sorted.every((entry, i) => entry === value[i]) ? value : sorted;
 }
 
 function compare(a: unknown, b: unknown): number {
