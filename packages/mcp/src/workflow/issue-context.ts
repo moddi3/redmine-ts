@@ -10,6 +10,7 @@ import type { Client, ToolSpec } from "../tools.ts";
 import { UNTRUSTED } from "../user-text.ts";
 import { clip, journalRest, TEXT_CAP } from "./clip.ts";
 import { bestEffort, defineTool, ToolError } from "./define.ts";
+import { LINE_CAP } from "./diff.ts";
 import { changesOf, FROM_TO_CAP, RELATION_PHRASES, resolveNames } from "./journals.ts";
 import type { Lookups } from "./lookups.ts";
 
@@ -138,7 +139,7 @@ const IssueContextSchema = z.object({
               diff: z
                 .string()
                 .describe(
-                  `In place of from and to for a description on several lines or over ${FROM_TO_CAP} characters, or a custom field on several lines. The changed lines, - old and + new, with one unchanged line around each run. A line cut after its start begins with …, and a line or diff cut short ends with a clip marker. A journal in full is not cut.`,
+                  `In place of from and to for a description on several lines or over ${FROM_TO_CAP} characters, or a custom field on several lines. The changed lines, - old and + new, with one unchanged line around each run. A line over ${LINE_CAP} characters shows the text around each place it changed, with … in place of each part left out. A diff that leaves anything out ends with one clip marker that names the call for all of it. A journal in full is not cut.`,
                 ),
             }),
           ]),

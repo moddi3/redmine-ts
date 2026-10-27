@@ -1,7 +1,7 @@
 // Journal details as a readable diff. Redmine sends each change as {property, name, old_value,
 // new_value} with ids in strings, such as status_id from "1" to "2". Each becomes {field, from, to}
 // with a label and names, fetching only the lookups the details reference; an id no lookup resolves
-// stays raw. A description on several lines or longer than one diff line, or a custom field value on
+// stays raw. A description on several lines or longer than FROM_TO_CAP, or a custom field value on
 // several lines, becomes {field, diff} instead.
 
 import type { Issue } from "@redmine-ts/sdk";
