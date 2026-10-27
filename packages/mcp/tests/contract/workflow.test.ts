@@ -22,6 +22,7 @@ describeServers("workflow tools", (server) => {
   let client: Client;
   let tools: Tool[];
   let issue_id: number;
+  const cleanup: (() => Promise<unknown>)[] = [];
   const dir = mkdtempSync(join(tmpdir(), "redmine-mcp-contract-"));
   const marker = `mcp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const sdk = createRedmine({ baseUrl: server.baseUrl, auth: { apiKey: server.adminKey } });
@@ -52,6 +53,7 @@ describeServers("workflow tools", (server) => {
 
   afterAll(async () => {
     if (issue_id !== undefined) await sdk.issues.delete({ issue_id }).catch(() => {});
+    for (const undo of cleanup) await undo().catch(() => {});
   });
 
   it("lists every workflow tool, attachments_save included with a files directory", () => {
@@ -170,6 +172,44 @@ describeServers("workflow tools", (server) => {
     const notes = context.journals.map((journal: { notes: string }) => journal.notes);
     expect(notes).toEqual(expect.arrayContaining(["Started over MCP.", "A note over MCP."]));
     expect(context).toMatchObject({ journals_total: context.journals.length, journals_omitted: 0 });
+  });
+
+  it("keeps the newest journals, oldest first, for a key whose user reads comments newest first", async () => {
+    const login = `desc-${marker}`;
+    const reader = await sdk.users.create({
+      login,
+      firstname: "Desc",
+      lastname: "Reader",
+      mail: `${login}@example.net`,
+      password: "desc-reader-pass-1",
+      pref: { comments_sorting: "desc" },
+    });
+    cleanup.push(() => sdk.users.delete({ user_id: reader.id }));
+    const { api_key: apiKey } = await sdk.users.get({ user_id: reader.id });
+    const issue = await sdk.issues.create({
+      project_id: server.projectIdentifier,
+      subject: `MCP journal order ${marker}`,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+    const written = ["Note 1", "Note 2", "Note 3", "Note 4", "Note 5"];
+    for (const notes of written) await sdk.issues.update({ issue_id: issue.id, notes });
+
+    const raw = await createRedmine({
+      baseUrl: server.baseUrl,
+      auth: { apiKey: apiKey! },
+    }).issues.get({ issue_id: issue.id, include: ["journals"] });
+    expect(raw.journals?.map((journal) => journal.notes)).toEqual(written.toReversed());
+
+    const desc = await connectTo(server, "full", { apiKey });
+    const notes = (journals: { notes: string }[]) => journals.map((journal) => journal.notes);
+    const context = (await ok("issue_context", { issue_id: issue.id, journals: 2 }, desc))
+      .structuredContent as { journals: { notes: string }[] };
+    expect(notes(context.journals)).toEqual(["Note 4", "Note 5"]);
+    expect(context).toMatchObject({ journals_total: 5, journals_omitted: 3 });
+
+    const read = (await ok("issues_get", { issue_id: issue.id, include: ["journals"] }, desc))
+      .structuredContent as { journals: { notes: string }[] };
+    expect(notes(read.journals)).toEqual(written);
   });
 
   it("uploads text, attaches it with issues_update, and reads it back three ways", async () => {
