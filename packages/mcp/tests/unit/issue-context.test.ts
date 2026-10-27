@@ -348,6 +348,41 @@ describe("journals that Redmine sends newest first, for a key whose user reads c
   });
 });
 
+describe("journals that Redmine writes on the parent when a subtask is added and removed", () => {
+  const SUBTASK: Record<string, Route> = {
+    ...ROUTES,
+    "GET /issues/7.json": () =>
+      json({
+        issue: {
+          ...ISSUE,
+          journals: [
+            journal(1, [attr("child_id", null, "11")]),
+            journal(2, [attr("child_id", "11", null)]),
+          ],
+        },
+      }),
+  };
+
+  it("issue_context labels each change Subtask and shows the subtask as #11", async () => {
+    const { client } = await serve(SUBTASK);
+    const context = (await callOk(client, "issue_context", { issue_id: 7 })).structuredContent as {
+      journals: { changes: unknown[] }[];
+    };
+    expect(context.journals.map((entry) => entry.changes)).toEqual([
+      [{ field: "Subtask", from: null, to: "#11" }],
+      [{ field: "Subtask", from: "#11", to: null }],
+    ]);
+  });
+
+  it("the issue resource shows a Subtask line for each", async () => {
+    const { client } = await serve(SUBTASK);
+    const { contents } = await client.readResource({ uri: "redmine://issues/7" });
+    const lines = (contents as { text: string }[])[0]!.text.split("\n");
+    expect(lines).toContain("- Subtask: none → #11");
+    expect(lines).toContain("- Subtask: #11 → none");
+  });
+});
+
 describe("redmine://issues/{id}", () => {
   it("lists the issue template and no fixed resources", async () => {
     const { client } = await serve(ROUTES);

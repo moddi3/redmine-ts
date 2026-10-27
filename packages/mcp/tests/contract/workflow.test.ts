@@ -220,6 +220,32 @@ describeServers("workflow tools", (server) => {
     expect(notes(raw.response.issue.journals)).toEqual(written);
   });
 
+  it("labels a subtask added and removed as Subtask on the parent, in issue_context and the resource", async () => {
+    const parent = await value("issues_create", {
+      project_id: server.projectIdentifier,
+      subject: `MCP parent ${marker}`,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: parent.id }));
+    const child = await value("issues_create", {
+      project_id: server.projectIdentifier,
+      subject: `MCP subtask ${marker}`,
+      parent_issue_id: parent.id,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: child.id }));
+    await value("issues_update", { issue_id: child.id, parent_issue_id: null });
+
+    const context = await value("issue_context", { issue_id: parent.id });
+    expect(context.journals.map((journal: { changes: Change[] }) => journal.changes)).toEqual([
+      [{ field: "Subtask", from: null, to: `#${child.id}` }],
+      [{ field: "Subtask", from: `#${child.id}`, to: null }],
+    ]);
+
+    const { contents } = await client.readResource({ uri: `redmine://issues/${parent.id}` });
+    const lines = (contents as { text: string }[])[0]!.text.split("\n");
+    expect(lines).toContain(`- Subtask: none → #${child.id}`);
+    expect(lines).toContain(`- Subtask: #${child.id} → none`);
+  });
+
   it("uploads text, attaches it with issues_update, and reads it back three ways", async () => {
     const filename = `${marker}.log`;
     const ref = await value("attachments_upload", {
