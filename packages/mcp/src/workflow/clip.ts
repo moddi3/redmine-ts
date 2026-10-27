@@ -10,6 +10,8 @@ export const CHANGE_CAP = 1000;
  */
 export const LINE_CAP = 350;
 
+export type Clip = (text: string, cap: number) => string;
+
 export function clip(text: string, cap: number, rest: string): string {
   if (text.length <= cap) return text;
   // Never split a surrogate pair.
@@ -20,4 +22,13 @@ export function clip(text: string, cap: number, rest: string): string {
 /** Ends text cut short, with how many characters it left out and `rest`, where to read them. */
 export function clipMarker(omitted: number, rest: string): string {
   return `\n[clipped: ${omitted} more characters. ${rest}]`;
+}
+
+export function clipJournal(issueId: number, journalId: number): Clip {
+  return (text, cap) =>
+    clip(
+      text,
+      cap,
+      `Call issue_context with issue_id ${issueId}, journals 0 and full [${journalId}] for all of it.`,
+    );
 }

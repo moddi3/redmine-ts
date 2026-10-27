@@ -220,6 +220,69 @@ describeServers("workflow tools", (server) => {
     expect(notes(raw.response.issue.journals)).toEqual(written);
   });
 
+  it("clips a long note with a marker that names the issue_context call returning it whole", async () => {
+    const issue = await sdk.issues.create({
+      project_id: server.projectIdentifier,
+      subject: `MCP long note ${marker}`,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+    const long = `Long note ${marker}. ${"x".repeat(5000)}`;
+    await sdk.issues.update({ issue_id: issue.id, notes: long });
+    await sdk.issues.update({ issue_id: issue.id, notes: "A short note after it." });
+
+    const clipped = await value("issue_context", { issue_id: issue.id });
+    const [first] = clipped.journals;
+    const call =
+      /\[clipped: \d+ more characters\. Call issue_context with issue_id (\d+), journals (\d+) and full \[(\d+)\] for all of it\.\]$/.exec(
+        first.notes,
+      );
+    expect(call?.slice(1).map(Number)).toEqual([issue.id, 0, first.id]);
+
+    const whole = await value("issue_context", {
+      issue_id: Number(call![1]),
+      journals: Number(call![2]),
+      full: [Number(call![3])],
+    });
+    expect(whole.journals).toEqual([expect.objectContaining({ id: first.id, notes: long })]);
+    expect(whole).toMatchObject({ journals_total: 2, journals_omitted: 1 });
+  });
+
+  it("numbers journals as #note-N, lower than Redmine's after a private note that the key cannot see", async () => {
+    const issue = await sdk.issues.create({
+      project_id: server.projectIdentifier,
+      subject: `MCP note numbers ${marker}`,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+    await sdk.issues.update({ issue_id: issue.id, notes: "Note 1" });
+    await sdk.issues.update({ issue_id: issue.id, notes: "Private 2", private_notes: true });
+    await sdk.issues.update({ issue_id: issue.id, notes: "Note 3" });
+    const login = `outsider-${marker}`;
+    const outsider = await sdk.users.create({
+      login,
+      firstname: "Out",
+      lastname: "Sider",
+      mail: `${login}@example.net`,
+      password: "outsider-pass-1",
+    });
+    cleanup.push(() => sdk.users.delete({ user_id: outsider.id }));
+    const { api_key: apiKey } = await sdk.users.get({ user_id: outsider.id });
+
+    const numbered = async (on: Client) => {
+      const { journals } = (await ok("issue_context", { issue_id: issue.id }, on))
+        .structuredContent as { journals: { note: number; notes: string }[] };
+      return journals.map(({ note, notes }) => [note, notes]);
+    };
+    expect(await numbered(client)).toEqual([
+      [1, "Note 1"],
+      [2, "Private 2"],
+      [3, "Note 3"],
+    ]);
+    expect(await numbered(await connectTo(server, "full", { apiKey }))).toEqual([
+      [1, "Note 1"],
+      [2, "Note 3"],
+    ]);
+  });
+
   it("labels a subtask added and removed as Subtask on the parent, in issue_context and the resource", async () => {
     const parent = await value("issues_create", {
       project_id: server.projectIdentifier,
