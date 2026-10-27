@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { lastJson } from "../connect.ts";
-import { callOk, json, serve } from "./harness.ts";
+import { callError, callOk, json, serve } from "./harness.ts";
 
 const user = {
   id: 1,
@@ -39,6 +39,19 @@ describe("API keys", () => {
     expect(result.structuredContent).toEqual({ response });
     expect(lastJson(result)).toEqual({ response });
     expect(JSON.stringify(result)).not.toMatch(/secret-/);
+  });
+
+  it("blanks api_key values in the body of an error result", async () => {
+    const { client } = await serve({
+      "GET /custom.json": () =>
+        json({ user: { id: 1, api_key: "secret-1" }, users: [{ api_key: "secret-2" }] }, 400),
+    });
+    const result = await callError(client, "raw_request", { method: "GET", path: "custom.json" });
+    expect(JSON.stringify(result)).not.toMatch(/secret-/);
+    expect(lastJson(result)).toMatchObject({
+      kind: "http",
+      body: '{"user":{"id":1,"api_key":""},"users":[{"api_key":""}]}',
+    });
   });
 
   it("names api_key in no tool's schema or description", async () => {
