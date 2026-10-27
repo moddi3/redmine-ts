@@ -170,6 +170,11 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
       const scoped = overlay.projectScoped.some(
         (g) => g.ops.includes(id) && g.filters.includes(p.name),
       );
+      const note = overlay.filterNotes[id]?.[p.name];
+      const description =
+        note === undefined
+          ? p.description
+          : p.description?.replace(/^.*/, (summary) => `${summary} ${note}`);
       where.push({
         name: p.name,
         spec: {
@@ -179,8 +184,8 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
           ...(scoped ? { scoped: true as const } : {}),
         },
         caps,
-        doc: jsDoc(p.description, sinceTag(p["x-since"])),
-        description: p.description,
+        doc: jsDoc(description, sinceTag(p["x-since"])),
+        description,
       });
     } else if (p.name === "include") {
       includes = (p.schema.items?.enum ?? []).map(String);
@@ -490,6 +495,13 @@ function checkOverlay(ops: OpModel[], doc: OpenApi, overlay: Overlay): void {
         if (!op.descriptor.filters[name])
           throw new Error(`overlay.projectScoped.${id}: no filter ${name}`);
       }
+    }
+  }
+  for (const [id, notes] of Object.entries(overlay.filterNotes)) {
+    const op = need("filterNotes", id);
+    for (const name of Object.keys(notes)) {
+      if (!op.descriptor.filters[name])
+        throw new Error(`overlay.filterNotes.${id}: no filter ${name}`);
     }
   }
   for (const [name, words] of Object.entries(overlay.filterWords)) {

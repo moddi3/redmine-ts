@@ -39,6 +39,8 @@ export interface Overlay {
   clearAsEmpty: Readonly<Record<string, readonly string[]>>;
   /** Filter name -> words compiled to operator codes. Words whose code a filter lacks are dropped. */
   filterWords: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /** operationId -> filter -> a sentence appended to the first line of the filter's description. */
+  filterNotes: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /**
    * Filters IssueQuery and TimeEntryQuery add only `if project`, so a query without one project drops them with
    * no error. Grouped by query class like commaLists. Observed on 6.1 and 7.0: a `category_id` next to a list of
@@ -64,6 +66,11 @@ export interface Overlay {
 
 const ISSUE_CHILD =
   "7.0.2-r1 moved the inline child shape into the recursive issue_child. Redmine 6.1 already renders nested children with id and subject (IssuesHelper#render_api_issue_children), so the 7.0 shape holds for both versions.";
+
+// Observed on 6.1 and 7.0: a list of two or more ids goes out in the long form, where Redmine compares
+// project_id with the values alone, and an identifier there matches nothing.
+const PROJECT_ID_NOTE =
+  "One id or identifier also matches subprojects, by Redmine's default setting. Two or more ids do not, and {not: id} excludes only that project, not its subprojects. An identifier works only as the one value.";
 
 export const overlay: Overlay = {
   namespaces: {
@@ -122,6 +129,10 @@ export const overlay: Overlay = {
       filters: ["issue.category_id", "subproject_id"],
     },
   ],
+  filterNotes: {
+    getIssues: { project_id: PROJECT_ID_NOTE },
+    getTimeEntries: { project_id: PROJECT_ID_NOTE },
+  },
   sparseIncludes: [
     "children",
     "relations",
