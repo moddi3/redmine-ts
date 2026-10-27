@@ -16,6 +16,7 @@ import {
 } from "./fixtures/fake-fetch.ts";
 import type { Responder } from "./fixtures/fake-fetch.ts";
 import * as ops from "./fixtures/registry.ts";
+import { normalizeResponse } from "../../src/core/quirks.ts";
 
 const issue = { id: 42, subject: "Printer on fire" };
 const ok: Responder = () => json({ issue });
@@ -1080,13 +1081,22 @@ describe("lists that Redmine reverses for a user who reads comments newest first
     ["oldest first", [1, 2, 3], [1, 2, 3]],
     ["as one entry", [1], [1]],
     ["empty", [], []],
-  ])("news comments sent %s come back oldest first", async (_, sent, expected) => {
+    ["oldest first, with comment 3 dated before the others", [3, 1, 2], [1, 2, 3]],
+    ["newest first, with comment 3 dated before the others", [2, 1, 3], [1, 2, 3]],
+  ])("news comments sent %s come back in id order", async (_, sent, expected) => {
     const comments = sent.map((id) => ({ id, content: `Comment ${id}` }));
     const { call } = testEngine(() => json({ news: { id: 5, comments } }));
     const news = (await call(ops.getNews, { news_id: 5, include: ["comments"] })) as {
       comments: { id: number }[];
     };
     expect(news.comments.map((entry) => entry.id)).toEqual(expected);
+  });
+
+  test("leaves lists that are already in order as the same object", () => {
+    const issue = { issue: { id: 42, journals: [journal(1, 0), journal(2, 1)] } };
+    const news = { news: { id: 5, comments: [{ id: 1 }, { id: 2 }] } };
+    expect(normalizeResponse(issue)).toBe(issue);
+    expect(normalizeResponse(news)).toBe(news);
   });
 
   test("normalize: false keeps the order Redmine sent", async () => {
