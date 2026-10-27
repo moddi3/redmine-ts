@@ -179,7 +179,6 @@ async function issueContext(
   const issue = await rm.issues.get({ issue_id, include: [...INCLUDES] });
   const all = issue.journals ?? [];
   const shown = journals === 0 ? [] : all.slice(-journals);
-  const omitted = all.length - shown.length;
   const [names, children] = await Promise.all([
     resolveNames(rm, lookups, issue, shown),
     childrenOf(rm, issue),
@@ -219,9 +218,9 @@ async function issueContext(
     ...(issue.watchers === undefined
       ? {}
       : { watchers: issue.watchers.map(({ id, name }) => ({ id, name })) }),
-    journals: shown.map((journal, index) => ({
+    journals: shown.map((journal) => ({
       id: journal.id,
-      note: omitted + index + 1,
+      note: all.indexOf(journal) + 1,
       user: journal.user?.name ?? null,
       created_on: journal.created_on,
       notes: clip(journal.notes ?? "", TEXT_CAP, rest),
@@ -229,7 +228,7 @@ async function issueContext(
       changes: changesOf(journal, names, customFields, rest),
     })),
     journals_total: all.length,
-    journals_omitted: omitted,
+    journals_omitted: all.length - shown.length,
   };
 }
 
