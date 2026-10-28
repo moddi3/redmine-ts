@@ -384,7 +384,6 @@ describe("spec corrections", () => {
     expectTypeOf<AlwaysSet["project"]>().toEqualTypeOf<IdName>();
     expectTypeOf<NonNullable<Issue["parent"]>>().toEqualTypeOf<{ id: number }>();
     expectTypeOf<NonNullable<IssueSummary["parent"]>>().toEqualTypeOf<{ id: number }>();
-    expect(generated.report.corrections).toBe(overlay.corrections);
   });
 
   test("leave the loaded specs as they are", () => {
@@ -394,32 +393,55 @@ describe("spec corrections", () => {
     }
   });
 
-  test("a correction stays while one vendored spec still needs it", async () => {
-    const half = withSpecs((v) => {
-      v["7.0"]!.components.schemas.issue!.required!.push(...always);
+  // The merge takes `required` from the latest spec, so once that spec has the fix, the correction does nothing.
+  test("a property the latest spec already requires fails generation, while an older spec lacks it", async () => {
+    const latestFixed = withSpecs((v) => {
+      v["7.0"]!.components.schemas.issue!.required!.push("author");
     });
-    await expect(generate(half)).resolves.toBeDefined();
+    await expect(generate(latestFixed)).rejects.toThrow(
+      "requiring author at #/components/schemas/issue no longer changes the merged spec",
+    );
   });
 
-  test("a correction that every vendored spec already has fails generation", async () => {
+  test("a property every vendored spec already requires fails generation", async () => {
     const fixed = withSpecs((v) => {
       for (const doc of Object.values(v)) {
         doc.components.schemas["issue.summary"]!.properties!.parent!.required = ["id"];
       }
     });
     await expect(generate(fixed)).rejects.toThrow(
-      "every vendored spec already requires id at #/components/schemas/issue.summary/properties/parent",
+      "requiring id at #/components/schemas/issue.summary/properties/parent no longer changes the merged spec",
     );
   });
 
-  test("a correction naming a missing schema or property fails generation", async () => {
-    const correct = (pointer: string, required: string[]) =>
-      generate(specs, { ...overlay, corrections: [{ pointer, required, reason: "test" }] });
-    await expect(correct("#/components/schemas/isue", ["project"])).rejects.toThrow(
-      "#/components/schemas/isue is not an object schema in 6.1.3-r1.yaml",
+  test("an older spec that already has the fix changes nothing", async () => {
+    const olderFixed = withSpecs((v) => {
+      v["6.1"]!.components.schemas.issue!.required!.push(...always);
+    });
+    expect((await generate(olderFixed)).files).toEqual(generated.files);
+  });
+
+  test("a correction naming a missing schema or property, or listing none or one twice, fails generation", async () => {
+    const correct = (...corrections: { pointer: string; required: string[] }[]) =>
+      generate(specs, {
+        ...overlay,
+        corrections: corrections.map((c) => ({ ...c, reason: "test" })),
+      });
+    const issue = "#/components/schemas/issue";
+    await expect(
+      correct({ pointer: "#/components/schemas/isue", required: ["project"] }),
+    ).rejects.toThrow("#/components/schemas/isue is not an object schema in 6.1.3-r1.yaml");
+    await expect(correct({ pointer: issue, required: ["projects"] })).rejects.toThrow(
+      `${issue} has no property projects in 6.1.3-r1.yaml`,
     );
-    await expect(correct("#/components/schemas/issue", ["projects"])).rejects.toThrow(
-      "#/components/schemas/issue has no property projects in 6.1.3-r1.yaml",
+    await expect(correct({ pointer: issue, required: ["constructor"] })).rejects.toThrow(
+      `${issue} has no property constructor in 6.1.3-r1.yaml`,
     );
+    await expect(correct({ pointer: issue, required: [] })).rejects.toThrow(
+      `${issue} lists no property`,
+    );
+    await expect(
+      correct({ pointer: issue, required: ["project"] }, { pointer: issue, required: ["project"] }),
+    ).rejects.toThrow(`project at ${issue} is listed twice`);
   });
 });

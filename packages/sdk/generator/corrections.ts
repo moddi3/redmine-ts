@@ -1,35 +1,60 @@
-// Applies overlay.corrections to copies of the vendored specs, before the merge. A correction only adds
-// properties to a `required` list, and one that no spec needs any more fails generation.
+// Applies overlay.corrections to copies of the vendored specs, then merges them. A correction only adds
+// properties to a `required` list, and a property that no longer changes the merged spec fails generation.
 
+import { mergeSpecs, type Merged } from "./merge.ts";
 import type { Correction } from "./overlay.ts";
 import type { OpenApi, Schema, SpecFile } from "./spec.ts";
 
-export function applyCorrections(
+export function mergeCorrected(
   specs: SpecFile[],
   corrections: readonly Correction[],
-): SpecFile[] {
+  resolved: Readonly<Record<string, string>>,
+): Merged {
+  const listed = new Set<string>();
+  for (const { pointer, required } of corrections) {
+    if (required.length === 0) throw new Error(`overlay.corrections: ${pointer} lists no property`);
+    for (const key of required) {
+      if (listed.has(`${pointer} ${key}`)) {
+        throw new Error(`overlay.corrections: ${key} at ${pointer} is listed twice`);
+      }
+      listed.add(`${pointer} ${key}`);
+    }
+  }
+  const merged = mergeSpecs(applyCorrections(specs, corrections), resolved);
+  // The merge takes `required` from the latest spec, so a fix there leaves a correction with nothing to do
+  // while an older spec still lacks the property. Merging without each property finds that, whatever the
+  // merge's rule.
+  const output = ({ latest, ops }: Merged) => JSON.stringify([latest, ops]);
+  const expected = output(merged);
+  for (const [i, { pointer, required }] of corrections.entries()) {
+    for (const key of required) {
+      const without = corrections.map((correction, j) =>
+        j === i ? { ...correction, required: required.filter((k) => k !== key) } : correction,
+      );
+      if (output(mergeSpecs(applyCorrections(specs, without), resolved)) === expected) {
+        throw new Error(
+          `overlay.corrections: requiring ${key} at ${pointer} no longer changes the merged spec; remove it from the correction`,
+        );
+      }
+    }
+  }
+  return merged;
+}
+
+function applyCorrections(specs: SpecFile[], corrections: readonly Correction[]): SpecFile[] {
   const out = structuredClone(specs);
   for (const { pointer, required } of corrections) {
-    const needed = new Set<string>();
     for (const { file, doc } of out) {
       const schema = resolve(doc, pointer);
       if (!schema?.properties) {
         throw new Error(`overlay.corrections: ${pointer} is not an object schema in ${file}`);
       }
       for (const key of required) {
-        if (!schema.properties[key]) {
+        if (!Object.hasOwn(schema.properties, key)) {
           throw new Error(`overlay.corrections: ${pointer} has no property ${key} in ${file}`);
         }
-        if (schema.required?.includes(key)) continue;
-        (schema.required ??= []).push(key);
-        needed.add(key);
+        if (!schema.required?.includes(key)) (schema.required ??= []).push(key);
       }
-    }
-    const fixed = required.filter((key) => !needed.has(key));
-    if (fixed.length > 0) {
-      throw new Error(
-        `overlay.corrections: every vendored spec already requires ${fixed.join(", ")} at ${pointer}; remove them from the correction`,
-      );
     }
   }
   return out;
