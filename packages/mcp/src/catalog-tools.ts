@@ -401,11 +401,13 @@ function filterLine(name: string, kind: string | undefined, spec: Spec): string 
 
 /**
  * What a filter's value is, read from the wire operators the spec documents for it: date operators
- * such as `t` (today), comparisons, or text matches. A filter whose spec lists its values has no kind.
+ * such as `t` (today), comparisons, or text matches. A filter whose spec lists its values has no kind,
+ * and one with special values such as `me` takes ids besides them, updated_by included.
  */
 function kindOf(name: string, { codes, values }: Spec): string | undefined {
   const id = /(^|_)id$/.test(name);
   if (values.some((line) => line.startsWith("Values:"))) return undefined;
+  if (values.some((line) => line.startsWith("Special values:"))) return "id";
   if (codes.has("t")) return "date";
   if (codes.has(">=")) return id ? "id" : "number";
   if (codes.has("~") && !id) return "text";

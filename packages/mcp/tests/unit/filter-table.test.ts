@@ -130,6 +130,12 @@ describe("the filter table in where", () => {
       "is_private | `1` for private, `0` for not private | private flag",
     );
     expect(row("assigned_to_id")).toBe("assigned_to_id | id, `me` for current user | assignee");
+    expect(row("updated_by")).toBe(
+      "updated_by | id, `me` for current user | user who updated the issue",
+    );
+    expect(row("last_updated_by")).toBe(
+      "last_updated_by | id, `me` for current user | user who last updated the issue",
+    );
     expect(row("duplicated")).toBe('duplicated |  | "duplicated by" relation');
     expect(row("project_id")).toContain(
       "id, `mine` for projects where current user is a member, `bookmarks` for bookmarked projects | project. One id or identifier also matches subprojects",
@@ -137,6 +143,21 @@ describe("the filter table in where", () => {
     expect(row("cf_<id>")).toContain("`cf_12`");
     const users = table(where(tools, "users_list").description!).rows;
     expect(users.get("login")?.[0]).toBe("login | text");
+  });
+
+  it("keeps wire syntax out of each filter's own description, which a bad-filter error quotes", () => {
+    for (const tool of catalogTools) {
+      const filters = tool.inputSchema.properties?.where;
+      if (filters === undefined) continue;
+      const own = [
+        ...Object.values(filters.properties ?? {}),
+        ...Object.values(filters.patternProperties ?? {}),
+      ];
+      expect(own.length, tool.name).toBeGreaterThan(0);
+      for (const { description } of own) {
+        expect(description, tool.name).not.toMatch(/Operators:|Examples:|Format:|`!3`/);
+      }
+    }
   });
 
   it("advertises one condition that accepts every form a filter accepts", async () => {
