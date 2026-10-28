@@ -260,7 +260,7 @@ function redmineFailure(tool: ToolSpec, error: RedmineError, redact: Redact): Ca
       case "forbidden":
         return tool.adminOnly === undefined
           ? `Redmine answered 403 for ${tool.name}: the key's user lacks the permission, or the REST API is disabled.`
-          : `Redmine answered 403 for ${tool.name}. ${tool.adminOnly}`;
+          : `Redmine answered 403 for ${tool.name}: it needs an admin key, or the REST API is disabled. ${tool.adminOnly}`.trimEnd();
       default:
         return error.message;
     }

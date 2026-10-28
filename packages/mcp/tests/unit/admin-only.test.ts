@@ -5,7 +5,7 @@ import { texts } from "../connect.ts";
 import { callError, json, serve } from "./harness.ts";
 
 const USERS_LIST =
-  "Needs an admin key. To find a user's id and login by name without one, call people_find, or memberships_list and then users_get.";
+  "To find a user's id and login by name without one, call people_find, or memberships_list and then users_get.";
 
 describe("tools that need an admin key", () => {
   it("are the catalog's users, groups, custom fields, archive and unarchive operations", () => {
@@ -31,34 +31,63 @@ describe("tools that need an admin key", () => {
   });
 
   it("say so after their title, with what works without one, and are listed for any key", async () => {
-    const { client, seen } = await serve({}, { access: "read-only" });
+    const { client, seen } = await serve({});
     const tools = (await client.listTools()).tools;
     const description = (name: string) => tools.find((tool) => tool.name === name)?.description;
     expect(description("users_list")).toMatch(/^List users\. Needs an admin key\. /);
-    expect(description("users_list")).toContain(USERS_LIST);
+    expect(description("users_list")).toContain(`Needs an admin key. ${USERS_LIST}`);
     expect(description("groups_list")).toContain(
       "Needs an admin key. memberships_list lists the groups in a project, and groups_get reads one by id.",
     );
     expect(description("custom_fields_list")).toContain("Needs an admin key. reference_data");
     expect(description("users_get")).not.toContain("admin key");
-    expect(description("users_get")).toContain("user_id from people_find");
+    expect(
+      tools
+        .filter((tool) => tool.description?.includes("user_id from people_find"))
+        .map((tool) => tool.name)
+        .toSorted(),
+    ).toEqual([
+      "issues_add_watcher",
+      "issues_remove_watcher",
+      "time_entries_create",
+      "time_entries_list",
+      "time_entries_update",
+      "users_get",
+    ]);
+    expect(
+      tools
+        .filter((tool) => tool.description?.includes("user_id from users_list"))
+        .map((tool) => tool.name)
+        .toSorted(),
+    ).toEqual([
+      "groups_add_user",
+      "groups_remove_user",
+      "memberships_create",
+      "users_delete",
+      "users_update",
+    ]);
+    expect(description("memberships_create")).toContain(
+      "user_id from users_list with an admin key, role_ids from roles_list. people_find searches only a project's members and an issue's people, so it does not find a user who is not a member yet.",
+    );
     expect(tools.filter((tool) => tool.description?.includes("Needs an admin key"))).toHaveLength(
-      3,
+      14,
     );
     expect(seen).toEqual([]);
   });
 
-  it("say so in a 403, which other tools keep general", async () => {
+  it("say so in a 403, with the REST API that may be off, and other tools keep it general", async () => {
     const { client } = await serve({
       "GET /users.json": () => json({}, 403),
       "PUT /projects/web/archive.json": () => json({}, 403),
       "GET /issues/7.json": () => json({}, 403),
     });
     const users = await callError(client, "users_list", {});
-    expect(texts(users)[0]).toBe(`Redmine answered 403 for users_list. ${USERS_LIST}`);
+    expect(texts(users)[0]).toBe(
+      `Redmine answered 403 for users_list: it needs an admin key, or the REST API is disabled. ${USERS_LIST}`,
+    );
     const archive = await callError(client, "projects_archive", { project_id: "web" });
     expect(texts(archive)[0]).toBe(
-      "Redmine answered 403 for projects_archive. Needs an admin key.",
+      "Redmine answered 403 for projects_archive: it needs an admin key, or the REST API is disabled.",
     );
     const issue = await callError(client, "issues_get", { issue_id: 7 });
     expect(texts(issue)[0]).toBe(

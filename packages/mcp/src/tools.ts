@@ -71,8 +71,8 @@ export interface ToolSpec {
   readonly since: RedmineVersion;
   readonly until: RedmineVersion | null;
   /**
-   * Set when Redmine answers 403 to every key but an admin's: "Needs an admin key." and what works
-   * without one, which the description and the 403 error both carry.
+   * Set when Redmine answers 403 to every key but an admin's: what works without an admin key, or ""
+   * when nothing does. The description and the 403 error say that the tool needs one, and add it.
    */
   readonly adminOnly?: string;
   /** Redmine failures reject with a RedmineError. */

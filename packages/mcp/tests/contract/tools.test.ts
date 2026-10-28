@@ -131,7 +131,9 @@ describeServers("generated tools", (server) => {
         expect(result.isError, name).toBe(true);
         expect(lastJson(result)).toMatchObject({ kind: "forbidden", status: 403 });
         expect(texts(result)[0]).toMatch(
-          new RegExp(`^Redmine answered 403 for ${name}\\. Needs an admin key\\.`),
+          new RegExp(
+            `^Redmine answered 403 for ${name}: it needs an admin key, or the REST API is disabled\\.`,
+          ),
         );
       } else {
         expect(result.isError, `${name}: ${texts(result).join("\n")}`).toBeFalsy();
