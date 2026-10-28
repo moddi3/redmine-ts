@@ -51,11 +51,15 @@ export function createLookups(rm: Client): Lookups {
 /** Memberships read for one project, 5 pages. A larger project is cut there, and `more` says so. */
 export const MAX_MEMBERS = 500;
 
+/**
+ * Each page goes into `members` as it comes, so a caller that passes its own array keeps the pages
+ * read before one that fails.
+ */
 export async function projectMembers(
   rm: Client,
   project_id: number | string,
+  members: Membership[] = [],
 ): Promise<{ members: Membership[]; more: boolean }> {
-  const members: Membership[] = [];
   for await (const page of rm.memberships.list({ project_id }).pages()) {
     members.push(...page.items);
     // total_count tells whether more follow, so a larger project costs no sixth page.

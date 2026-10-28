@@ -1,7 +1,7 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormatsModule from "ajv-formats";
 import type { Client, Tool } from "@modelcontextprotocol/client";
-import { createRedmine } from "@redmine-ts/sdk";
+import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { User } from "@redmine-ts/sdk";
 import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { texts } from "../connect.ts";
@@ -14,6 +14,7 @@ interface Match {
   id: number;
   name: string;
   login: string | null;
+  match: string;
   found_as: string[];
   locked?: true;
 }
@@ -40,7 +41,9 @@ describeServers("people_find", (server) => {
   let grace: User;
   let lena: User;
   let groupId: number;
+  let watchingGroupName: string;
   let issueId: number;
+  let anonymous: { id: number; name: string };
 
   async function find(on: Client, args: Record<string, unknown>): Promise<People> {
     const result = await on.callTool({ name: "people_find", arguments: args });
@@ -96,13 +99,35 @@ describeServers("people_find", (server) => {
     await sdk.issues.addWatcher({ issue_id: issue.id, user_id: semyon.id });
     await asJsmith.issues.update({ issue_id: issue.id, notes: "Seen by John." });
 
+    // A group that watches the issue and is no member of its project, which users_get answers 404.
+    watchingGroupName = `PF watchers ${marker}`;
+    const watching = await sdk.groups.create({ name: watchingGroupName });
+    cleanup.unshift(() => sdk.groups.delete({ group_id: watching.id }));
+    await sdk.issues.addWatcher({ issue_id: issue.id, user_id: watching.id });
+
+    // A user who wrote a note and was deleted, so Redmine shows the note as its Anonymous user's.
+    const leaver = await person("leaver", "Leo", "Leaver");
+    await join(leaver.id, "Developer");
+    await sdk.issues.update({ issue_id: issue.id, notes: "Before leaving." }, { as: leaver.login });
+    await sdk.users.delete({ user_id: leaver.id });
+    const { journals } = await sdk.issues.get({ issue_id: issue.id, include: ["journals"] });
+    anonymous = journals!.find((journal) => journal.notes === "Before leaving.")!.user!;
+
     user = await connectTo(server, "full", { apiKey: server.userKey });
     admin = await connectTo(server);
     tools = (await user.listTools()).tools;
   });
 
   afterAll(async () => {
-    for (const undo of cleanup) await undo().catch(() => {});
+    const failed: unknown[] = [];
+    for (const undo of cleanup) {
+      // A record a test already deleted is gone, which is what cleanup wants.
+      await undo().catch((error: unknown) => {
+        if (!RedmineError.is(error, "not_found")) failed.push(error);
+      });
+    }
+    if (failed.length > 0)
+      throw new AggregateError(failed, `${failed.length} cleanup steps failed`);
   });
 
   it("is listed for a key that is not an admin's, in read-only mode too", async () => {
@@ -119,6 +144,7 @@ describeServers("people_find", (server) => {
       id: semyon.id,
       name: "Семён Петров",
       login: semyon.login,
+      match: "exact",
       found_as: ["member"],
     });
     expect(found.unavailable).toBeUndefined();
@@ -130,6 +156,7 @@ describeServers("people_find", (server) => {
       id: grace.id,
       name: "Grace Groupwood",
       login: grace.login,
+      match: "exact",
       found_as: ["member"],
     });
     expect(
@@ -150,6 +177,7 @@ describeServers("people_find", (server) => {
       id: lena.id,
       name: "Lena Lockwood",
       login: null,
+      match: "exact",
       found_as: ["member"],
     });
     expect(asUser.unavailable).toEqual([
@@ -165,6 +193,7 @@ describeServers("people_find", (server) => {
       id: lena.id,
       name: "Lena Lockwood",
       login: lena.login,
+      match: "exact",
       found_as: ["member"],
       locked: true,
     });
@@ -174,7 +203,9 @@ describeServers("people_find", (server) => {
     const author = await find(user, { name: "Redmine Admin", issue_id: issueId });
     // jsmith's role shows only users who share a project with him, and no watchers.
     expect(author).toEqual({
-      matches: [{ id: adminId, name: "Redmine Admin", login: null, found_as: ["author"] }],
+      matches: [
+        { id: adminId, name: "Redmine Admin", login: null, match: "exact", found_as: ["author"] },
+      ],
       more: 0,
       unavailable: [
         "watchers: this key's user may not view the issue's watchers",
@@ -188,6 +219,7 @@ describeServers("people_find", (server) => {
           id: adminId,
           name: "Redmine Admin",
           login: "admin",
+          match: "exact",
           found_as: expect.arrayContaining(["author"]),
         },
       ],
@@ -199,6 +231,7 @@ describeServers("people_find", (server) => {
       id: semyon.id,
       name: "Семён Петров",
       login: semyon.login,
+      match: "exact",
       found_as: ["member", "watcher"],
     });
     const writer = await find(user, { name: "Smith John", issue_id: issueId });
@@ -206,7 +239,49 @@ describeServers("people_find", (server) => {
       id: expect.any(Number),
       name: "John Smith",
       login: "jsmith",
+      match: "exact",
       found_as: ["member", "journal"],
     });
+  });
+
+  it("never returns a group, even one that watches the issue without being a member", async () => {
+    const watchers = await sdk.issues.get({ issue_id: issueId, include: ["watchers"] });
+    expect(watchers.watchers?.map((watcher) => watcher.name)).toContain(watchingGroupName);
+    // Both the member group and the group that only watches match.
+    expect(await find(admin, { name: `PF ${marker}`, issue_id: issueId })).toEqual({
+      matches: [],
+      more: 0,
+    });
+  });
+
+  it("gives the Anonymous user, which stands for a deleted user, no login", async () => {
+    expect(await find(admin, { name: anonymous.name, issue_id: issueId })).toEqual({
+      matches: [
+        {
+          id: anonymous.id,
+          name: anonymous.name,
+          login: null,
+          match: "exact",
+          found_as: ["journal"],
+        },
+      ],
+      more: 0,
+      unavailable: [
+        `login of ${anonymous.id}: none, because this is the Anonymous user, which Redmine shows in place of a deleted user. No mention reaches it.`,
+      ],
+    });
+    const asUser = await find(user, { name: anonymous.name, issue_id: issueId });
+    expect(asUser.matches).toEqual([
+      {
+        id: anonymous.id,
+        name: anonymous.name,
+        login: null,
+        match: "exact",
+        found_as: ["journal"],
+      },
+    ]);
+    expect(asUser.unavailable).toContainEqual(
+      expect.stringMatching(new RegExp(`^login of ${anonymous.id}: users_get answered 404\\. `)),
+    );
   });
 });
