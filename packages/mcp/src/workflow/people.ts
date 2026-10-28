@@ -44,7 +44,7 @@ const PeopleSchema = z.object({
         match: z
           .enum(["exact", "prefix", "partial"])
           .describe(
-            'How the name matched. "exact": each word of the query is a whole word of the name. "prefix": each starts one. "partial": the name as Redmine shows it holds less than the query, such as "Ivan P." or "Ivan" for "Ivan Petrov", so it may be someone else. Partial matches come only when no other did.',
+            'How the name matched. "exact": each word of the query is a whole word of the name. "prefix": each starts one. "partial": the name as Redmine shows it is shorter than the query or has initials, such as "Ivan P." or "Ivan" for "Ivan Petrov", so it may be someone else. Partial matches come only when no other did.',
           ),
         found_as: z
           .array(z.enum(FOUND_AS))
@@ -82,10 +82,10 @@ export const peopleFindTool: ToolSpec = defineTool({
     "Finds people by name and returns each one's id, name and login, which an @login mention takes.",
     "Works with any API key, unlike users_list, which needs an admin key.",
     "With project_id it searches the project's members. With issue_id it searches the members of the issue's project and the issue's author, assignee, watchers and journal users.",
-    'It matches names as Redmine shows them. Words match in any order, ignoring case and accents, and a word may be the start of one: "petrov ivan" and "Iv Pet" both find Ivan Petrov. Groups are never returned.',
+    'It matches names as Redmine shows them. Words match in any order, ignoring case and accents, and a word may be the start of one: "petrov ivan" and "Iv Pet" both find Ivan Petrov. Groups the key may see are left out.',
     'A "partial" match, such as "Ivan P." for "Ivan Petrov", may be someone else, and comes only when nothing matched better.',
     `Returns the best ${MAX_MATCHES} matches with their logins and counts the rest in more.`,
-    `Makes at most ${MAX_CALLS} calls: the issue, ${MEMBER_PAGES} pages of members, and for each match users_get, then groups_get for a watcher or assignee that users_get does not find. The SDK retries each call up to twice.`,
+    `Makes at most ${MAX_CALLS} calls: the issue, ${MEMBER_PAGES} pages of members, and for each match users_get, then groups_get for a watcher or assignee that users_get does not find. By default the SDK retries each call up to twice.`,
     "Returns {matches, more, unavailable}.",
   ].join(" "),
   input: z.strictObject({
@@ -288,17 +288,21 @@ const FOLDS: Readonly<Record<string, string>> = {
 /**
  * A name's words for matching: lower case, without accents or other marks, with letters such as ł and
  * ß spelled in Latin, split at anything but a letter or digit. An apostrophe joins, so "O'Neil" is
- * one word, and ', ’ and the Ukrainian ʼ are the same.
+ * one word, and ', ’, ´, ` and the Ukrainian ʼ are the same.
  */
 export function nameWords(text: string): string[] {
-  return text
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[łøßıđðħæœþ]/gu, (letter) => FOLDS[letter]!)
-    .replace(/['‘’ʼ]/gu, "")
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((word) => word !== "");
+  return (
+    text
+      // NFKD turns ´ into a space and an accent, so it becomes an apostrophe first.
+      .replaceAll("´", "'")
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replace(/[łøßıđðħæœþ]/gu, (letter) => FOLDS[letter]!)
+      .replace(/['‘’ʼ`]/gu, "")
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word !== "")
+  );
 }
 
 /**

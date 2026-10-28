@@ -78,7 +78,7 @@ describe("name matching", () => {
     expect(nameWords("Jean-Pierre  Dupont")).toEqual(["jean", "pierre", "dupont"]);
     expect(match("oneil", "Mary O'Neil")).toBe(1);
     expect(match("O’Neil", "Mary O'Neil")).toBe(1);
-    for (const query of ["Мар'яна", "Мар’яна", "Марʼяна", "маряна"]) {
+    for (const query of ["Мар'яна", "Мар’яна", "Марʼяна", "Мар´яна", "Мар`яна", "маряна"]) {
       for (const name of ["Мар'яна Коваль", "Мар’яна Коваль", "Марʼяна Коваль"]) {
         expect(match(query, name), `${query} in ${name}`).toBe(1);
       }
@@ -178,6 +178,7 @@ const ivan = { id: 7, name: "Ivan Petrov", login: "ipetrov" };
 const anna = { id: 8, name: "Anna Petrova", login: "apetrova" };
 const sidorov = { id: 9, name: "Ivan Sidorov", login: "isidorov" };
 const zaitsev = { id: 10, name: "Ivan Zaitsev", login: "izaitsev" };
+const abramov = { id: 11, name: "Ivan Abramov", login: "iabramov" };
 const adminov = { id: 1, name: "Ivan Adminov" };
 const gone = { id: 12, name: "Ivan Gone" };
 const petrovTeam = { id: 20, name: "Petrov team" };
@@ -245,8 +246,10 @@ describe("people_find", () => {
         member(3, ivan),
         member(4, ivanFans, "group"),
         member(5, jane),
+        // Ahead of everyone by name, but only a member.
+        member(6, abramov),
       ]),
-      ...users([ivan, sidorov, zaitsev]),
+      ...users([ivan, sidorov, zaitsev, abramov]),
     });
     const result = await callOk(client, "people_find", { name: "ivan", issue_id: 7 });
     const exact = { login: null, match: "exact" };
@@ -268,6 +271,7 @@ describe("people_find", () => {
           match: "exact",
           found_as: ["member", "watcher"],
         },
+        { id: 11, name: "Ivan Abramov", login: "iabramov", match: "exact", found_as: ["member"] },
         { id: 10, name: "Ivan Zaitsev", login: "izaitsev", match: "exact", found_as: ["member"] },
       ],
       more: 0,
@@ -279,7 +283,7 @@ describe("people_find", () => {
     ]);
     // An author and a journal user are users, so a 404 asks no groups_get.
     expect(sent(seen).slice(2).toSorted()).toEqual(
-      [1, 10, 12, 7, 9].map((id) => `GET /users/${id}.json`),
+      [1, 10, 11, 12, 7, 9].map((id) => `GET /users/${id}.json`),
     );
   });
 
@@ -560,7 +564,7 @@ describe("people_find", () => {
     const { tools } = await client.listTools();
     const description = tools.find((tool) => tool.name === "people_find")?.description;
     expect(description).toContain(`Makes at most ${MAX_CALLS} calls: `);
-    expect(description).toContain("The SDK retries each call up to twice");
+    expect(description).toContain("the SDK retries each call up to twice");
   });
 
   it("marks a locked user, which only an admin key learns", async () => {
