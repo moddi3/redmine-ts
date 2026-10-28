@@ -2,7 +2,7 @@ import { format } from "vite-plus/fmt";
 import { uploadKey } from "../src/core/op.ts";
 import { catalogFile } from "./catalog.ts";
 import { mergeCorrected } from "./corrections.ts";
-import { type Drift, type Merged } from "./merge.ts";
+import type { Drift, Merged } from "./merge.ts";
 import { analyzeOperations, type OpModel } from "./operations.ts";
 import { overlay as defaultOverlay, type Correction, type Overlay } from "./overlay.ts";
 import {

@@ -15,5 +15,5 @@ Upstream revisions can contain breaking fixes, so always pin an exact tag, never
 
 1. Run `spec/fetch.sh <tag>`, for example `spec/fetch.sh 7.1.0-r1`. To replace a revision of a version already vendored, delete the old file in the same change.
 2. Refresh the license if upstream changed it: `curl -sfL -o spec/redmine-openapi/LICENSE https://raw.githubusercontent.com/d-yoshi/redmine-openapi/<tag>/LICENSE`.
-3. In `packages/sdk`, run `vp run gen` and read the drift report it prints. If generation fails because a correction no longer changes the merged spec, upstream fixed those fields: remove them from the correction in `overlay.ts`.
+3. In `packages/sdk`, run `vp run gen` and read the drift report it prints. If generation fails because a correction no longer changes the merged spec, upstream fixed those fields: remove them from the correction in `overlay.ts`, and remove the correction once it lists none.
 4. Update the table above.

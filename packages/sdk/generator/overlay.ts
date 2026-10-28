@@ -83,7 +83,7 @@ const ISSUE_CHILD =
   "7.0.2-r1 moved the inline child shape into the recursive issue_child. Redmine 6.1 already renders nested children with id and subject (IssuesHelper#render_api_issue_children), so the 7.0 shape holds for both versions.";
 
 const ISSUE_ALWAYS_SET =
-  "Redmine's API templates skip each of these when it is nil, and Redmine never lets it be nil. Issue validates project and tracker on every save, and priority, status and author on create and on change, deleting a project deletes its issues, deleting a user moves the user's issues to Anonymous, and a tracker, status or priority in use cannot be deleted. Observed on 6.1 and 7.0: tests/contract/issues.test.ts.";
+  "Redmine's API templates skip each of these when it is nil, and Redmine never lets it be nil: Issue validates project and tracker on every save, and priority, status and author on create and on change; deleting a project deletes its issues; deleting a user moves the user's issues to Anonymous; and a tracker, status or priority in use cannot be deleted. Observed on 6.1 and 7.0: tests/contract/issues.test.ts.";
 const PARENT_ID =
   "The API templates write parent only together with its id. Observed on 6.1 and 7.0: tests/contract/issues.test.ts.";
 

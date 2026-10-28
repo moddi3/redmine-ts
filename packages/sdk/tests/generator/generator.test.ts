@@ -396,10 +396,10 @@ describe("spec corrections", () => {
   // The merge takes `required` from the latest spec, so once that spec has the fix, the correction does nothing.
   test("a property the latest spec already requires fails generation, while an older spec lacks it", async () => {
     const latestFixed = withSpecs((v) => {
-      v["7.0"]!.components.schemas.issue!.required!.push("author");
+      v["7.0"]!.components.schemas.issue!.required!.push("author", "project");
     });
     await expect(generate(latestFixed)).rejects.toThrow(
-      "requiring author at #/components/schemas/issue no longer changes the merged spec",
+      "requiring project at #/components/schemas/issue, author at #/components/schemas/issue no longer changes the merged spec",
     );
   });
 

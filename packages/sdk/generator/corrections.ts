@@ -26,17 +26,19 @@ export function mergeCorrected(
   // merge's rule.
   const output = ({ latest, ops }: Merged) => JSON.stringify([latest, ops]);
   const expected = output(merged);
-  for (const [i, { pointer, required }] of corrections.entries()) {
-    for (const key of required) {
+  const stale = corrections.flatMap(({ pointer, required }, i) =>
+    required.flatMap((key) => {
       const without = corrections.map((correction, j) =>
         j === i ? { ...correction, required: required.filter((k) => k !== key) } : correction,
       );
-      if (output(mergeSpecs(applyCorrections(specs, without), resolved)) === expected) {
-        throw new Error(
-          `overlay.corrections: requiring ${key} at ${pointer} no longer changes the merged spec; remove it from the correction`,
-        );
-      }
-    }
+      const unchanged = output(mergeSpecs(applyCorrections(specs, without), resolved)) === expected;
+      return unchanged ? [`${key} at ${pointer}`] : [];
+    }),
+  );
+  if (stale.length > 0) {
+    throw new Error(
+      `overlay.corrections: requiring ${stale.join(", ")} no longer changes the merged spec; remove them from the corrections`,
+    );
   }
   return merged;
 }
