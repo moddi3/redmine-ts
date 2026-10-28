@@ -11,6 +11,7 @@ import type { Route } from "./harness.ts";
 const WORKFLOW = [
   "issue_context",
   "reference_data",
+  "people_find",
   "issues_transition",
   "attachments_upload",
   "attachments_download",
@@ -101,6 +102,7 @@ describe("workflow tools in tools/list", () => {
       [
         "issue_context",
         "reference_data",
+        "people_find",
         "issues_transition",
         "attachments_upload",
         "attachments_download",
@@ -113,6 +115,7 @@ describe("workflow tools in tools/list", () => {
       [
         "issue_context",
         "reference_data",
+        "people_find",
         "issues_transition",
         "attachments_upload",
         "attachments_download",
@@ -122,7 +125,7 @@ describe("workflow tools in tools/list", () => {
     [
       "read-only",
       undefined,
-      ["issue_context", "reference_data", "attachments_download", "raw_request"],
+      ["issue_context", "reference_data", "people_find", "attachments_download", "raw_request"],
     ],
     ["full", dir, WORKFLOW],
     [
@@ -131,6 +134,7 @@ describe("workflow tools in tools/list", () => {
       [
         "issue_context",
         "reference_data",
+        "people_find",
         "attachments_download",
         "attachments_save",
         "raw_request",
@@ -166,6 +170,7 @@ describe("workflow tools in tools/list", () => {
     };
     expect(await hints("full", "issue_context")).toMatchObject(read);
     expect(await hints("full", "reference_data")).toMatchObject(read);
+    expect(await hints("full", "people_find")).toMatchObject(read);
     expect(await hints("full", "attachments_download")).toMatchObject(read);
     expect(await hints("full", "issues_transition")).toMatchObject({
       readOnlyHint: false,
