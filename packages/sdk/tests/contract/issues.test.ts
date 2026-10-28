@@ -1,6 +1,9 @@
 import { expect, it } from "vite-plus/test";
 import { RedmineError } from "../../src/index.ts";
-import { clientFor, cleanups, describeServers, freshProject, unique } from "./helpers.ts";
+import { clientFor, cleanups, describeServers, freshProject, sorted, unique } from "./helpers.ts";
+
+/** The spec leaves these optional, and overlay.corrections makes them required. */
+const ALWAYS_SET = ["project", "tracker", "status", "priority", "author"] as const;
 
 describeServers("issues", (server) => {
   const admin = clientFor(server);
@@ -30,8 +33,8 @@ describeServers("issues", (server) => {
     const issue = await admin.issues.get({ issue_id: created.id });
     expect(issue.subject).toBe(created.subject);
     expect(issue.description).toBe("line one\r\nline two");
-    expect(issue.project?.name).toBe("SDK Test");
-    expect(issue.author?.name).toBe("Redmine Admin");
+    expect(issue.project.name).toBe("SDK Test");
+    expect(issue.author.name).toBe("Redmine Admin");
     expect(issue.is_private).toBe(false);
     expect(issue.done_ratio).toBe(0);
 
@@ -60,7 +63,57 @@ describeServers("issues", (server) => {
     for (const status of issue.allowed_statuses) {
       expect(status).toMatchObject({ id: expect.any(Number), name: expect.any(String) });
     }
-    expect(issue.allowed_statuses.map((s) => s.id)).toContain(issue.status?.id);
+    expect(issue.allowed_statuses.map((s) => s.id)).toContain(issue.status.id);
+  });
+
+  it("get and list send project, tracker, status, priority and author on every issue, and parent with its id, also after the author is deleted", async () => {
+    const project = await freshProject(admin, cleanup, "always");
+    const login = unique("author");
+    const author = await admin.users.create({
+      login,
+      firstname: "Gone",
+      lastname: "Author",
+      mail: `${login}@example.net`,
+      password: "contract-pass-1",
+    });
+    cleanup.add(() => admin.users.delete({ user_id: author.id }));
+    const developer = (await admin.roles.list().all()).find((r) => r.name === "Developer");
+    if (!developer) throw new Error("the seeded server has no Developer role");
+    await admin.memberships.create({
+      project_id: project.id,
+      user_id: author.id,
+      role_ids: [developer.id],
+    });
+    const parent = await admin.issues.create({ project_id: project.id, subject: "parent" });
+    const child = await admin.issues.create(
+      { project_id: project.id, subject: "child", parent_issue_id: parent.id },
+      { as: login },
+    );
+    // Redmine moves a deleted user's issues to the anonymous user.
+    await admin.users.delete({ user_id: author.id });
+
+    const got = [
+      await admin.issues.get({ issue_id: parent.id }),
+      await admin.issues.get({ issue_id: child.id }),
+    ];
+    const listed = await admin.issues.list({ where: { project_id: project.id } }).all();
+    expect(sorted(listed.map((i) => i.id))).toEqual(sorted([parent.id, child.id]));
+
+    for (const issues of [got, listed]) {
+      for (const issue of issues) {
+        for (const key of ALWAYS_SET) {
+          expect(issue[key], `${key} of #${issue.id}`).toMatchObject({
+            id: expect.any(Number),
+            name: expect.any(String),
+          });
+        }
+      }
+      const byId = new Map(issues.map((i) => [i.id, i]));
+      expect(byId.get(parent.id)).not.toHaveProperty("parent");
+      expect(byId.get(child.id)?.parent).toEqual({ id: parent.id });
+      expect(byId.get(child.id)?.author).toMatchObject({ name: "Anonymous" });
+      expect(byId.get(child.id)?.author.id).not.toBe(author.id);
+    }
   });
 
   it("an update with notes adds a journal carrying them and the author", async () => {
