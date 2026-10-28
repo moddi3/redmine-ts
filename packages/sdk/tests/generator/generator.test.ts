@@ -6,7 +6,7 @@ import { overlay } from "../../generator/overlay.ts";
 import { loadSpecs, type SpecFile } from "../../generator/spec.ts";
 import { uploadKey } from "../../src/core/op.ts";
 import { ops } from "../../src/generated/ops.ts";
-import type { CustomField, Issue } from "../../src/generated/schemas.ts";
+import type { CustomField, IdName, Issue, IssueSummary } from "../../src/generated/schemas.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const specs = loadSpecs(resolve(root, "../../spec/redmine-openapi"));
@@ -371,5 +371,55 @@ describe("requiredness across versions", () => {
       details: Detail[];
     }>();
     expectTypeOf<Pick<Detail, "old_value">>().toEqualTypeOf<{ old_value: string | null }>();
+  });
+});
+
+describe("spec corrections", () => {
+  const always = ["project", "tracker", "status", "priority", "author"] as const;
+  type AlwaysSet = Pick<Issue, (typeof always)[number]>;
+
+  test("make the issue fields Redmine always sends required, in both issue schemas", () => {
+    expectTypeOf<AlwaysSet>().toEqualTypeOf<Required<AlwaysSet>>();
+    expectTypeOf<Pick<IssueSummary, keyof AlwaysSet>>().toEqualTypeOf<AlwaysSet>();
+    expectTypeOf<AlwaysSet["project"]>().toEqualTypeOf<IdName>();
+    expectTypeOf<NonNullable<Issue["parent"]>>().toEqualTypeOf<{ id: number }>();
+    expectTypeOf<NonNullable<IssueSummary["parent"]>>().toEqualTypeOf<{ id: number }>();
+    expect(generated.report.corrections).toBe(overlay.corrections);
+  });
+
+  test("leave the loaded specs as they are", () => {
+    for (const { doc } of specs) {
+      expect(doc.components.schemas.issue!.required).not.toContain("project");
+      expect(doc.components.schemas.issue!.properties!.parent!.required).toBeUndefined();
+    }
+  });
+
+  test("a correction stays while one vendored spec still needs it", async () => {
+    const half = withSpecs((v) => {
+      v["7.0"]!.components.schemas.issue!.required!.push(...always);
+    });
+    await expect(generate(half)).resolves.toBeDefined();
+  });
+
+  test("a correction that every vendored spec already has fails generation", async () => {
+    const fixed = withSpecs((v) => {
+      for (const doc of Object.values(v)) {
+        doc.components.schemas["issue.summary"]!.properties!.parent!.required = ["id"];
+      }
+    });
+    await expect(generate(fixed)).rejects.toThrow(
+      "every vendored spec already requires id at #/components/schemas/issue.summary/properties/parent",
+    );
+  });
+
+  test("a correction naming a missing schema or property fails generation", async () => {
+    const correct = (pointer: string, required: string[]) =>
+      generate(specs, { ...overlay, corrections: [{ pointer, required, reason: "test" }] });
+    await expect(correct("#/components/schemas/isue", ["project"])).rejects.toThrow(
+      "#/components/schemas/isue is not an object schema in 6.1.3-r1.yaml",
+    );
+    await expect(correct("#/components/schemas/issue", ["projects"])).rejects.toThrow(
+      "#/components/schemas/issue has no property projects in 6.1.3-r1.yaml",
+    );
   });
 });

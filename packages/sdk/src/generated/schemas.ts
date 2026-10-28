@@ -32,16 +32,16 @@ export interface Attachment {
 
 export interface IssueSummary {
   id: number;
-  project?: IdName;
-  tracker?: IdName;
-  status?: IssueStatusSummary;
-  priority?: IdName;
-  author?: IdName;
+  project: IdName;
+  tracker: IdName;
+  status: IssueStatusSummary;
+  priority: IdName;
+  author: IdName;
   assigned_to?: IdName;
   category?: IdName;
   fixed_version?: IdName;
   parent?: {
-    id?: number;
+    id: number;
   };
   subject: string;
   description: string | null;
@@ -99,16 +99,16 @@ export interface IssueChild {
 
 export interface Issue {
   id: number;
-  project?: IdName;
-  tracker?: IdName;
-  status?: IssueStatusSummary;
-  priority?: IdName;
-  author?: IdName;
+  project: IdName;
+  tracker: IdName;
+  status: IssueStatusSummary;
+  priority: IdName;
+  author: IdName;
   assigned_to?: IdName;
   category?: IdName;
   fixed_version?: IdName;
   parent?: {
-    id?: number;
+    id: number;
   };
   subject: string;
   description: string | null;
