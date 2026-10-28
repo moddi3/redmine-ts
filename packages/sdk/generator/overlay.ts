@@ -1,5 +1,6 @@
 // The only hand-written generator input. The generator checks that every key names a real tag,
-// operation, filter or conflict, so a spec update cannot leave a stale decision behind.
+// operation, filter or conflict, and that every correction still changes a spec, so a spec update
+// cannot leave a stale decision behind.
 
 import type { Safety } from "../src/core/op.ts";
 
@@ -62,10 +63,29 @@ export interface Overlay {
   stableTags: readonly string[];
   /** JSON pointer of a non-additive change -> why the latest shape is right. */
   resolved: Readonly<Record<string, string>>;
+  /**
+   * The only changes the generator makes to the vendored specs, until upstream fixes them. Each one adds
+   * properties to the `required` list of the schema at a JSON pointer, in every vendored spec, before the
+   * merge. Generation fails when the pointer or a property is missing from a spec, and when requiring a
+   * property no longer changes the merged spec, so an upstream fix forces its removal.
+   */
+  corrections: readonly Correction[];
+}
+
+export interface Correction {
+  pointer: string;
+  required: readonly string[];
+  /** Why Redmine always sends these properties, with the evidence. */
+  reason: string;
 }
 
 const ISSUE_CHILD =
   "7.0.2-r1 moved the inline child shape into the recursive issue_child. Redmine 6.1 already renders nested children with id and subject (IssuesHelper#render_api_issue_children), so the 7.0 shape holds for both versions.";
+
+const ISSUE_ALWAYS_SET =
+  "Redmine's API templates skip each of these when it is nil, and Redmine never lets it be nil: Issue validates project and tracker on every save, and priority, status and author on create and on change; deleting a project deletes its issues; deleting a user moves the user's issues to Anonymous; and a tracker, status or priority in use cannot be deleted. Observed on 6.1 and 7.0: tests/contract/issues.test.ts.";
+const PARENT_ID =
+  "The API templates write parent only together with its id. Observed on 6.1 and 7.0: tests/contract/issues.test.ts.";
 
 // Observed on 6.1 and 7.0: a list of two or more ids goes out in the long form, where Redmine compares
 // project_id with the values alone, and an identifier there matches nothing.
@@ -150,4 +170,26 @@ export const overlay: Overlay = {
     "#/components/schemas/issue/properties/children/items/properties/tracker": ISSUE_CHILD,
     "#/components/schemas/issue/properties/children/items/properties/subject": ISSUE_CHILD,
   },
+  corrections: [
+    {
+      pointer: "#/components/schemas/issue",
+      required: ["project", "tracker", "status", "priority", "author"],
+      reason: ISSUE_ALWAYS_SET,
+    },
+    {
+      pointer: "#/components/schemas/issue.summary",
+      required: ["project", "tracker", "status", "priority", "author"],
+      reason: ISSUE_ALWAYS_SET,
+    },
+    {
+      pointer: "#/components/schemas/issue/properties/parent",
+      required: ["id"],
+      reason: PARENT_ID,
+    },
+    {
+      pointer: "#/components/schemas/issue.summary/properties/parent",
+      required: ["id"],
+      reason: PARENT_ID,
+    },
+  ],
 };

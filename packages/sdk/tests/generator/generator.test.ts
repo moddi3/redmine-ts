@@ -6,7 +6,7 @@ import { overlay } from "../../generator/overlay.ts";
 import { loadSpecs, type SpecFile } from "../../generator/spec.ts";
 import { uploadKey } from "../../src/core/op.ts";
 import { ops } from "../../src/generated/ops.ts";
-import type { CustomField, Issue } from "../../src/generated/schemas.ts";
+import type { CustomField, IdName, Issue, IssueSummary } from "../../src/generated/schemas.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const specs = loadSpecs(resolve(root, "../../spec/redmine-openapi"));
@@ -371,5 +371,77 @@ describe("requiredness across versions", () => {
       details: Detail[];
     }>();
     expectTypeOf<Pick<Detail, "old_value">>().toEqualTypeOf<{ old_value: string | null }>();
+  });
+});
+
+describe("spec corrections", () => {
+  const always = ["project", "tracker", "status", "priority", "author"] as const;
+  type AlwaysSet = Pick<Issue, (typeof always)[number]>;
+
+  test("make the issue fields Redmine always sends required, in both issue schemas", () => {
+    expectTypeOf<AlwaysSet>().toEqualTypeOf<Required<AlwaysSet>>();
+    expectTypeOf<Pick<IssueSummary, keyof AlwaysSet>>().toEqualTypeOf<AlwaysSet>();
+    expectTypeOf<AlwaysSet["project"]>().toEqualTypeOf<IdName>();
+    expectTypeOf<NonNullable<Issue["parent"]>>().toEqualTypeOf<{ id: number }>();
+    expectTypeOf<NonNullable<IssueSummary["parent"]>>().toEqualTypeOf<{ id: number }>();
+  });
+
+  test("leave the loaded specs as they are", () => {
+    for (const { doc } of specs) {
+      expect(doc.components.schemas.issue!.required).not.toContain("project");
+      expect(doc.components.schemas.issue!.properties!.parent!.required).toBeUndefined();
+    }
+  });
+
+  // The merge takes `required` from the latest spec, so once that spec has the fix, the correction does nothing.
+  test("a property the latest spec already requires fails generation, while an older spec lacks it", async () => {
+    const latestFixed = withSpecs((v) => {
+      v["7.0"]!.components.schemas.issue!.required!.push("author", "project");
+    });
+    await expect(generate(latestFixed)).rejects.toThrow(
+      "requiring project at #/components/schemas/issue, author at #/components/schemas/issue no longer changes the merged spec",
+    );
+  });
+
+  test("a property every vendored spec already requires fails generation", async () => {
+    const fixed = withSpecs((v) => {
+      for (const doc of Object.values(v)) {
+        doc.components.schemas["issue.summary"]!.properties!.parent!.required = ["id"];
+      }
+    });
+    await expect(generate(fixed)).rejects.toThrow(
+      "requiring id at #/components/schemas/issue.summary/properties/parent no longer changes the merged spec",
+    );
+  });
+
+  test("an older spec that already has the fix changes nothing", async () => {
+    const olderFixed = withSpecs((v) => {
+      v["6.1"]!.components.schemas.issue!.required!.push(...always);
+    });
+    expect((await generate(olderFixed)).files).toEqual(generated.files);
+  });
+
+  test("a correction naming a missing schema or property, or listing none or one twice, fails generation", async () => {
+    const correct = (...corrections: { pointer: string; required: string[] }[]) =>
+      generate(specs, {
+        ...overlay,
+        corrections: corrections.map((c) => ({ ...c, reason: "test" })),
+      });
+    const issue = "#/components/schemas/issue";
+    await expect(
+      correct({ pointer: "#/components/schemas/isue", required: ["project"] }),
+    ).rejects.toThrow("#/components/schemas/isue is not an object schema in 6.1.3-r1.yaml");
+    await expect(correct({ pointer: issue, required: ["projects"] })).rejects.toThrow(
+      `${issue} has no property projects in 6.1.3-r1.yaml`,
+    );
+    await expect(correct({ pointer: issue, required: ["constructor"] })).rejects.toThrow(
+      `${issue} has no property constructor in 6.1.3-r1.yaml`,
+    );
+    await expect(correct({ pointer: issue, required: [] })).rejects.toThrow(
+      `${issue} lists no property`,
+    );
+    await expect(
+      correct({ pointer: issue, required: ["project"] }, { pointer: issue, required: ["project"] }),
+    ).rejects.toThrow(`project at ${issue} is listed twice`);
   });
 });
