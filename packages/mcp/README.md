@@ -118,19 +118,29 @@ An `@login` mention needs the person's login. `users_list` would find it by name
 - With `project_id`, the project's members.
 - With `issue_id`, the members of the issue's project, and the issue's author, assignee, watchers, and the users of its journals.
 
-Each match comes as `{id, name, login, found_as}`. `name` is as Redmine shows it, in the users display format set under **Administration**, **Settings**, **Display**. `found_as` lists where the name was found: `member`, `author`, `assignee`, `watcher`, or `journal`. A person on the issue without `member` is not a member of its project now, such as an admin or someone who left.
+Each match comes as `{id, name, login, match, found_as}`. `name` is as Redmine shows it, in the users display format set under **Administration**, **Settings**, **Display**. `found_as` lists where the name was found: `member`, `author`, `assignee`, `watcher`, or `journal`. A person on the issue without `member` is not a member of its project now, such as an admin or someone who left.
 
-Matching works on words. Case, accents, and other marks do not count, so `семен` finds Семён and `jose` finds José. Punctuation splits words, except an apostrophe. Each word of `name` pairs with a different word of the person's name, in any order, so `petrov ivan` finds Ivan Petrov. A word may be the start of one, so `Iv Pet` finds him too, but `van` does not. A `name` with more words finds a person when it holds a start of each word of their name, so `Ivan Ivanovich Petrov` finds Ivan Petrov, and `Ivan Petrov` finds someone that Redmine shows as Ivan P. A Latin spelling does not find a name in Cyrillic, or the other way round. A name in a script without spaces matches only from its start.
+Matching works on words. Case, accents, and other marks do not count, so `семен` finds Семён and `jose` finds José. Letters with no mark to drop are spelled in Latin, so `lukasz` finds Łukasz and `strauss` finds Strauß. Punctuation splits words, except an apostrophe, and `'`, `’`, and `ʼ` are the same. Each word of `name` pairs with a different word of the person's name, in any order, so `petrov ivan` finds Ivan Petrov. A word may be the start of one, so `Iv Pet` finds him too, but `van` does not. A Latin spelling does not find a name in Cyrillic, or the other way round. A name in a script without spaces matches only from its start.
 
-The best matches come first: the same words, then whole words of a longer name, then starts of words, then a longer `name`. People on the issue come before the other members, and ties go by name.
+`match` says how the person matched:
 
-Groups are never matched, because a mention names a user. A user who is a member only through a group is matched, because Redmine gives each user of a member group a membership of their own.
+- `exact`: each word of `name` is a whole word of the person's name, as `Petrov` for Ivan Petrov.
+- `prefix`: each word of `name` is a whole word or the start of one, as `Iv Pet` for Ivan Petrov.
+- `partial`: the name as Redmine shows it holds less than `name`. Each of its words is a word of `name` or the initial of one, so `Ivan Petrov` finds someone shown as Ivan P., I. Petrov, or Ivan, and `Ivan Ivanovich Petrov` finds Ivan Petrov. When the shown name has as many words as `name`, a word of `name` may also start one of them, so `Iv Petrov` finds Ivan P.
 
-`people_find` reads the issue once, at most 5 pages of members, which is 500 members, and calls `users_get` for each match it returns. It returns at most 10 matches, so it sends at most 16 requests. `more` counts the matches after the first 10. In a project of more than 500 members, `unavailable` says that the rest were not searched, and `memberships_list` pages through all of them.
+A partial match may be someone else, so `people_find` returns partial matches only when nothing matched better. The best matches come first: the same words, then whole words of a longer name, then starts of words, then partial matches. People on the issue come before the other members, and ties go by name.
+
+`people_find` matches the names that Redmine shows. Under the `username` display format, Redmine shows logins, so search by login. Under `lastnamefirstname`, Redmine runs the last and first name together, so search by the last name or its start.
+
+Groups are never returned, because a mention names a user. A user who is a member only through a group is matched, because Redmine gives each user of a member group a membership of their own. An issue may be assigned to a group, and a group may watch it without being a member. `users_get` answers 404 for a group, so for a watcher or assignee that `users_get` does not find, `people_find` calls `groups_get` and drops the group. A group the key may not see stays, with `login: null`.
+
+`people_find` makes at most 26 calls: the issue, at most 5 pages of members, which is 500 members, and for each match it returns, `users_get`, then `groups_get` for a watcher or assignee that `users_get` does not find. The SDK retries each call up to twice on a 429, a 502, 503, or 504, a network error, or a timeout, so `people_find` sends at most 78 requests. It returns at most 10 matches, and `more` counts the matches after the first 10. A group among the first 10 is dropped after its lookup, so fewer than 10 can come back while `more` is above 0. In a project of more than 500 members, `unavailable` says that the rest were not searched, and `memberships_list` pages through all of them.
 
 `users_get` returns the login to any key that may see the user. A key that is not an admin's sees only active users, and, depending on its roles, only users in the projects it can see. For a user the key may not see, `login` is `null`, and `unavailable` names the user's id. Redmine resolves a mention from that key to the same users, so the mention would not reach them either. With an admin key, a locked user comes with `locked: true`, because Redmine notifies no locked user of a mention.
 
-A key whose role may not view watchers gets no watchers, and `unavailable` says so. When the key may not read the members of the issue's project, `people_find` searches the issue's people alone and says so in `unavailable`. With `project_id`, that is an error.
+Redmine shows the issues and journals of a deleted user as its Anonymous user's, which has no login. `people_find` returns the Anonymous user with `login: null`, and `unavailable` says why. A key that is not an admin's gets 404 from `users_get` for it, as for a user it may not see.
+
+A key whose role may not view watchers gets no watchers, and `unavailable` says so. When the key may not read the members of the issue's project, `people_find` searches the issue's people alone and says so in `unavailable`. When a page of members after the first fails, it searches the members read before that page, and `unavailable` says how many. With `project_id`, a failed first page is an error.
 
 ### Files
 
@@ -159,7 +169,7 @@ Every tool has a `title` and all four hints, set from its HTTP method:
 
 An update counts as destructive because it overwrites data that exists. `openWorldHint` is `false` because the tools reach only your Redmine instance.
 
-Inputs take ids, not names. `reference_data` maps the common names to ids in one call. A tool's description also names where to find each id it takes, such as `people_find` for `user_id`.
+Inputs take ids, not names. `reference_data` maps the common names to ids in one call. A tool's description also names where to find each id it takes. For `user_id` that is `people_find`, which finds only a project's members and an issue's people. Where it cannot find the user, the description names `users_list`: on the tools that need an admin key, and on `memberships_create`, which adds someone who is not a member yet.
 
 ### Filters
 
@@ -200,7 +210,7 @@ A failed Redmine request comes back as a tool result with `isError: true`, never
 
 ### Tools that need an admin key
 
-Redmine answers 403 to every key but an admin's on these tools, because their actions in Redmine 6.1 and 7.0 run `require_admin` first: `users_list`, `users_create`, `users_update`, `users_delete`, `groups_list`, `groups_create`, `groups_update`, `groups_delete`, `groups_add_user`, `groups_remove_user`, `groups_remove_users`, `custom_fields_list`, `projects_archive`, and `projects_unarchive`. Their descriptions and their 403 errors say "Needs an admin key". Where something works without one, they name it:
+Redmine answers 403 to every key but an admin's on these tools, because their actions in Redmine 6.1 and 7.0 run `require_admin` first: `users_list`, `users_create`, `users_update`, `users_delete`, `groups_list`, `groups_create`, `groups_update`, `groups_delete`, `groups_add_user`, `groups_remove_user`, `groups_remove_users`, `custom_fields_list`, `projects_archive`, and `projects_unarchive`. Their descriptions say "Needs an admin key". Their 403 errors say that the tool needs an admin key or that the REST API is disabled, because with the REST API off Redmine answers 403 to every key, an admin's too. Where something works without an admin key, both name it:
 
 - `users_list`: `people_find`, or `memberships_list` and then `users_get`.
 - `users_update`: `my_account_update`, for the key's own account.
