@@ -152,7 +152,7 @@ const outIssueSummary: JsonSchema = {
     assigned_to: outIdName,
     category: outIdName,
     fixed_version: outIdName,
-    parent: { type: "object", properties: { id: { type: "integer" } } },
+    parent: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] },
     subject: { type: "string" },
     description: { type: ["string", "null"] },
     start_date: { type: ["string", "null"], format: "date" },
@@ -208,6 +208,11 @@ const outIssueSummary: JsonSchema = {
     "created_on",
     "updated_on",
     "closed_on",
+    "project",
+    "tracker",
+    "status",
+    "priority",
+    "author",
   ],
 };
 
@@ -273,7 +278,7 @@ const outIssue: JsonSchema = {
     assigned_to: outIdName,
     category: outIdName,
     fixed_version: outIdName,
-    parent: { type: "object", properties: { id: { type: "integer" } } },
+    parent: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] },
     subject: { type: "string" },
     description: { type: ["string", "null"] },
     start_date: { type: ["string", "null"], format: "date" },
@@ -373,6 +378,11 @@ const outIssue: JsonSchema = {
     "created_on",
     "updated_on",
     "closed_on",
+    "project",
+    "tracker",
+    "status",
+    "priority",
+    "author",
   ],
 };
 

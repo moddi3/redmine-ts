@@ -64,7 +64,13 @@ export interface ToolSpec {
   readonly name: string;
   readonly title: string;
   readonly description: string;
+  /** Checks every call, and is what tools/list shows unless listedInputSchema is set. */
   readonly inputSchema: Schema;
+  /**
+   * What tools/list shows in place of inputSchema. List tools show one loose condition for every filter
+   * in `where`, and a table of the filters in its description, because a schema per filter is too large.
+   */
+  readonly listedInputSchema?: Schema;
   readonly outputSchema: Schema;
   readonly annotations: Annotations;
   readonly tier: Tier;

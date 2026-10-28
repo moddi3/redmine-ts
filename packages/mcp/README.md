@@ -76,7 +76,7 @@ Cursor, in `.cursor/mcp.json` or `~/.cursor/mcp.json`:
 
 The server name, `redmine` above, is the prefix clients put in front of the tool names, so the tools themselves carry no `redmine_` prefix.
 
-Tool schemas are JSON Schema draft 2020-12 with one `type` per schema. A value that may be `null` is an `anyOf` with a `{ "type": "null" }` branch, not `"type": ["string", "null"]`, so clients that map tool schemas onto a dialect with one type per schema, such as Gemini's function declarations, can read them.
+Tool schemas are JSON Schema draft 2020-12 with one `type` per schema. A value that may be `null` is an `anyOf` with a `{ "type": "null" }` branch, not `"type": ["string", "null"]`, so clients that map tool schemas onto a dialect with one type per schema, such as Gemini's function declarations, can read them. They use no `$ref`. Each input schema in `tools/list` is under 5,000 bytes of compact JSON, because Codex strips the descriptions from a larger one.
 
 ## Connect claude.ai and ChatGPT
 
@@ -179,7 +179,18 @@ List tools filter with `where`, keyed by Redmine's filter names, such as `status
 { "where": { "status_id": "open", "assigned_to_id": "me", "tracker_id": [1, 2] } }
 ```
 
-An object with one operator picks another comparison: `{ "not": 3 }`, `{ "gte": "2026-10-01" }`, `{ "lte": 5 }`, `{ "between": [1, 10] }`, `{ "contains": "crash" }`, `{ "any": true }`, or `{ "none": true }`. Each filter accepts only the operators Redmine documents for it, and its description in the input schema lists them. `{ "raw": "<t-30" }` sends Redmine's own syntax unchanged, for relative dates and other rare cases. An unknown filter or an operator the filter does not take is refused before any request, with the forms the filter accepts.
+An object with one operator picks another comparison: `{ "not": 3 }`, `{ "gte": "2026-10-01" }`, `{ "lte": 5 }`, `{ "between": [1, 10] }`, `{ "contains": "crash" }`, `{ "any": true }`, or `{ "none": true }`. Each filter accepts only the operators Redmine documents for it. `{ "raw": "<t-30" }` sends Redmine's own syntax unchanged, for relative dates and other rare cases. An unknown filter or an operator the filter does not take is refused before any request, with the forms the filter accepts.
+
+In `tools/list`, `where` has one loose condition for every filter, and its description lists the filters in a table. Each line gives a filter, its value, and what it filters, under the operators it takes:
+
+```text
+Takes not, any, none:
+assigned_to_id | id, `me` for current user | assignee
+Takes gte, lte, between, any, none:
+created_on | date | creation date
+```
+
+A schema for each filter made the input schema of `issues_list` 48K characters. With the table it is under 5,000 bytes. The server still checks each call against the forms of each filter.
 
 ### Pages
 
@@ -206,7 +217,7 @@ A failed Redmine request comes back as a tool result with `isError: true`, never
 - A 422 carries Redmine's own messages, such as `Subject cannot be blank`, in the user's language.
 - A 404 says to check the ids.
 - A 403 from a [tool that needs an admin key](#tools-that-need-an-admin-key) says so, and names what works without one.
-- Input that does not match the schema is refused before any request. For a bad filter, the message lists the forms the filter accepts.
+- Input that does not match the tool's schema, or a filter form that the filter does not take, is refused before any request. For a bad filter, the message lists the forms the filter accepts.
 
 ### Tools that need an admin key
 

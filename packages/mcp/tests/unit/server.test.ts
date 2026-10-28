@@ -221,19 +221,16 @@ describe("tools/list", () => {
     const { client } = await server();
     const { tools } = await client.listTools();
     const where = tools.find((tool) => tool.name === "issues_list")?.inputSchema.properties
-      ?.where as {
-      properties: Record<string, { description: string }>;
-      patternProperties: Record<string, { description: string }>;
-    };
-    const filters = [...Object.values(where.properties), ...Object.values(where.patternProperties)];
-    for (const { description } of filters) {
-      expect(description).not.toMatch(/Operators:|Examples:|Format:/);
-    }
-    expect(where.properties.tracker_id?.description).not.toContain("`!3`");
-    expect(where.properties.tracker_id?.description).toContain("{not: value or array}");
-    expect(where.properties.tracker_id?.description).not.toContain("{gte");
-    expect(where.properties.status_id?.description).toContain('"open", "closed", "any"');
-    expect(where.properties.updated_on?.description).toContain("{between: [from, to]}");
+      ?.where as { description: string };
+    const lines = where.description.split("\n");
+    const row = (name: string) => lines.findIndex((line) => line.startsWith(`${name} | `));
+    const takes = (name: string) =>
+      lines.findLast((line, at) => at < row(name) && line.startsWith("Takes "));
+    expect(where.description).not.toMatch(/Operators:|Examples:|Format:|`!3`|`>=/);
+    expect(where.description).toContain("{not: value or array}");
+    expect(takes("tracker_id")).toBe("Takes not:");
+    expect(lines[row("status_id")]).toContain("`open`, `closed`, `any`");
+    expect(takes("updated_on")).toContain("between");
   });
 
   it("writes descriptions under 1000 characters that name the result shape", async () => {

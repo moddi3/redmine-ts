@@ -105,6 +105,37 @@ describeServers("generated tools", (server) => {
     expect(lastJson(gone)).toMatchObject({ kind: "not_found" });
   });
 
+  it("reads a subtask with issues_get and issues_list within outputSchemas that require its references and parent id", async () => {
+    const issue = {
+      required: expect.arrayContaining(["project", "tracker", "status", "priority", "author"]),
+      properties: { parent: { required: ["id"] } },
+    };
+    const outputOf = (name: string) => tools.find((tool) => tool.name === name)?.outputSchema;
+    expect(outputOf("issues_get")).toMatchObject(issue);
+    expect(outputOf("issues_list")).toMatchObject({ properties: { items: { items: issue } } });
+
+    const marker = `mcp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const parent = await ok("issues_create", {
+      project_id: server.projectIdentifier,
+      subject: `MCP parent ${marker}`,
+    });
+    created.push(parent.id as number);
+    const child = await ok("issues_create", {
+      project_id: server.projectIdentifier,
+      subject: `MCP subtask ${marker}`,
+      parent_issue_id: parent.id,
+    });
+    created.push(child.id as number);
+
+    expect(await ok("issues_get", { issue_id: child.id })).toMatchObject({
+      parent: { id: parent.id },
+    });
+    const page = await ok("issues_list", { where: { parent_id: parent.id as number } });
+    expect(page.items).toEqual([
+      expect.objectContaining({ id: child.id, parent: { id: parent.id } }),
+    ]);
+  });
+
   it("answers every list tool that needs no input within its outputSchema, concise and detailed", async () => {
     const lists = tools.filter(
       (tool) => tool.name.includes("_list") && (tool.inputSchema.required ?? []).length === 0,
