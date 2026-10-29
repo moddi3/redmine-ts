@@ -53,7 +53,11 @@ try {
   }
   const diagnostics = parseDiagnostics(output.slice(output.indexOf("{")));
   for (const fixture of sources) {
-    const got = new Set(diagnostics.filter((d) => d.file === fixture.copy).map((d) => d.rule));
+    const got = new Set(
+      diagnostics
+        .filter((d) => d.file === fixture.copy && d.severity === "error")
+        .map((d) => d.rule),
+    );
     const missing = fixture.expected.filter((rule) => !got.has(rule));
     console.log(
       `${missing.length === 0 ? "rejected" : "PASSED  "}\t${fixture.name}\t${[...got].sort().join(" ")}`,
