@@ -6,6 +6,7 @@
 import type { Issue } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
+import { roundHours } from "../hours.ts";
 import type { Client, ToolSpec } from "../tools.ts";
 import { UNTRUSTED } from "../user-text.ts";
 import { clip, journalRest, TEXT_CAP } from "./clip.ts";
@@ -217,7 +218,7 @@ async function issueContext(
   );
   const { description } = issue;
   return {
-    issue: {
+    issue: roundHours({
       ...fields,
       id: issue.id,
       subject: issue.subject,
@@ -225,7 +226,7 @@ async function issueContext(
         description === null
           ? null
           : clip(description, TEXT_CAP, `Call issues_get with issue_id ${issue.id} for all of it.`),
-    },
+    }),
     allowed_statuses: (issue.allowed_statuses ?? []).map(({ id, name, is_closed }) => ({
       id,
       name,

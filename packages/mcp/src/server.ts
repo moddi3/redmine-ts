@@ -15,7 +15,14 @@ import type { Access, RedmineConfig, RedmineVersion } from "@redmine-ts/sdk";
 import pkg from "../package.json" with { type: "json" };
 import { redactor } from "./api-keys.ts";
 import type { Redact } from "./api-keys.ts";
-import { BY_METHOD, catalogTools, DEFAULT_LIMIT, HEAVY_KEYS, MAX_LIMIT } from "./catalog-tools.ts";
+import {
+  BY_METHOD,
+  catalogTools,
+  DEFAULT_LIMIT,
+  HEAVY_KEYS,
+  MAX_LIMIT,
+  SHORT_ISSUE,
+} from "./catalog-tools.ts";
 import { ISSUE_TEMPLATE, readIssue } from "./resources.ts";
 import { isListed } from "./tools.ts";
 import type {
@@ -284,7 +291,7 @@ function instructions(access: Access, version: RedmineVersion | undefined): stri
     "issues_transition changes a status by name and lists the allowed ones when refused. attachments_upload and attachments_download carry files. raw_request reaches plugin endpoints and fields the typed tools miss.",
     'people_find returns the id and login of people by name in a project or an issue, for any key. Tools whose description says "Needs an admin key", such as users_list, answer 403 to other keys.',
     'Filters go in `where`, keyed by Redmine filter name. A value or an array means equals any of them. The description of `where` lists each filter with its value and which of {not}, {gte}, {lte}, {between: [a, b]}, {contains}, {any: true}, {none: true} it accepts, and {raw: "..."} takes Redmine filter syntax. status_id also takes "open", "closed" and "any".',
-    `List tools return {items, total_count, offset, limit, next_offset}. limit is ${DEFAULT_LIMIT} by default, at most ${MAX_LIMIT}. Call again with offset = next_offset until it is null. Items leave out ${HEAVY_KEYS.join(", ")} unless detailed is true; the get tool returns one record in full.`,
+    `List tools return {items, total_count, offset, limit, next_offset}. limit is ${DEFAULT_LIMIT} by default, at most ${MAX_LIMIT}. Call again with offset = next_offset until it is null. issues_list items carry only ${SHORT_ISSUE.join(", ")}, and fields adds others. Items of other lists leave out ${HEAVY_KEYS.join(", ")}. detailed: true returns every field, and the get tool returns one record in full.`,
     "Errors come back as tool results with isError and the error as JSON. A 422 carries Redmine's own messages; fix the named fields and retry.",
   ].join("\n");
 }
