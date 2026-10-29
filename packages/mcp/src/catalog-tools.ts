@@ -537,9 +537,7 @@ function describeTool(entry: CatalogEntry, adminOnly: string | undefined): strin
     clip(entry.description, 300),
     effect,
     returns,
-    output.kind === "list"
-      ? "A page stops before limit at the server's result budget, with next_offset at the first item left out."
-      : "",
+    output.kind === "list" ? "A large page may end before limit; follow next_offset." : "",
     ids.length > 0 ? `Ids, not names: ${ids.join(", ")}.` : "",
     entry.id === "createMembership"
       ? "people_find searches only a project's members and an issue's people, so it does not find a user who is not a member yet."

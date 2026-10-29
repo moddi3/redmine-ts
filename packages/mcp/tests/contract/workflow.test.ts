@@ -263,7 +263,9 @@ describeServers("workflow tools", (server) => {
       });
       pages.push(page);
       before = page.journals_before;
-    } while (before !== null);
+      // Each page holds a journal, so 30 pages reach the oldest.
+    } while (before !== null && pages.length < 30);
+    expect(before).toBeNull();
     expect(pages.length).toBeGreaterThan(1);
     const read = pages.toReversed().flatMap((page) => page.journals.map((journal) => journal.id));
     expect(read).toEqual(ids);

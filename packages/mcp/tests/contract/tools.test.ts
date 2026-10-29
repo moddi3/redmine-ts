@@ -153,7 +153,8 @@ describeServers("generated tools", (server) => {
     const small = await connectTo(server, "full", { maxResultBytes: 2_000 });
     const read: number[] = [];
     let offset: number | null = 0;
-    while (offset !== null) {
+    // Each page holds an item, so 5 pages reach the end.
+    while (offset !== null && read.length < 5) {
       const result = await small.callTool({
         name: "issues_list",
         arguments: { where, limit: 100, offset },

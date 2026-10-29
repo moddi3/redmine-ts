@@ -63,7 +63,8 @@ describe("a list page under the result budget", () => {
     await callOk(client, "issues_list", { limit: 20 });
     const pages: Page[] = [];
     let offset: number | null = 0;
-    while (offset !== null) {
+    // Each page holds an item, so 20 pages reach the end.
+    while (offset !== null && pages.length < 20) {
       const result = await client.callTool({
         name: "issues_list",
         arguments: { limit: 20, offset },
@@ -74,6 +75,7 @@ describe("a list page under the result budget", () => {
       pages.push(page);
       offset = page.next_offset;
     }
+    expect(offset).toBeNull();
     expect(pages.length).toBeGreaterThan(2);
     pages.forEach((page, at) => {
       expect(bytes(page)).toBeLessThanOrEqual(2_000);

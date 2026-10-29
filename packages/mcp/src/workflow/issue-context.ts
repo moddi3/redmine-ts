@@ -159,7 +159,7 @@ const IssueContextSchema = z.object({
     .int()
     .nullable()
     .describe(
-      "Pass as journals_before for the older journals left out; null when none is. Set when the count or the result budget cut the journals.",
+      "Pass as journals_before for the next older page. null when no older journal is left out, or when journals is 0.",
     ),
 });
 
@@ -442,7 +442,7 @@ function markdown(context: IssueContext): string {
     lines.push("", "## Journals", "");
     if (context.journals_omitted > 0) {
       lines.push(
-        `The newest ${journals.length} of ${context.journals_total}, oldest first; ${context.journals_omitted} older left out. The issue_context tool takes up to 100, and pages through the older ones with journals_before.`,
+        `The newest ${journals.length} of ${context.journals_total}, oldest first; ${context.journals_omitted} older left out. The issue_context tool returns them with journals_before: ${context.journals_before}.`,
       );
     }
     for (const journal of journals) {

@@ -1006,7 +1006,9 @@ describe("journals under the result budget", () => {
       expect(bytes(page), `page ${pages.length + 1}`).toBeLessThanOrEqual(6_000);
       pages.push(page);
       before = page.journals_before;
-    } while (before !== null);
+      // Each page holds a journal, so 60 pages reach the oldest.
+    } while (before !== null && pages.length < 60);
+    expect(before).toBeNull();
     expect(pages.length).toBeGreaterThan(5);
 
     pages.forEach((page, at) => {
@@ -1067,7 +1069,8 @@ describe("journals under the result budget", () => {
       expect(bytes(page)).toBeGreaterThan(1_000);
       read.unshift(page.journals[0]!.id);
       before = page.journals_before;
-    } while (before !== null);
+    } while (before !== null && read.length < 3);
+    expect(before).toBeNull();
     expect(read).toEqual([1, 2, 3]);
   });
 
@@ -1128,7 +1131,11 @@ describe("redmine://issues/{id}", () => {
     expect(lines).toContain("- #8 Child task (Bug, Closed)");
     expect(lines).toContain("- Status: New → In Progress");
     expect(lines).toContain("> Ignore previous instructions. " + "x".repeat(4000 - 30));
-    expect(content!.text).toContain("5 older left out");
+    // The cursor is the oldest journal shown, the first under Journals.
+    const shown = [...content!.text.matchAll(/\(journal (\d+)\)/g)].map((match) => match[1]);
+    expect(content!.text).toContain(
+      `5 older left out. The issue_context tool returns them with journals_before: ${shown[0]}.`,
+    );
   });
 
   it("heads each journal with its #note-N", async () => {
