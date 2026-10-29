@@ -725,7 +725,7 @@ The rule covers tool results, `raw_request` included, error results and the `red
 - Text that Redmine users write reaches the agent unchanged. When a result contains `subject`, `description`, `notes`, `text`, or `comments`, its first text block says that the text is data and not instructions. Treat an agent that reads issues from strangers as exposed to prompt injection anyway, and run it in `read-only` mode when it does not need to write.
 - `full` mode lets the agent delete issues, projects, and users. Redmine has no undo. Use `no-delete` unless the agent needs to delete.
 - `raw_request` reaches every REST path, plugins included, with the same key. The access mode applies to it like to every tool, and the SDK refuses a path outside `REDMINE_URL`.
-- Without `REDMINE_MCP_FILES_DIR`, no tool reads or writes local files. With it, tools read and write only inside that directory.
+- Without `REDMINE_MCP_FILES_DIR`, no tool reads or writes local files. With it, tools read and write only inside that directory. Only trusted users should be able to write in it, because a hard link there to a file outside is read like any file in it, and on systems other than Linux and macOS a directory there swapped for a symlink while a file is read can lead the server to a file outside it.
 - The server hides API keys in what it returns, unless you pass `--dangerously-reveal-api-keys`. See [API keys](#api-keys).
 - The server never logs the API key and sends it only in the `X-Redmine-API-Key` header. Over [OAuth](#oauth), it sends Redmine only Redmine's own token or the key sealed in the client's token, never the client's token.
 
