@@ -1,0 +1,6 @@
+fix(sdk): retry 503 on GET only
+
+# Generated with [Claude Code](https://claude.com/claude-code)
+# ------------------------ >8 ------------------------
+# Do not modify or remove the line above.
+Co-Authored-By: Claude <noreply@anthropic.com>
