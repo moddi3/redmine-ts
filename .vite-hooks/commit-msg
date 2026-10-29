@@ -11,3 +11,8 @@ if ! printf '%s\n' "$subject" | grep -Eq "$pattern"; then
   echo "Types: feat fix docs style refactor perf test build ci chore revert." >&2
   exit 1
 fi
+# Commits carry no AI credits. Agents add these trailers by habit even when settings turn them off.
+if grep -Eiq '^(co-authored-by:.*(claude|anthropic|codex|openai|cursor|copilot)|.*generated with \[?claude)' "$1"; then
+  echo "commit-msg: remove the AI credit line; commits in this repo carry no Co-Authored-By or Generated-with lines for agents." >&2
+  exit 1
+fi
