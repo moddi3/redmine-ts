@@ -50,7 +50,7 @@ describeServers("people_find", (server) => {
     expect(result.isError, texts(result).join("\n")).toBeFalsy();
     const validate = ajv.compile(tools.find((tool) => tool.name === "people_find")!.outputSchema!);
     expect(validate(result.structuredContent) ? [] : validate.errors).toEqual([]);
-    return result.structuredContent as unknown as People;
+    return result.structuredContent as People;
   }
 
   async function person(key: string, firstname: string, lastname: string): Promise<User> {
@@ -111,7 +111,7 @@ describeServers("people_find", (server) => {
     await sdk.issues.update({ issue_id: issue.id, notes: "Before leaving." }, { as: leaver.login });
     await sdk.users.delete({ user_id: leaver.id });
     const { journals } = await sdk.issues.get({ issue_id: issue.id, include: ["journals"] });
-    anonymous = journals!.find((journal) => journal.notes === "Before leaving.")!.user!;
+    anonymous = journals.find((journal) => journal.notes === "Before leaving.")!.user!;
 
     user = await connectTo(server, "full", { apiKey: server.userKey });
     admin = await connectTo(server);

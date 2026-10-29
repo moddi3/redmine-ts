@@ -75,7 +75,7 @@ describeServers("issues.transition", (server) => {
     const { status } = await admin.issues.get({ issue_id: issue.id });
     const before = seen.requests().length;
 
-    await admin.issues.transition({ issue_id: issue.id, status_id: status!.id });
+    await admin.issues.transition({ issue_id: issue.id, status_id: status.id });
 
     expect(writes(before)).toEqual([]);
     expect(

@@ -53,7 +53,7 @@ const ANY_BY_DEFAULT = new Set(["items", "additionalProperties"]);
  * require a type cannot read it.
  */
 export function portable(schema: Schema): Schema {
-  return rewrite(schema as Node) as Schema;
+  return rewrite(schema as Node);
 }
 
 function rewrite(node: Node): Node {

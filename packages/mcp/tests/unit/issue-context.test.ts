@@ -988,8 +988,7 @@ describe("journals under the result budget", () => {
     client: Awaited<ReturnType<typeof serve>>["client"],
     args: Record<string, unknown>,
   ) =>
-    (await callOk(client, "issue_context", { issue_id: 7, ...args }))
-      .structuredContent as unknown as Context;
+    (await callOk(client, "issue_context", { issue_id: 7, ...args })).structuredContent as Context;
 
   it("stops adding journals at the budget, and journals_before pages to the oldest with none lost or repeated", async () => {
     const { client } = await serve(withJournals(SIXTY), {}, { maxResultBytes: 6_000 });
@@ -1002,7 +1001,7 @@ describe("journals under the result budget", () => {
         name: "issue_context",
         arguments: { issue_id: 7, journals: 100, journals_before: before ?? undefined },
       });
-      const page = result.structuredContent as unknown as Context;
+      const page = result.structuredContent as Context;
       expect(bytes(page), `page ${pages.length + 1}`).toBeLessThanOrEqual(6_000);
       pages.push(page);
       before = page.journals_before;

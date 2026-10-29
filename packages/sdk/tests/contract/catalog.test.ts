@@ -27,7 +27,7 @@ async function probe<I, R>(
   const entry: CatalogEntry | undefined = entries.get(method);
   if (!entry) throw new Error(`no catalog entry for ${method}`);
   const problems = check(entry.inputSchema, input).map((p) => `${method} input ${p}`);
-  const value = (await run(input)) as Awaited<R>;
+  const value = await run(input);
   const { output } = entry;
   const absent = value === undefined && output.kind === "item" && output.optional;
   const items = isListing(value) ? (await value.page({ limit: 100 })).items : absent ? [] : [value];

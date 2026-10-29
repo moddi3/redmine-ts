@@ -179,7 +179,7 @@ async function signInAndUse(server: ContractServer, publicUrl: string, serve: Se
       response_types: ["code"],
       token_endpoint_auth_method: "none",
     },
-    clientInformation: () => store.client as never,
+    clientInformation: () => store.client,
     saveClientInformation: (client) => void (store.client = client as never),
     tokens: () => store.tokens as never,
     saveTokens: (tokens) => void (store.tokens = tokens),
@@ -323,7 +323,7 @@ describeServers("OAuth through Redmine", (server) => {
     let stderr = "";
     try {
       await new Promise<void>((resolve, reject) => {
-        child.stderr!.on("data", (chunk: Buffer) => {
+        child.stderr.on("data", (chunk: Buffer) => {
           stderr += chunk;
           if (stderr.includes("redirect URI is")) resolve();
         });

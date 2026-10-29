@@ -65,7 +65,7 @@ const toolsList = (pad = 0, id = 7) =>
 function post(
   key: string,
   chunksAndWaits: (string | number)[],
-  { end = true, length = true, headers = {} as Record<string, string> } = {},
+  { end = true, length = true, headers = {} } = {},
 ): Request {
   const encoder = new TextEncoder();
   const bytes = chunksAndWaits

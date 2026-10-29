@@ -26,7 +26,7 @@ async function start(server: ContractServer, ...flags: string[]): Promise<Runnin
   });
   let stderr = "";
   const url = await new Promise<URL>((resolve, reject) => {
-    child.stderr!.on("data", (chunk: Buffer) => {
+    child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk;
       const printed = /serving MCP at (\S+)/.exec(stderr)?.[1];
       if (printed) resolve(new URL(printed));

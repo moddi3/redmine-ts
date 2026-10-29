@@ -1136,7 +1136,7 @@ describe("built-in authorization server", () => {
             redmineApp: REDMINE_APP,
             fetchClientMetadata: noMetadataFetch,
             ...oauth,
-          } as never,
+          },
           ...options,
         });
     expect(create({ publicUrl: "http://mcp.example.com/mcp" })).toThrow("https");
@@ -2382,10 +2382,13 @@ describe("the grant store", () => {
 
   function racing(method: (typeof methods)[number][1]): Setup {
     const doorkeeper = fakeRedmine({ doorkeeper: true });
-    const setupped = setup({ fetch: doorkeeper.fetch }, {
-      ...method,
-      store: memoryGrantStore(),
-    } as never);
+    const setupped = setup(
+      { fetch: doorkeeper.fetch },
+      {
+        ...method,
+        store: memoryGrantStore(),
+      },
+    );
     return { ...setupped, redmine: doorkeeper };
   }
 
@@ -2585,7 +2588,7 @@ describe("the grant store", () => {
     const shared = secret();
     const store = memoryGrantStore();
     const keyOptions = { secret: shared, redmineApp: undefined, apiKeyLogin: true } as never;
-    const first = setup({}, { ...(keyOptions as object), store } as never);
+    const first = setup({}, { ...(keyOptions as object), store });
     const { verifier, challenge } = pkce();
     const person = browser(first.handle, ORIGIN, first.redmine);
     const consentPage = await person.send(
