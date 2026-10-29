@@ -4,6 +4,8 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -222,6 +224,31 @@ describe("attachments_upload", () => {
         path: "link.txt",
       });
       expect(texts(result)[0]).toContain(`resolves outside the files directory "${real}"`);
+    });
+
+    it("reads nothing when the file is swapped for a symlink to a file outside after the check", async () => {
+      const file = await localFiles(dir).open("logs/app.log");
+      rmSync(join(dir, "logs", "app.log"));
+      symlinkSync(join(root, "secret.txt"), join(dir, "logs", "app.log"));
+      await expect(file.bytes()).rejects.toThrow(
+        'path "logs/app.log" changed while it was read, so nothing was sent',
+      );
+    });
+
+    it("reads nothing when a directory on the path is swapped for a symlink after the check", async () => {
+      const file = await localFiles(dir).open("logs/app.log");
+      mkdirSync(join(root, "elsewhere"));
+      writeFileSync(join(root, "elsewhere", "app.log"), "secret");
+      renameSync(join(dir, "logs"), join(root, "logs-moved"));
+      symlinkSync(join(root, "elsewhere"), join(dir, "logs"));
+      await expect(file.bytes()).rejects.toThrow("changed while it was read");
+    });
+
+    it("reads the new file when it is replaced by another inside the directory after the check", async () => {
+      const file = await localFiles(dir).open("logs/app.log");
+      rmSync(join(dir, "logs", "app.log"));
+      writeFileSync(join(dir, "logs", "app.log"), "line 2\n");
+      expect(new TextDecoder().decode(await file.bytes())).toBe("line 2\n");
     });
 
     it("throws when the directory does not exist", () => {

@@ -2,9 +2,9 @@
 // inside it after symlinks are followed, and a saved file never replaces one that exists. Node only:
 // the web-standard server reaches this through the LocalFiles it is given, never by import.
 
-import { realpathSync } from "node:fs";
+import { constants, realpathSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
-import { open, readFile, realpath, rm, stat } from "node:fs/promises";
+import { lstat, open, realpath, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import type { LocalFiles } from "../tools.ts";
 import { invalidInput } from "./define.ts";
@@ -17,7 +17,7 @@ export function localFiles(dir: string): LocalFiles {
     async open(path) {
       const target = await fileInside(root, path);
       const { size } = await stat(target);
-      return { size, bytes: async () => new Uint8Array(await readFile(target)) };
+      return { size, bytes: () => readChecked(root, path, target) };
     },
     async save(filename, fallback, body) {
       const { path, file } = await createUnique(root, filename, fallback);
@@ -57,6 +57,32 @@ async function fileInside(root: string, path: string): Promise<string> {
     throw invalidInput(`path "${path}" is not a regular file`);
   }
   return target;
+}
+
+/**
+ * The bytes of `target`, read through one handle that is checked to be the file `path` names inside
+ * `root` now. The path may have changed since `fileInside` checked it, for example into a symlink to a
+ * file outside, and a read by path would follow it.
+ */
+async function readChecked(root: string, path: string, target: string): Promise<Uint8Array> {
+  const file = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)).catch(() => {
+    throw changed(path);
+  });
+  try {
+    const opened = await file.stat();
+    // The path still resolves to the same place with no symlink on it, and that place holds the
+    // file the handle has.
+    const again = await fileInside(root, path).catch(() => undefined);
+    const now = again === target ? await lstat(target) : undefined;
+    if (!opened.isFile() || now?.dev !== opened.dev || now?.ino !== opened.ino) throw changed(path);
+    return new Uint8Array(await file.readFile());
+  } finally {
+    await file.close();
+  }
+}
+
+function changed(path: string): Error {
+  return invalidInput(`path "${path}" changed while it was read, so nothing was sent`);
 }
 
 /**
