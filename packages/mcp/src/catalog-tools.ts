@@ -5,9 +5,11 @@ import { VERSIONS } from "@redmine-ts/sdk";
 import type { Listing } from "@redmine-ts/sdk";
 import { catalog } from "@redmine-ts/sdk/catalog";
 import type { CatalogEntry, JsonSchema } from "@redmine-ts/sdk/catalog";
+import { roundHours } from "./hours.ts";
 import { portable } from "./portable.ts";
 import { fitPage } from "./result-budget.ts";
 import type { Annotations, Client, Schema, Tier, ToolSpec } from "./tools.ts";
+import { invalidInput } from "./workflow/define.ts";
 
 const DRAFT = "https://json-schema.org/draft/2020-12/schema";
 
@@ -28,6 +30,23 @@ export const HEAVY_KEYS: readonly string[] = [
   "journals",
   "changesets",
 ];
+
+/**
+ * What an issues_list item carries unless the call names more in fields or passes detailed: enough to
+ * pick an issue from a search. A page of 100 full items went past some clients' output limit.
+ */
+export const SHORT_ISSUE: readonly string[] = [
+  "id",
+  "project",
+  "tracker",
+  "status",
+  "assigned_to",
+  "subject",
+  "updated_on",
+];
+
+/** List entries whose items are short by default, with the fields a short item carries. */
+const SHORT_ITEMS: Readonly<Record<string, readonly string[]>> = { getIssues: SHORT_ISSUE };
 
 export const DEFAULT_LIMIT = 25;
 export const MAX_LIMIT = 100;
@@ -175,6 +194,23 @@ const PAGING: Readonly<Record<string, Schema>> = {
   },
 };
 
+/** PAGING for a list whose items are short by default. */
+const SHORT_PAGING: Readonly<Record<string, Schema>> = {
+  ...PAGING,
+  detailed: {
+    type: "boolean",
+    default: false,
+    description:
+      "Return every item field, description included. Off by default to keep pages short.",
+  },
+  fields: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      'Item fields to add to the short item, such as ["due_date", "spent_hours"]. The tool description names them.',
+  },
+};
+
 type Method = (input: Record<string, unknown>) => unknown;
 
 /**
@@ -224,17 +260,24 @@ function toolFor(entry: CatalogEntry): ToolSpec {
   };
   const { output } = entry;
   switch (output.kind) {
-    case "list":
+    case "list": {
+      const short = SHORT_ITEMS[entry.id];
+      const known = Object.keys(output.schema.properties ?? {});
+      const includes = (entry.inputSchema.properties?.include?.items?.enum ?? []).map(String);
       return {
         ...common,
-        inputSchema: pagedInput(entry.inputSchema),
-        outputSchema: pageOutput(output.schema),
+        inputSchema: pagedInput(entry.inputSchema, short),
+        outputSchema: pageOutput(output.schema, short),
         budgeted: true,
         // Measured once the items are shaped, as the page is sent.
         run: async (rm, input, { budget }) => ({
-          structured: fitPage(await listPage(call, rm, input), budget),
+          structured: fitPage(
+            await listPage(call, rm, input, short && { carries: short, known, includes }),
+            budget,
+          ),
         }),
       };
+    }
     case "item":
       return {
         ...common,
@@ -243,9 +286,9 @@ function toolFor(entry: CatalogEntry): ToolSpec {
           ? { $schema: DRAFT, type: "object", anyOf: [withoutDraft(output.schema), OK] }
           : output.schema,
         run: async (rm, input) => ({
-          structured: ((await call(rm, input)) as Record<string, unknown> | undefined) ?? {
-            ok: true,
-          },
+          structured: roundHours(
+            ((await call(rm, input)) as Record<string, unknown> | undefined) ?? { ok: true },
+          ),
         }),
       };
     case "empty":
@@ -263,18 +306,47 @@ function toolFor(entry: CatalogEntry): ToolSpec {
   }
 }
 
+type Item = Record<string, unknown>;
+
 async function listPage(
   call: (rm: Client, input: Record<string, unknown>) => unknown,
   rm: Client,
   input: Record<string, unknown>,
+  /**
+   * Set for a list whose items are short by default: what they carry, every item field, and the
+   * fields that come only with include.
+   */
+  short:
+    | { carries: readonly string[]; known: readonly string[]; includes: readonly string[] }
+    | undefined,
 ): Promise<Record<string, unknown>> {
   const {
     limit = DEFAULT_LIMIT,
     offset = 0,
     detailed = false,
+    fields = [],
     ...rest
-  } = input as { limit?: number; offset?: number; detailed?: boolean };
-  const listing = call(rm, rest) as Listing<Record<string, unknown>>;
+  } = input as { limit?: number; offset?: number; detailed?: boolean; fields?: string[] };
+  const known = short?.known ?? [];
+  const unknown = [...new Set(fields.filter((name) => !known.includes(name)))];
+  if (unknown.length > 0) {
+    throw invalidInput(
+      `unknown item ${unknown.length === 1 ? "field" : "fields"} ${unknown.map((name) => `"${name}"`).join(", ")} in fields, item fields: ${known.join(", ")}`,
+    );
+  }
+  // include names associations, such as relations, for the items to carry. Redmine sends them only
+  // when asked, so naming one in fields asks for it too.
+  const asked = (rest as { include?: string[] }).include ?? [];
+  const include = [
+    ...new Set([...asked, ...fields.filter((name) => short?.includes.includes(name))]),
+  ];
+  const shown = (item: Item): Item =>
+    detailed
+      ? item
+      : short === undefined
+        ? concise(item)
+        : only(item, [...short.carries, ...fields, ...include]);
+  const listing = call(rm, include.length === 0 ? rest : { ...rest, include }) as Listing<Item>;
   const page = await listing.page({ offset, limit });
   // Lists Redmine does not page (statuses, trackers) come back whole, so they are paged here.
   const paged = page.total_count !== undefined;
@@ -282,7 +354,7 @@ async function listPage(
   const total = page.total_count ?? page.items.length;
   const end = offset + items.length;
   return {
-    items: detailed ? items : items.map(concise),
+    items: roundHours(items.map(shown)),
     total_count: total,
     offset,
     limit,
@@ -290,19 +362,27 @@ async function listPage(
   };
 }
 
-function concise(item: Record<string, unknown>): Record<string, unknown> {
+function concise(item: Item): Item {
   return Object.fromEntries(Object.entries(item).filter(([key]) => !HEAVY_KEYS.includes(key)));
 }
 
-function pagedInput(schema: JsonSchema): JsonSchema {
+function only(item: Item, keys: readonly string[]): Item {
+  return Object.fromEntries(Object.entries(item).filter(([key]) => keys.includes(key)));
+}
+
+function pagedInput(schema: JsonSchema, short: readonly string[] | undefined): JsonSchema {
   const described = describeFilters(schema);
   const kept = Object.entries(described.properties ?? {}).filter(
     ([key]) => key !== "pageSize" && key !== "paging",
   );
-  return { ...described, properties: { ...Object.fromEntries(kept), ...PAGING } };
+  return {
+    ...described,
+    properties: { ...Object.fromEntries(kept), ...(short === undefined ? PAGING : SHORT_PAGING) },
+  };
 }
 
-function pageOutput(item: JsonSchema): JsonSchema {
+/** An item must carry what every concise or short item carries, and may carry the rest. */
+function pageOutput(item: JsonSchema, short: readonly string[] | undefined): JsonSchema {
   const count: JsonSchema = { type: "integer", minimum: 0 };
   return {
     $schema: DRAFT,
@@ -312,7 +392,9 @@ function pageOutput(item: JsonSchema): JsonSchema {
         type: "array",
         items: {
           ...withoutDraft(item),
-          required: (item.required ?? []).filter((key) => !HEAVY_KEYS.includes(key)),
+          required: (item.required ?? []).filter((key) =>
+            short === undefined ? !HEAVY_KEYS.includes(key) : short.includes(key),
+          ),
         },
       },
       total_count: count,
@@ -503,8 +585,18 @@ function describeTool(entry: CatalogEntry, adminOnly: string | undefined): strin
   };
   const returns = ((): string => {
     switch (output.kind) {
-      case "list":
-        return `Returns one page, {items, total_count, offset, limit, next_offset}. Call again with offset = next_offset until it is null. Items omit ${HEAVY_KEYS.join(", ")} unless detailed is true. Item fields: ${fields(output.schema, HEAVY_KEYS)}.`;
+      case "list": {
+        const page =
+          "Returns one page, {items, total_count, offset, limit, next_offset}. Call again with offset = next_offset until it is null.";
+        const short = SHORT_ITEMS[entry.id];
+        if (short === undefined) {
+          return `${page} Items omit ${HEAVY_KEYS.join(", ")} unless detailed is true. Item fields: ${fields(output.schema, HEAVY_KEYS)}.`;
+        }
+        const more = Object.keys(output.schema.properties ?? {}).filter(
+          (key) => !short.includes(key),
+        );
+        return `${page} Items carry only ${short.join(", ")}, and what include names. fields adds any of ${more.join(", ")}. detailed: true returns every field.`;
+      }
       case "item":
         return `Returns the ${entry.method === "POST" ? "created " : ""}record: ${fields(output.schema)}.${output.optional ? " Returns {ok: true} when Redmine sends no body." : ""}`;
       case "empty":
