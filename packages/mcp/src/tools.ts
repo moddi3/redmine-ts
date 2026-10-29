@@ -34,7 +34,7 @@ export interface LocalFiles {
   readonly dir: string;
   /**
    * A regular file inside the directory, refused with kind invalid_input before anything is read otherwise.
-   * `bytes()` refuses the same way when the file changed after `open`.
+   * `bytes()` refuses the same way when the file changed after `open`, or when it cannot be opened.
    */
   open(path: string): Promise<{ size: number; bytes(): Promise<Uint8Array> }>;
   /** Writes `body` to a new file named after `filename` that never replaces an existing one. */

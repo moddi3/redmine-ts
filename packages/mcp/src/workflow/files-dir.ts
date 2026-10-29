@@ -62,10 +62,11 @@ async function fileInside(root: string, path: string): Promise<string> {
 /**
  * The `size` bytes of `target`, read through one handle that is checked against what `path` names
  * inside `root` after it is opened. The path may have changed since `fileInside` checked it, for example
- * into a symlink to a file outside, and a read by path would follow it. On Linux the handle's own path
- * settles it. Elsewhere Node has no such call, so a directory on the path that keeps flipping between a
- * directory and a symlink can still pass the separate lookups, which is why only trusted users should
- * write in the files directory.
+ * into a symlink to a file outside, and a read by path would follow it. On macOS the open refuses a
+ * symlink anywhere on `target`, which has none once resolved, and on Linux the handle's own path in
+ * /proc settles it. Elsewhere, or on Linux without /proc, a directory on the path that keeps flipping
+ * between a directory and a symlink can still pass the separate lookups below, which is why only trusted
+ * users should write in the files directory.
  */
 async function readChecked(
   root: string,
@@ -74,7 +75,7 @@ async function readChecked(
   size: number,
 ): Promise<Uint8Array> {
   // O_NONBLOCK keeps a FIFO swapped in from blocking the open; it is refused as not a file below.
-  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+  const flags = constants.O_RDONLY | NO_SYMLINKS | (constants.O_NONBLOCK ?? 0);
   const file = await open(target, flags).catch((error: NodeJS.ErrnoException) => {
     throw ["ELOOP", "ENOENT", "ENOTDIR"].includes(error.code ?? "")
       ? changed(path)
@@ -108,6 +109,12 @@ async function readChecked(
     await file.close();
   }
 }
+
+/**
+ * Darwin's O_NOFOLLOW_ANY, which fs.constants lacks, refuses a symlink anywhere on the path, and it
+ * cannot be combined with O_NOFOLLOW. Elsewhere O_NOFOLLOW refuses one in the last segment.
+ */
+const NO_SYMLINKS = process.platform === "darwin" ? 0x20000000 : (constants.O_NOFOLLOW ?? 0);
 
 function changed(path: string): Error {
   return invalidInput(`path "${path}" changed while it was read`);
