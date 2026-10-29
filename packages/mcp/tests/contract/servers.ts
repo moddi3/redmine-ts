@@ -51,10 +51,14 @@ export function describeServers(title: string, body: (server: ContractServer) =>
 export function connectTo(
   server: ContractServer,
   access: Access = "full",
-  { apiKey = server.adminKey, filesDir }: { apiKey?: string; filesDir?: string } = {},
+  {
+    apiKey = server.adminKey,
+    filesDir,
+    maxResultBytes,
+  }: { apiKey?: string; filesDir?: string; maxResultBytes?: number } = {},
 ) {
   return connect(
     { baseUrl: server.baseUrl, auth: { apiKey }, version: server.version, access },
-    { filesDir },
+    { filesDir, maxResultBytes },
   );
 }

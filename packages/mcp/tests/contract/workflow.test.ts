@@ -220,6 +220,55 @@ describeServers("workflow tools", (server) => {
     expect(notes(raw.response.issue.journals)).toEqual(written);
   });
 
+  it("pages the journals of a long history with journals_before, each page under 32,000 bytes", async () => {
+    const issue = await sdk.issues.create({
+      project_id: server.projectIdentifier,
+      subject: `MCP long history ${marker}`,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+    for (let n = 1; n <= 30; n += 1) {
+      await sdk.issues.update({
+        issue_id: issue.id,
+        notes: `Заметка ${n}: ${"проверка истории ".repeat(90)}`,
+      });
+    }
+    const { journals } = await sdk.issues.get({
+      issue_id: issue.id,
+      include: ["journals"],
+    });
+    const ids = journals.map((journal) => journal.id);
+    expect(ids).toHaveLength(30);
+
+    const pages: { journals: { id: number }[]; journals_omitted: number }[] = [];
+    let before: number | null | undefined;
+    do {
+      const result = await ok("issue_context", {
+        issue_id: issue.id,
+        journals: 100,
+        ...(before === undefined ? {} : { journals_before: before }),
+      });
+      const page = result.structuredContent as {
+        journals: { id: number }[];
+        journals_total: number;
+        journals_omitted: number;
+        journals_before: number | null;
+      };
+      expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThanOrEqual(32_000);
+      expect(page.journals.length).toBeGreaterThan(0);
+      const oldest = ids.indexOf(page.journals[0]!.id);
+      expect(page).toMatchObject({
+        journals_total: 30,
+        journals_omitted: oldest,
+        journals_before: oldest > 0 ? ids[oldest] : null,
+      });
+      pages.push(page);
+      before = page.journals_before;
+    } while (before !== null);
+    expect(pages.length).toBeGreaterThan(1);
+    const read = pages.toReversed().flatMap((page) => page.journals.map((journal) => journal.id));
+    expect(read).toEqual(ids);
+  });
+
   it("clips a long note with a marker that names the issue_context call returning it whole", async () => {
     const issue = await sdk.issues.create({
       project_id: server.projectIdentifier,

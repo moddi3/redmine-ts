@@ -15,10 +15,17 @@ import { isStrongSecret, MIN_SECRET_LENGTH, SECRET_RULE } from "./oauth/seal.ts"
 import type { RedmineOAuthOptions } from "./oauth/server.ts";
 import { memoryGrantStore } from "./oauth/store.ts";
 import { publicFetch } from "./public-fetch.ts";
+import { DEFAULT_RESULT_BYTES, MIN_RESULT_BYTES } from "./result-budget.ts";
 import { ACCESS_ORDER, strictest } from "./tools.ts";
 
 export type CliCommand =
-  | { kind: "serve"; config: RedmineConfig; filesDir?: string; dangerouslyRevealApiKeys?: boolean }
+  | {
+      kind: "serve";
+      config: RedmineConfig;
+      filesDir?: string;
+      dangerouslyRevealApiKeys?: boolean;
+      maxResultBytes?: number;
+    }
   | {
       kind: "http";
       host: string;
@@ -51,6 +58,9 @@ Environment:
                        Optional: a directory attachments_upload reads paths from
                        and attachments_save writes to; without it no tool touches
                        local files. Not read over HTTP
+  REDMINE_MCP_MAX_RESULT_BYTES
+                       Optional: bytes of JSON at which list tools and issue_context
+                       stop filling a result and page the rest, default ${DEFAULT_RESULT_BYTES}
 
 Environment for OAuth over HTTP:
   REDMINE_MCP_PUBLIC_URL
@@ -138,6 +148,17 @@ const Env = z.object({
       .refine((dir) => dir === undefined || isDirectory(dir), {
         error: "must be an existing directory",
       }),
+  ),
+  REDMINE_MCP_MAX_RESULT_BYTES: z.preprocess(
+    blankToUndefined,
+    z
+      .string()
+      .regex(/^\d+$/, { error: `must be a whole number of bytes, such as ${DEFAULT_RESULT_BYTES}` })
+      .transform(Number)
+      .refine((bytes) => bytes >= MIN_RESULT_BYTES && Number.isSafeInteger(bytes), {
+        error: `must be at least ${MIN_RESULT_BYTES} bytes`,
+      })
+      .optional(),
   ),
 });
 
@@ -331,6 +352,7 @@ export function parseCli(
     REDMINE_VERSION,
     REDMINE_MCP_ACCESS,
     REDMINE_MCP_FILES_DIR,
+    REDMINE_MCP_MAX_RESULT_BYTES,
   } = parsed.data;
   return {
     kind: "serve",
@@ -342,6 +364,9 @@ export function parseCli(
     },
     ...(REDMINE_MCP_FILES_DIR === undefined ? {} : { filesDir: REDMINE_MCP_FILES_DIR }),
     ...(flags["dangerously-reveal-api-keys"] ? { dangerouslyRevealApiKeys: true } : {}),
+    ...(REDMINE_MCP_MAX_RESULT_BYTES === undefined
+      ? {}
+      : { maxResultBytes: REDMINE_MCP_MAX_RESULT_BYTES }),
   };
 }
 
@@ -365,6 +390,7 @@ function httpCommand(flags: Flags, env: Readonly<Record<string, string | undefin
   if (!parsed.success) return invalid(parsed.error);
   const settings = parsed.data;
   const { REDMINE_URL, REDMINE_VERSION, REDMINE_MCP_ACCESS, REDMINE_MCP_PUBLIC_URL } = settings;
+  const { REDMINE_MCP_MAX_RESULT_BYTES } = settings;
   const { "--port": port, "--host": host, "--allow-origin": allowedOrigins } = settings;
   const proxyHosts = settings["--allow-host"];
   const loopback =
@@ -389,6 +415,9 @@ function httpCommand(flags: Flags, env: Readonly<Record<string, string | undefin
       ...(knowsEveryHost ? { allowedHosts: hostnames } : {}),
       ...(REDMINE_MCP_PUBLIC_URL === undefined ? {} : { publicUrl: REDMINE_MCP_PUBLIC_URL }),
       ...(oauth === undefined ? {} : { oauth }),
+      ...(REDMINE_MCP_MAX_RESULT_BYTES === undefined
+        ? {}
+        : { maxResultBytes: REDMINE_MCP_MAX_RESULT_BYTES }),
     },
     warnings: Object.entries(NOT_READ_OVER_HTTP)
       .filter(([name]) => blankToUndefined(env[name]) !== undefined)

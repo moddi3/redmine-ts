@@ -136,6 +136,47 @@ describeServers("generated tools", (server) => {
     ]);
   });
 
+  it("cuts a list page at a small result budget and pages through the rest with next_offset", async () => {
+    const marker = `mcp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    for (const n of [1, 2, 3, 4, 5]) {
+      const issue = await ok("issues_create", {
+        project_id: server.projectIdentifier,
+        subject: `MCP budget ${n} ${marker} ${"ш".repeat(200)}`,
+      });
+      created.push(issue.id as number);
+    }
+    const where = { project_id: server.projectIdentifier, subject: { contains: marker } };
+    const whole = await ok("issues_list", { where, limit: 100 });
+    expect(whole).toMatchObject({ total_count: 5, next_offset: null });
+    const ids = (whole.items as { id: number }[]).map((item) => item.id);
+
+    const small = await connectTo(server, "full", { maxResultBytes: 2_000 });
+    const read: number[] = [];
+    let offset: number | null = 0;
+    while (offset !== null) {
+      const result = await small.callTool({
+        name: "issues_list",
+        arguments: { where, limit: 100, offset },
+      });
+      expect(result.isError, texts(result).join("\n")).toBeFalsy();
+      expect(violations("issues_list", result.structuredContent)).toEqual([]);
+      const page = result.structuredContent as {
+        items: { id: number }[];
+        total_count: number;
+        next_offset: number | null;
+      };
+      expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThanOrEqual(2_000);
+      expect(page.items.length).toBeGreaterThan(0);
+      expect(page.items.length).toBeLessThan(5);
+      expect(page.total_count).toBe(5);
+      const end = offset + page.items.length;
+      expect(page.next_offset).toBe(end < 5 ? end : null);
+      read.push(...page.items.map((item) => item.id));
+      offset = page.next_offset;
+    }
+    expect(read).toEqual(ids);
+  });
+
   it("answers every list tool that needs no input within its outputSchema, concise and detailed", async () => {
     const lists = tools.filter(
       (tool) => tool.name.includes("_list") && (tool.inputSchema.required ?? []).length === 0,

@@ -15,6 +15,8 @@ export interface WorkflowTool<I extends z.ZodObject, O extends z.ZodObject> {
   readonly output: O;
   readonly annotations: Annotations;
   readonly tier: Tier;
+  /** Set when the tool stops filling its result at the result budget. */
+  readonly budgeted?: boolean;
   readonly run: (
     rm: Client,
     input: z.output<I>,

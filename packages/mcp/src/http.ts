@@ -28,6 +28,7 @@ import { comparablePath, CORS_MAX_AGE, publicDocument, publicPaths } from "./oau
 import type { PublicPaths } from "./oauth/web.ts";
 import { checkApiKey } from "./redmine-key.ts";
 import type { KeyVerdict } from "./redmine-key.ts";
+import { checkResultBytes, DEFAULT_RESULT_BYTES } from "./result-budget.ts";
 import { createRedmineMcpServer } from "./server.ts";
 import type { Observation } from "./server.ts";
 import { allows, isApiPath, strictest } from "./tools.ts";
@@ -131,6 +132,8 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
    * streams are not timed.
    */
   bodyTimeoutMs?: number;
+  /** The result budget of every request's server, as `maxResultBytes` of createRedmineMcpServer. */
+  maxResultBytes?: number;
 }
 
 /**
@@ -174,10 +177,12 @@ export function createRedmineMcpHandler(
     verifier: external,
     maxBodyBytesInFlight = 32 * 1024 * 1024,
     bodyTimeoutMs = 300_000,
+    maxResultBytes = DEFAULT_RESULT_BYTES,
     ...config
   } = rest;
   // A bad baseUrl, version or limit throws here instead of failing every request.
   createRedmine(config);
+  checkResultBytes(maxResultBytes);
   const access = config.access ?? "full";
   if (oauth !== undefined && external !== undefined) {
     throw new TypeError("oauth and verifier exclude each other: use one authorization server");
@@ -228,7 +233,7 @@ export function createRedmineMcpHandler(
       const redmine = authInfo?.extra?.redmine as RequestAuth;
       return createRedmineMcpServer(
         { ...config, auth: redmine.auth, access: redmine.access },
-        redmine.kind === "bearer" ? { observe: redmine.observe } : {},
+        { maxResultBytes, ...(redmine.kind === "bearer" ? { observe: redmine.observe } : {}) },
       );
     },
     { onerror: onError, maxRequestBodySize: MAX_BODY_BYTES },

@@ -6,6 +6,7 @@ import type { Listing } from "@redmine-ts/sdk";
 import { catalog } from "@redmine-ts/sdk/catalog";
 import type { CatalogEntry, JsonSchema } from "@redmine-ts/sdk/catalog";
 import { portable } from "./portable.ts";
+import { fitPage } from "./result-budget.ts";
 import type { Annotations, Client, Schema, Tier, ToolSpec } from "./tools.ts";
 
 const DRAFT = "https://json-schema.org/draft/2020-12/schema";
@@ -228,7 +229,11 @@ function toolFor(entry: CatalogEntry): ToolSpec {
         ...common,
         inputSchema: pagedInput(entry.inputSchema),
         outputSchema: pageOutput(output.schema),
-        run: async (rm, input) => ({ structured: await listPage(call, rm, input) }),
+        budgeted: true,
+        // Measured once the items are shaped, as the page is sent.
+        run: async (rm, input, { budget }) => ({
+          structured: fitPage(await listPage(call, rm, input), budget),
+        }),
       };
     case "item":
       return {
@@ -532,9 +537,15 @@ function describeTool(entry: CatalogEntry, adminOnly: string | undefined): strin
     clip(entry.description, 300),
     effect,
     returns,
+    output.kind === "list"
+      ? "A page stops before limit at the server's result budget, with next_offset at the first item left out."
+      : "",
     ids.length > 0 ? `Ids, not names: ${ids.join(", ")}.` : "",
     entry.id === "createMembership"
       ? "people_find searches only a project's members and an issue's people, so it does not find a user who is not a member yet."
+      : "",
+    entry.id === "getIssue"
+      ? "include journals returns every journal in one result, which may pass the client's limit: for a long history, issue_context pages through them."
       : "",
     ...version,
     entry.docsUrl ? `Docs: ${entry.docsUrl}` : "",
