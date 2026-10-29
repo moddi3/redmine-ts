@@ -61,15 +61,23 @@ const isConstAssertion = (node: Node): boolean => {
   return name?.type === "Identifier" && name.name === "const";
 };
 
-/**
- * A cast is reported once, on its outermost assertion: `x as unknown as T` on the outer `as`, and
- * `x as T as const` on `as T`, since `as const` is not a cast.
- */
-const isOutermostCast = (node: Node): boolean => {
+const castsNothing = (node: Node): boolean =>
+  node.type === "TSNonNullExpression" ||
+  node.type === "ChainExpression" ||
+  (isAssertion(node) && isConstAssertion(node));
+
+/** The node around `node`, past `!`, `?.` and `as const`. */
+const enclosing = (node: Node): Node | undefined => {
   const parent = child(node, "parent");
-  const insideCast = parent !== undefined && isAssertion(parent) && !isConstAssertion(parent);
-  return !isConstAssertion(node) && !insideCast;
+  return parent !== undefined && castsNothing(parent) ? enclosing(parent) : parent;
 };
+
+/**
+ * A cast is reported once, on its outermost assertion: `x as unknown as T` and `(x as unknown)! as T`
+ * on the outer `as`, and `x as T as const` on `as T`, since `as const` is not a cast.
+ */
+const isOutermostCast = (node: Node): boolean =>
+  !isConstAssertion(node) && !isAssertion(enclosing(node));
 
 /** The value a cast reads, under other assertions, `!` and `?.`. */
 const castValue = (node: Node | undefined): Node | undefined =>
