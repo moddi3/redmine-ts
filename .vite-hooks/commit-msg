@@ -2,7 +2,7 @@
 # Commits carry no AI credits, merge and autosquash messages included. Agents add these lines by habit even
 # when settings turn them off. A co-author counts as an agent by name or by Anthropic's noreply address.
 # Git passes comment lines and the diff of `commit -v` to this hook, so those are dropped first.
-agent='(claude( code| (opus|sonnet|haiku|fable)[^<]*)?|codex|chatgpt|(github )?copilot|cursor( agent)?|gemini[^<]*)'
+agent='(claude( code| (opus|sonnet|haiku|fable)[^<]*)?|(openai )?codex|chatgpt|(github )?copilot|cursor( agent)?|gemini( cli| code assist| [0-9][^<]*)?)'
 if sed -e '/^# -* >8 -*$/,$d' -e '/^#/d' "$1" |
   grep -Eiq "^co-authored-by: *$agent *<|^co-authored-by:.*<noreply@anthropic\.com>|^[^[:alnum:]]*generated (with|by) .*$agent"; then
   echo "commit-msg: remove the AI credit line; commits in this repo carry no Co-Authored-By or Generated-with lines for agents." >&2

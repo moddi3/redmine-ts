@@ -1,0 +1,3 @@
+fix(sdk): retry 503 on GET only
+
+Co-Authored-By: Gemini Smith <gemini@example.com>
