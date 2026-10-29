@@ -1,15 +1,16 @@
 #!/bin/sh
+# Git passes comment lines and the diff of `commit -v` to this hook, so those are dropped first.
+message=$(sed -e '/^# -* >8 -*$/,$d' -e '/^#/d' "$1")
 # Commits carry no AI credits, merge and autosquash messages included. Agents add these lines by habit even
 # when settings turn them off. A co-author counts as an agent by name or by Anthropic's noreply address.
-# Git passes comment lines and the diff of `commit -v` to this hook, so those are dropped first.
-agent='(claude( code| (opus|sonnet|haiku|fable)[^<]*)?|(openai )?codex|chatgpt|(github )?copilot|cursor( agent)?|gemini( cli| code assist| [0-9][^<]*)?)'
-if sed -e '/^# -* >8 -*$/,$d' -e '/^#/d' "$1" |
+agent='(claude( code| (opus|sonnet|haiku|fable)[^<]*)?|(openai )?(codex|chatgpt)|(github )?copilot|cursor( agent)?|gemini( cli| code assist| [0-9][^<]*)?)'
+if printf '%s\n' "$message" |
   grep -Eiq "^co-authored-by: *$agent *<|^co-authored-by:.*<noreply@anthropic\.com>|^[^[:alnum:]]*generated (with|by) .*$agent"; then
   echo "commit-msg: remove the AI credit line; commits in this repo carry no Co-Authored-By or Generated-with lines for agents." >&2
   exit 1
 fi
 # Conventional Commits: type(scope)!: subject. Merge, revert and autosquash messages pass through.
-subject=$(sed -n '/^[^#]/{p;q;}' "$1")
+subject=$(printf '%s\n' "$message" | sed -n '/[^[:space:]]/{p;q;}')
 pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: [^ ].*'
 case "$subject" in
   Merge\ * | Revert\ * | fixup!\ * | squash!\ * | amend!\ *) exit 0 ;;
