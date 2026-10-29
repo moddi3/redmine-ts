@@ -262,12 +262,13 @@ function toolFor(entry: CatalogEntry): ToolSpec {
     case "list": {
       const short = SHORT_ITEMS[entry.id];
       const known = Object.keys(output.schema.properties ?? {});
+      const includes = (entry.inputSchema.properties?.include?.items?.enum ?? []).map(String);
       return {
         ...common,
         inputSchema: pagedInput(entry.inputSchema, short),
         outputSchema: pageOutput(output.schema, short),
         run: async (rm, input) => ({
-          structured: await listPage(call, rm, input, short && { carries: short, known }),
+          structured: await listPage(call, rm, input, short && { carries: short, known, includes }),
         }),
       };
     }
@@ -305,8 +306,13 @@ async function listPage(
   call: (rm: Client, input: Record<string, unknown>) => unknown,
   rm: Client,
   input: Record<string, unknown>,
-  /** Set for a list whose items are short by default: what they carry, and every item field. */
-  short: { carries: readonly string[]; known: readonly string[] } | undefined,
+  /**
+   * Set for a list whose items are short by default: what they carry, every item field, and the
+   * fields that come only with include.
+   */
+  short:
+    | { carries: readonly string[]; known: readonly string[]; includes: readonly string[] }
+    | undefined,
 ): Promise<Record<string, unknown>> {
   const {
     limit = DEFAULT_LIMIT,
@@ -316,21 +322,25 @@ async function listPage(
     ...rest
   } = input as { limit?: number; offset?: number; detailed?: boolean; fields?: string[] };
   const known = short?.known ?? [];
-  const unknown = fields.filter((name) => !known.includes(name));
+  const unknown = [...new Set(fields.filter((name) => !known.includes(name)))];
   if (unknown.length > 0) {
     throw invalidInput(
-      `unknown item field ${unknown.map((name) => `"${name}"`).join(", ")} in fields, item fields: ${known.join(", ")}`,
+      `unknown item ${unknown.length === 1 ? "field" : "fields"} ${unknown.map((name) => `"${name}"`).join(", ")} in fields, item fields: ${known.join(", ")}`,
     );
   }
-  // include names associations, such as relations, for the items to carry.
-  const { include = [] } = rest as { include?: string[] };
+  // include names associations, such as relations, for the items to carry. Redmine sends them only
+  // when asked, so naming one in fields asks for it too.
+  const asked = (rest as { include?: string[] }).include ?? [];
+  const include = [
+    ...new Set([...asked, ...fields.filter((name) => short?.includes.includes(name))]),
+  ];
   const shown = (item: Item): Item =>
     detailed
       ? item
       : short === undefined
         ? concise(item)
         : only(item, [...short.carries, ...fields, ...include]);
-  const listing = call(rm, rest) as Listing<Item>;
+  const listing = call(rm, include.length === 0 ? rest : { ...rest, include }) as Listing<Item>;
   const page = await listing.page({ offset, limit });
   // Lists Redmine does not page (statuses, trackers) come back whole, so they are paged here.
   const paged = page.total_count !== undefined;

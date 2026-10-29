@@ -180,13 +180,22 @@ describe("issues_list items", () => {
     expect(seen[0]!.url.searchParams.get("include")).toBe("relations");
   });
 
+  it("ask Redmine for a field that comes only with include, when fields names it", async () => {
+    const {
+      items: [item],
+      seen,
+    } = await items({ fields: ["relations"] });
+    expect(item).toHaveProperty("relations", RELATIONS);
+    expect(seen[0]!.url.searchParams.get("include")).toBe("relations");
+  });
+
   it("refuse a name in fields that is not an item field, before sending", async () => {
     const { client, seen } = await serve(ROUTES);
     const result = await callError(client, "issues_list", {
-      fields: ["due_date", "dueDate", "notes"],
+      fields: ["due_date", "dueDate", "notes", "dueDate"],
     });
     expect(texts(result)[0]).toBe(
-      'Invalid input for issues_list: unknown item field "dueDate", "notes" in fields, item fields: id, project, tracker, status, priority, author, assigned_to, category, fixed_version, parent, subject, description, start_date, due_date, done_ratio, is_private, estimated_hours, total_estimated_hours, spent_hours, total_spent_hours, custom_fields, created_on, updated_on, closed_on, attachments, relations. Nothing was sent.',
+      'Invalid input for issues_list: unknown item fields "dueDate", "notes" in fields, item fields: id, project, tracker, status, priority, author, assigned_to, category, fixed_version, parent, subject, description, start_date, due_date, done_ratio, is_private, estimated_hours, total_estimated_hours, spent_hours, total_spent_hours, custom_fields, created_on, updated_on, closed_on, attachments, relations. Nothing was sent.',
     );
     expect(lastJson(result)).toMatchObject({ kind: "invalid_input" });
     expect(seen).toEqual([]);

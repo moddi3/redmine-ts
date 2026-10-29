@@ -202,13 +202,13 @@ A list tool returns one page:
 
 `limit` is 25 by default and at most 100. To read the next page, call the tool again with `offset` set to `next_offset`. `next_offset` is `null` on the last page. Lists that Redmine returns whole, such as `issue_statuses_list`, are paged the same way.
 
-An `issues_list` item is short. It carries only `id`, `project`, `tracker`, `status`, `assigned_to`, `subject`, and `updated_on`, which is enough to pick an issue from a search, and the associations that `include` names. A typical item is about 280 characters instead of about 760, so a page of 100 is about 28K characters instead of 76K. `fields` adds other item fields, such as `due_date` and `spent_hours`, and the tool's description names them all:
+An `issues_list` item is short. It carries only `id`, `project`, `tracker`, `status`, `assigned_to`, `subject`, and `updated_on`, which is enough to pick an issue from a search, and the associations that `include` names. On a test server, a page of 100 issues was about 27K characters instead of 69K. `fields` adds other item fields, such as `due_date` and `spent_hours`, and the tool's description names them all:
 
 ```json
 { "where": { "assigned_to_id": "me" }, "fields": ["due_date", "spent_hours"] }
 ```
 
-`id` is always kept. A name in `fields` that is not an item field is refused before any request, and the error lists the item fields.
+`id` is always kept. Redmine sends `attachments` and `relations` only when asked, so naming one in `fields` asks for it, as `include` does. A name in `fields` that is not an item field is refused before any request, and the error lists the item fields.
 
 Items of the other list tools leave out the long fields `description`, `notes`, `text`, `comments`, `journals`, and `changesets`.
 
