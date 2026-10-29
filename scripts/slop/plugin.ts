@@ -89,7 +89,7 @@ const isConstAssertion = (node: Node): boolean => {
 const noTypeAssertion = {
   create(context: Context) {
     const check = (node: Node): void => {
-      if (node.type === "TSAsExpression" && isConstAssertion(node)) return;
+      if (isConstAssertion(node)) return;
       if (child(node, "parent")?.type === "TSAsExpression") return;
       const property = unwrapAssertions(node);
       const target =
