@@ -1,4 +1,11 @@
 #!/bin/sh
+# Commits carry no AI credits, merge and autosquash messages included. Agents add these lines by habit even
+# when settings turn them off. A co-author counts as an agent by name or by Anthropic's noreply address.
+agent='(claude( code| (opus|sonnet|haiku|fable)[^<]*)?|codex|chatgpt|(github )?copilot|cursor( agent)?|gemini[^<]*)'
+if grep -Eiq "^co-authored-by: *$agent *<|^co-authored-by:.*<noreply@anthropic\.com>|generated (with|by) .*$agent" "$1"; then
+  echo "commit-msg: remove the AI credit line; commits in this repo carry no Co-Authored-By or Generated-with lines for agents." >&2
+  exit 1
+fi
 # Conventional Commits: type(scope)!: subject. Merge, revert and autosquash messages pass through.
 subject=$(sed -n '/^[^#]/{p;q;}' "$1")
 pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: [^ ].*'
@@ -9,10 +16,5 @@ if ! printf '%s\n' "$subject" | grep -Eq "$pattern"; then
   echo "commit-msg: \"$subject\" is not a Conventional Commit." >&2
   echo "Use type(scope): subject, e.g. \"fix(sdk): retry 503 on GET only\"." >&2
   echo "Types: feat fix docs style refactor perf test build ci chore revert." >&2
-  exit 1
-fi
-# Commits carry no AI credits. Agents add these trailers by habit even when settings turn them off.
-if grep -Eiq '^(co-authored-by:.*(claude|anthropic|codex|openai|cursor|copilot)|.*generated with \[?claude)' "$1"; then
-  echo "commit-msg: remove the AI credit line; commits in this repo carry no Co-Authored-By or Generated-with lines for agents." >&2
   exit 1
 fi

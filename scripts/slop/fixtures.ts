@@ -1,10 +1,11 @@
 // Checks that the repo's lint config, compiler options and hooks reject each fixture of real slop. A fixture
 // names its target folder and the diagnostics it must get; it is copied there, linted with `vp lint`, and
-// removed. Commit message fixtures run through .vite-hooks/commit-msg.
+// removed. Commit messages run through .vite-hooks/commit-msg, which must refuse each one in commit-msg/ and
+// accept each one in commit-msg-accepted/.
 // Usage: node scripts/slop/fixtures.ts
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDiagnostics } from "./oxlint.ts";
 
@@ -63,16 +64,26 @@ try {
   for (const fixture of sources) rmSync(join(root, fixture.copy), { force: true });
 }
 
-for (const name of readdirSync(join(fixtures, "commit-msg"))) {
-  const hook = spawnSync("sh", [
-    join(root, ".vite-hooks/commit-msg"),
-    join(fixtures, "commit-msg", name),
-  ]);
-  console.log(`${hook.status === 0 ? "PASSED  " : "rejected"}\tcommit-msg/${basename(name)}`);
-  if (hook.status === 0) failures.push(`commit-msg/${name}: the hook accepted it`);
+const messages: [string, boolean][] = [
+  ["commit-msg", true],
+  ["commit-msg-accepted", false],
+];
+for (const [dir, refuse] of messages) {
+  for (const name of readdirSync(join(fixtures, dir))) {
+    const hook = spawnSync("sh", [
+      "-e",
+      join(root, ".vite-hooks/commit-msg"),
+      join(fixtures, dir, name),
+    ]);
+    const refused = hook.status !== 0;
+    console.log(`${refused ? "rejected" : "accepted"}\t${dir}/${name}`);
+    if (refused !== refuse) {
+      failures.push(`${dir}/${name}: the hook ${refused ? "refused" : "accepted"} it`);
+    }
+  }
 }
 
 if (failures.length > 0) {
-  console.error(`\nThe setup let these through:\n${failures.join("\n")}`);
+  console.error(`\nThe setup got these wrong:\n${failures.join("\n")}`);
   process.exitCode = 1;
 }
