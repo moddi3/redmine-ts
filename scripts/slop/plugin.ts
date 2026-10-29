@@ -52,17 +52,38 @@ const boundedTestLoop = {
   },
 };
 
-const unwrapAssertions = (node: Node | undefined): Node | undefined =>
-  node !== undefined && (node.type === "TSAsExpression" || node.type === "TSTypeAssertion")
-    ? unwrapAssertions(child(node, "expression"))
+const isAssertion = (node: Node | undefined): boolean =>
+  node?.type === "TSAsExpression" || node?.type === "TSTypeAssertion";
+
+const isConstAssertion = (node: Node): boolean => {
+  const annotation = child(node, "typeAnnotation");
+  const name = annotation === undefined ? undefined : child(annotation, "typeName");
+  return name?.type === "Identifier" && name.name === "const";
+};
+
+/**
+ * A cast is reported once, on its outermost assertion: `x as unknown as T` on the outer `as`, and
+ * `x as T as const` on `as T`, since `as const` is not a cast.
+ */
+const isOutermostCast = (node: Node): boolean => {
+  const parent = child(node, "parent");
+  const insideCast = parent !== undefined && isAssertion(parent) && !isConstAssertion(parent);
+  return !isConstAssertion(node) && !insideCast;
+};
+
+/** The value a cast reads, under other assertions, `!` and `?.`. */
+const castValue = (node: Node | undefined): Node | undefined =>
+  node !== undefined &&
+  (isAssertion(node) || node.type === "TSNonNullExpression" || node.type === "ChainExpression")
+    ? castValue(child(node, "expression"))
     : node;
 
-// PRs 76 and 77 added 30 casts of structuredContent to tests, each copied from the casts next to it.
+// PRs 76 and 77 added 14 casts of structuredContent to tests.
 const noStructuredContentCast = {
   create(context: Context) {
     const check = (node: Node): void => {
-      if (child(node, "parent")?.type === "TSAsExpression") return;
-      const target = unwrapAssertions(child(node, "expression"));
+      if (!isOutermostCast(node)) return;
+      const target = castValue(child(node, "expression"));
       const property = target?.type === "MemberExpression" ? child(target, "property") : undefined;
       if (property?.name !== "structuredContent") return;
       context.report({
@@ -77,21 +98,14 @@ const noStructuredContentCast = {
   },
 };
 
-const isConstAssertion = (node: Node): boolean => {
-  const annotation = child(node, "typeAnnotation");
-  const name = annotation === undefined ? undefined : child(annotation, "typeName");
-  return name?.type === "Identifier" && name.name === "const";
-};
-
 // 19ad0dc cast `authInfo.extra.redmine as RequestAuth`; an agent working on issue 92 cast a tool's
 // inputSchema to `{ properties?: ... }`. typescript/no-unsafe-type-assertion misses the second, because the
 // target type is compatible, and typescript/consistent-type-assertions suggests `satisfies`, which narrows nothing.
 const noTypeAssertion = {
   create(context: Context) {
     const check = (node: Node): void => {
-      if (isConstAssertion(node)) return;
-      if (child(node, "parent")?.type === "TSAsExpression") return;
-      const property = unwrapAssertions(node);
+      if (!isOutermostCast(node)) return;
+      const property = castValue(node);
       const target =
         property?.type === "MemberExpression" ? child(property, "property") : undefined;
       if (target?.name === "structuredContent") return;
