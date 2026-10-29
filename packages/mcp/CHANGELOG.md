@@ -1,5 +1,37 @@
 # @redmine-ts/mcp
 
+## 0.5.0
+
+### Minor Changes
+
+- c9e701a: `tools/list` now describes `where` with a table instead of a schema for each filter. In `issues_list`, `time_entries_list`, `users_list` and `projects_list`, `where` takes one loose condition, and its description lists the filters: each filter's value, such as an id, a date, `me` or `open`, and what it filters, under the operators it takes. The server still checks each call against the forms of each filter, so a bad filter gets the same error as before.
+
+  A full-access listing goes from 276K to 200K characters, and the input schema of `issues_list` from 48,004 to 4,474 bytes. Every input schema is now under 5,000 bytes. Codex strips the descriptions from a larger one, so it used to show the four list tools without their filter descriptions and with each operator form as `{}`.
+
+- d5bd5a9: `people_find` is a new read-only workflow tool that finds people by name in a project's members, or on an issue and in its project, and returns each one's id, name and login for an `@login` mention, with any API key. Each match says how it matched: `exact`, `prefix`, or `partial` for a name that Redmine shows shorter, such as Ivan P., which comes only when nothing matched better. Groups the key may see are left out. It makes at most 26 calls, each retried up to twice by the SDK by default. Every access mode lists it, so `full` now lists 93 tools, 92 on a 6.1 server, `no-delete` 77 and `read-only` 44.
+
+  The 14 tools whose Redmine actions run `require_admin`, such as `users_list`, now say "Needs an admin key" in their description, and their 403 error says that they need one or that the REST API is disabled. Each names what works without an admin key, where something does. A `user_id` input now names `people_find` as where to find the id, or `users_list` where `people_find` cannot find the user.
+
+  `reference_data` and `issue_context` no longer read a sixth page of members to learn that a project has more than 500.
+
+- 0281264: List tools and `issue_context` now stop filling a result at 32,000 bytes of its compact JSON, so that results stay under what Cursor, Codex and OpenCode accept and Claude Code no longer saves them to a file. The budget counts UTF-8 bytes of one copy of the JSON, as the result is sent, with API keys hidden.
+
+  A list page now ends before the item that would take it over the budget, so it may hold fewer than `limit` items, and `next_offset` names the first item left out. A page holds one item at least, so `next_offset` always moves on. Callers that page with `next_offset` need no change; a caller that took a page short of `limit` for the last page should read `next_offset` instead.
+
+  `issue_context` adds the newest journals only while they fit, one at least, and returns `journals_before`, the id of the oldest journal it returned, whenever it leaves older journals out, by the `journals` count or by the budget. Calling it again with `journals_before` returns the next older page, and `journals_before` is `null` on the last. `journals_omitted` counts the older journals still left out. Journals in `full` come on top and are never cut. When the issue alone is over the budget, each page holds the issue and one journal. The `issues_get` description now points to `issue_context` for a long history.
+
+  `REDMINE_MCP_MAX_RESULT_BYTES`, or the `maxResultBytes` option of `createRedmineMcpServer` and `createRedmineMcpHandler`, changes the budget, at least 1,000 bytes. Above 49,000, list tools and `issue_context` also carry `_meta["anthropic/maxResultSizeChars"]`, set to the budget plus 1,000, so Claude Code keeps their results inline.
+
+- 8ef5e5c: `issues_list` items are now short by default. Each item carries only `id`, `project`, `tracker`, `status`, `assigned_to`, `subject` and `updated_on`, plus the associations that `include` names, so a page of 100 issues on a test server went from about 69K to about 27K characters. The new `fields` input adds other item fields, such as `fields: ["due_date", "spent_hours"]`; `id` is always kept, `attachments` and `relations` there are fetched as `include` would, and a name that is not an item field is refused before any request. For the fields that items carried before, pass `detailed: true`, which returns every field as it did and adds `description`, or name the fields you need in `fields`. The other list tools are unchanged.
+
+  Every tool but `raw_request`, and the issue resource, now rounds hour fields to two decimals: `estimated_hours`, `total_estimated_hours`, `spent_hours` and `total_spent_hours` of issues and versions, and a time entry's `hours`. Redmine can send them as long floats, such as `2.1600000262260437`, which now reads `2.16`. The SDK still returns what Redmine sends.
+
+### Patch Changes
+
+- 55df491: The output schemas of `issues_get`, `issues_list` and `issues_create` now require `project`, `tracker`, `status`, `priority` and `author` on each issue, and `id` in `parent`. Redmine sends them on every issue, so the results do not change.
+- Updated dependencies [55df491]
+  - @redmine-ts/sdk@0.6.0
+
 ## 0.4.0
 
 ### Minor Changes
