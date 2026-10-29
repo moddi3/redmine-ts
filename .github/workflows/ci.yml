@@ -33,6 +33,7 @@ jobs:
           cache: true
       - run: vp check
       - run: node scripts/slop/fence.ts --check
+      - run: node scripts/slop/fixtures.ts
       - if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags --depth=1 origin "$BASE_REF"

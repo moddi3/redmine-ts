@@ -1,0 +1,3 @@
+fix(mcp): name attachment_id in attachments_download and attachments_save, and name unknown arguments
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
