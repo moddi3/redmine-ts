@@ -24,6 +24,12 @@ import {
   SHORT_ISSUE,
 } from "./catalog-tools.ts";
 import { ISSUE_TEMPLATE, readIssue } from "./resources.ts";
+import {
+  checkResultBytes,
+  DEFAULT_RESULT_BYTES,
+  inlineChars,
+  resultBudget,
+} from "./result-budget.ts";
 import { isListed } from "./tools.ts";
 import type {
   Client,
@@ -67,6 +73,16 @@ export interface RedmineMcpOptions {
    * characters wherever a response repeats it.
    */
   dangerouslyRevealApiKeys?: boolean;
+  /**
+   * UTF-8 bytes of compact JSON at which list tools and issue_context stop filling a result. A list
+   * page then ends early, with next_offset at the first item left out, and issue_context returns
+   * journals_before for the older journals. Each result carries its JSON twice, and the budget counts
+   * one copy, because clients read one. Default 32,000, under Cursor's 40,000 bytes and Codex's about
+   * 48,000. Above 49,000, those tools also carry `_meta["anthropic/maxResultSizeChars"]`, set to the
+   * budget plus 1,000 and at most 500,000, so Claude Code keeps their results inline instead of saving
+   * those over 50,000 characters to a file. At least 1,000.
+   */
+  maxResultBytes?: number;
 }
 
 /** Compiled once per schema for the process, because HTTP serving builds a server per request. */
@@ -94,7 +110,13 @@ export function createRedmineMcpServer(
   config: RedmineConfig,
   options: RedmineMcpOptions = {},
 ): Server {
-  const { files, observe, dangerouslyRevealApiKeys } = options;
+  const {
+    files,
+    observe,
+    dangerouslyRevealApiKeys,
+    maxResultBytes = DEFAULT_RESULT_BYTES,
+  } = options;
+  checkResultBytes(maxResultBytes);
   const access = config.access ?? "full";
   const rm = createRedmine({
     ...config,
@@ -102,17 +124,24 @@ export function createRedmineMcpServer(
     normalize: true,
     ...(observe === undefined ? {} : { fetch: observed(config.fetch, observe) }),
   });
-  const context: ToolContext = { lookups: createLookups(rm), files };
   const redact = redactor(config.auth, dangerouslyRevealApiKeys === true);
+  const context: ToolContext = {
+    lookups: createLookups(rm),
+    files,
+    budget: resultBudget(maxResultBytes, redact),
+  };
   const tools = [...workflowTools(access, files?.dir), ...catalogTools];
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
-  const listed = tools.filter((tool) => isListed(tool, access, config.version)).map(definition);
+  const chars = inlineChars(maxResultBytes);
+  const listed = tools
+    .filter((tool) => isListed(tool, access, config.version))
+    .map((tool) => definition(tool, chars));
 
   const server = new Server(
     { name: "redmine", title: "Redmine", version: pkg.version },
     {
       capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
-      instructions: instructions(access, config.version),
+      instructions: instructions(access, config.version, maxResultBytes),
     },
   );
   server.setRequestHandler("tools/list", () => ({ tools: listed }));
@@ -223,7 +252,8 @@ async function explainFilters(schema: Schema, where: unknown): Promise<string | 
   return undefined;
 }
 
-function definition(tool: ToolSpec): Tool {
+/** `chars` lets Claude Code keep a budgeted tool's results inline up to that many characters. */
+function definition(tool: ToolSpec, chars: number | undefined): Tool {
   return {
     name: tool.name,
     title: tool.title,
@@ -231,6 +261,9 @@ function definition(tool: ToolSpec): Tool {
     inputSchema: (tool.listedInputSchema ?? tool.inputSchema) as Tool["inputSchema"],
     outputSchema: tool.outputSchema as Tool["outputSchema"],
     annotations: { title: tool.title, ...tool.annotations },
+    ...(tool.budgeted && chars !== undefined
+      ? { _meta: { "anthropic/maxResultSizeChars": chars } }
+      : {}),
   };
 }
 
@@ -276,7 +309,11 @@ function redmineFailure(tool: ToolSpec, error: RedmineError, redact: Redact): Ca
 }
 
 /** The first 512 characters stand alone, because some clients cut instructions there. */
-function instructions(access: Access, version: RedmineVersion | undefined): string {
+function instructions(
+  access: Access,
+  version: RedmineVersion | undefined,
+  resultBytes: number,
+): string {
   const mode = {
     full: "Access: full, writes and deletes included.",
     "no-delete": "Access: no-delete, so delete tools are hidden and refused.",
@@ -292,6 +329,7 @@ function instructions(access: Access, version: RedmineVersion | undefined): stri
     'people_find returns the id and login of people by name in a project or an issue, for any key. Tools whose description says "Needs an admin key", such as users_list, answer 403 to other keys.',
     'Filters go in `where`, keyed by Redmine filter name. A value or an array means equals any of them. The description of `where` lists each filter with its value and which of {not}, {gte}, {lte}, {between: [a, b]}, {contains}, {any: true}, {none: true} it accepts, and {raw: "..."} takes Redmine filter syntax. status_id also takes "open", "closed" and "any".',
     `List tools return {items, total_count, offset, limit, next_offset}. limit is ${DEFAULT_LIMIT} by default, at most ${MAX_LIMIT}. Call again with offset = next_offset until it is null. issues_list items carry only ${SHORT_ISSUE.join(", ")}, and fields adds others. Items of other lists leave out ${HEAVY_KEYS.join(", ")}. detailed: true returns every field, and the get tool returns one record in full.`,
+    `A list page stops before limit when its JSON would pass ${resultBytes.toLocaleString("en-US")} bytes, keeping one item at least, and next_offset names the first item left out. issue_context stops adding journals there too; pass its journals_before for the older ones.`,
     "Errors come back as tool results with isError and the error as JSON. A 422 carries Redmine's own messages; fix the named fields and retry.",
   ].join("\n");
 }

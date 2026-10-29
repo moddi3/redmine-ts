@@ -84,6 +84,33 @@ describe("parseCli", () => {
     });
   });
 
+  it("reads REDMINE_MCP_MAX_RESULT_BYTES over stdio and HTTP", () => {
+    const budget = { REDMINE_MCP_MAX_RESULT_BYTES: "60000" };
+    expect(parseCli([], { ...env, ...budget })).toMatchObject({
+      kind: "serve",
+      maxResultBytes: 60_000,
+    });
+    expect(parseCli(["--http"], { REDMINE_URL: env.REDMINE_URL, ...budget })).toMatchObject({
+      kind: "http",
+      options: { maxResultBytes: 60_000 },
+      warnings: [],
+    });
+    expect(parseCli([], { ...env, REDMINE_MCP_MAX_RESULT_BYTES: " " })).not.toHaveProperty(
+      "maxResultBytes",
+    );
+  });
+
+  it.each([
+    ["32k", "REDMINE_MCP_MAX_RESULT_BYTES must be a whole number of bytes, such as 32000"],
+    ["-1", "REDMINE_MCP_MAX_RESULT_BYTES must be a whole number of bytes, such as 32000"],
+    ["32", "REDMINE_MCP_MAX_RESULT_BYTES must be at least 1000 bytes"],
+  ])("refuses REDMINE_MCP_MAX_RESULT_BYTES=%s", (value, message) => {
+    expect(parseCli([], { ...env, REDMINE_MCP_MAX_RESULT_BYTES: value })).toEqual({
+      kind: "error",
+      message,
+    });
+  });
+
   it("never echoes the API key", () => {
     const command = parseCli([], {
       REDMINE_URL: KEY,

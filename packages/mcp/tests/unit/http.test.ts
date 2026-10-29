@@ -404,6 +404,19 @@ describe("createRedmineMcpHandler", () => {
     expect(keys).toHaveLength(3);
   });
 
+  it("builds every request's server with the handler's result budget", async () => {
+    const { handle } = handler({ maxResultBytes: 60_000 });
+    const client = await connect(handle, "alice-key");
+    const { tools } = await client.listTools();
+    expect(tools.find((tool) => tool.name === "issue_context")?._meta).toEqual({
+      "anthropic/maxResultSizeChars": 61_000,
+    });
+    expect(client.getInstructions()).toContain("would pass 60,000 bytes");
+    expect(() => handler({ maxResultBytes: 999 })).toThrow(
+      "maxResultBytes must be an integer of at least 1000",
+    );
+  });
+
   it.each(["legacy", "modern"] as const)(
     "serves a %s-era client the tools of its access mode",
     async (era) => {

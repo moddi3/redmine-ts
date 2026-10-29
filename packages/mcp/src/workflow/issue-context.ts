@@ -7,6 +7,8 @@ import type { Issue } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
 import { roundHours } from "../hours.ts";
+import { fitCount } from "../result-budget.ts";
+import type { ResultBudget } from "../result-budget.ts";
 import type { Client, ToolSpec } from "../tools.ts";
 import { UNTRUSTED } from "../user-text.ts";
 import { clip, journalRest, TEXT_CAP } from "./clip.ts";
@@ -148,10 +150,18 @@ const IssueContextSchema = z.object({
       }),
     )
     .describe(
-      "The newest journals and those in full, oldest first, with ids in changes resolved to names.",
+      "The newest journals before journals_before, and those in full, oldest first, with ids in changes resolved to names.",
     ),
   journals_total: z.int(),
-  journals_omitted: z.int().describe("Journals left out."),
+  journals_omitted: z
+    .int()
+    .describe("Journals older than these that this result leaves out, for the next pages."),
+  journals_before: z
+    .int()
+    .nullable()
+    .describe(
+      "Pass as journals_before for the next older page. null when no older journal is left out, or when journals is 0.",
+    ),
 });
 
 type IssueContext = z.output<typeof IssueContextSchema>;
@@ -163,7 +173,8 @@ export const issueContextTool: ToolSpec = defineTool({
     "Everything needed to work on one issue in one call: the issue with its full description, the statuses it can move to next, relations read from this issue, subtasks with their status, attachment metadata, watchers, and the newest journals as readable diffs with ids resolved to names.",
     "Call it first when asked to work on, triage or summarize an issue, instead of issues_get.",
     `Descriptions and notes longer than ${TEXT_CAP} characters are clipped with a marker that names the call returning them whole.`,
-    "Returns {issue, allowed_statuses, relations, children, attachments, watchers, journals, journals_total, journals_omitted}.",
+    "Returns {issue, allowed_statuses, relations, children, attachments, watchers, journals, journals_total, journals_omitted, journals_before}.",
+    "Journals stop at the result budget; call again with journals_before for the older ones.",
     "Next: issues_transition to change the status by name, issues_update for other fields or a note, attachments_download to read a file.",
   ].join(" "),
   input: z.strictObject({
@@ -174,8 +185,13 @@ export const issueContextTool: ToolSpec = defineTool({
       .max(MAX_JOURNALS)
       .default(DEFAULT_JOURNALS)
       .describe(
-        `How many of the newest journals to include, ${DEFAULT_JOURNALS} by default, at most ${MAX_JOURNALS}. 0 leaves them out.`,
+        `How many of the newest journals to include, ${DEFAULT_JOURNALS} by default, at most ${MAX_JOURNALS}, fewer past the result budget. 0 leaves them out.`,
       ),
+    journals_before: z
+      .int()
+      .positive()
+      .optional()
+      .describe("A journal id, from journals_before of the last result: returns older journals."),
     full: z
       .array(z.int().positive())
       .default([])
@@ -183,17 +199,30 @@ export const issueContextTool: ToolSpec = defineTool({
   }),
   output: IssueContextSchema,
   ...BY_METHOD.GET,
-  run: async (rm, { issue_id, journals, full }, { lookups }) => ({
-    structured: await issueContext(rm, lookups, issue_id, journals, full),
+  budgeted: true,
+  run: async (rm, input, { lookups, budget }) => ({
+    structured: await issueContext(rm, lookups, input, budget),
   }),
 });
 
+interface ContextInput {
+  readonly issue_id: number;
+  readonly journals: number;
+  readonly full: readonly number[];
+  readonly journals_before?: number | undefined;
+}
+
+/**
+ * The page is the newest `journals` before journals_before, as many as the budget fits with the rest
+ * of the result, and one at least, so paging moves on even when the issue alone is over the budget.
+ * Journals in full come on top of it, never cut. Without a budget, as for the issue resource, the
+ * count alone decides.
+ */
 async function issueContext(
   rm: Client,
   lookups: Lookups,
-  issue_id: number,
-  journals: number,
-  full: readonly number[],
+  { issue_id, journals, full, journals_before }: ContextInput,
+  budget: ResultBudget | undefined,
 ): Promise<IssueContext> {
   const issue = await rm.issues.get({ issue_id, include: [...INCLUDES] });
   const all = issue.journals ?? [];
@@ -205,11 +234,11 @@ async function issueContext(
       { kind: "unknown_journal", issue_id: issue.id, journal_ids: unknown },
     );
   }
-  const shown = all.filter(
-    (journal, index) => index >= all.length - journals || whole.has(journal.id),
-  );
+  const window = before(all, journals_before);
+  const newest = journals === 0 ? [] : window.slice(-journals);
+  const candidates = all.filter((journal) => newest.includes(journal) || whole.has(journal.id));
   const [names, children] = await Promise.all([
-    resolveNames(rm, lookups, issue, shown),
+    resolveNames(rm, lookups, issue, candidates),
     childrenOf(rm, issue),
   ]);
   const customFields = new Map((issue.custom_fields ?? []).map((cf) => [String(cf.id), cf.name]));
@@ -217,7 +246,7 @@ async function issueContext(
     Object.entries(issue).filter(([key]) => !(INCLUDES as readonly string[]).includes(key)),
   );
   const { description } = issue;
-  return {
+  const context: Omit<IssueContext, "journals_omitted" | "journals_before"> = {
     issue: roundHours({
       ...fields,
       id: issue.id,
@@ -246,9 +275,13 @@ async function issueContext(
     ...(issue.watchers === undefined
       ? {}
       : { watchers: issue.watchers.map(({ id, name }) => ({ id, name })) }),
-    journals: shown.map((journal) => {
+    journals: [],
+    journals_total: all.length,
+  };
+  const entries = new Map(
+    candidates.map((journal) => {
       const rest = whole.has(journal.id) ? undefined : journalRest(issue.id, journal.id);
-      return {
+      const entry: IssueContext["journals"][number] = {
         id: journal.id,
         note: all.indexOf(journal) + 1,
         user: journal.user?.name ?? null,
@@ -257,11 +290,36 @@ async function issueContext(
         private_notes: journal.private_notes ?? false,
         changes: changesOf(journal, names, customFields, rest),
       };
+      return [journal, entry];
     }),
-    journals_total: all.length,
-    journals_omitted: all.length - shown.length,
+  );
+  /** The result with the newest `count` journals of the page. */
+  const build = (count: number): IssueContext => {
+    const page = count === 0 ? [] : newest.slice(-count);
+    const older = window.slice(0, window.length - page.length);
+    const shown = candidates.filter((journal) => page.includes(journal) || whole.has(journal.id));
+    const omitted = older.filter((journal) => !whole.has(journal.id)).length;
+    return {
+      ...context,
+      journals: shown.map((journal) => entries.get(journal)!),
+      journals_omitted: omitted,
+      journals_before: page.length > 0 && omitted > 0 ? page[0]!.id : null,
+    };
   };
+  return budget === undefined ? build(newest.length) : fitCount(budget, newest.length, build);
 }
+
+/**
+ * The journals before journals_before, oldest first: those before it in Redmine's order, or, for an id
+ * the key cannot see now, such as a journal deleted since, those with a lower id.
+ */
+function before(all: readonly Journal[], id: number | undefined): readonly Journal[] {
+  if (id === undefined) return all;
+  const at = all.findIndex((journal) => journal.id === id);
+  return at === -1 ? all.filter((journal) => journal.id < id) : all.slice(0, at);
+}
+
+type Journal = NonNullable<Issue["journals"]>[number];
 
 function relationFrom(
   issueId: number,
@@ -312,7 +370,9 @@ export async function issueMarkdown(
   lookups: Lookups,
   issue_id: number,
 ): Promise<string> {
-  return markdown(await issueContext(rm, lookups, issue_id, DEFAULT_JOURNALS, []));
+  return markdown(
+    await issueContext(rm, lookups, { issue_id, journals: DEFAULT_JOURNALS, full: [] }, undefined),
+  );
 }
 
 function markdown(context: IssueContext): string {
@@ -383,7 +443,7 @@ function markdown(context: IssueContext): string {
     lines.push("", "## Journals", "");
     if (context.journals_omitted > 0) {
       lines.push(
-        `The newest ${journals.length} of ${context.journals_total}, oldest first; ${context.journals_omitted} older left out. The issue_context tool takes up to 100, and issues_get with include ["journals"] returns all.`,
+        `The newest ${journals.length} of ${context.journals_total}, oldest first; ${context.journals_omitted} older left out. The issue_context tool returns them with journals_before: ${context.journals_before}.`,
       );
     }
     for (const journal of journals) {

@@ -5,6 +5,7 @@ import type { ContentBlock } from "@modelcontextprotocol/server";
 import { VERSIONS } from "@redmine-ts/sdk";
 import type { Access, Redmine, RedmineVersion } from "@redmine-ts/sdk";
 import type { JsonSchema } from "@redmine-ts/sdk/catalog";
+import type { ResultBudget } from "./result-budget.ts";
 import type { Lookups } from "./workflow/lookups.ts";
 
 /** Any declared version: tools see the whole client surface, and the SDK guards versions at runtime. */
@@ -50,6 +51,8 @@ export interface ToolContext {
   readonly lookups: Lookups;
   /** Where `path` inputs read from and saved attachments go, when the server has a files directory. */
   readonly files: LocalFiles | undefined;
+  /** The size at which tools that set `budgeted` stop filling their result. */
+  readonly budget: ResultBudget;
 }
 
 export interface ToolResult {
@@ -81,6 +84,8 @@ export interface ToolSpec {
    * when nothing does. The description and the 403 error say that the tool needs one, and add it.
    */
   readonly adminOnly?: string;
+  /** Set when the tool stops filling its result at the result budget, as list tools do. */
+  readonly budgeted?: boolean;
   /** Redmine failures reject with a RedmineError. */
   readonly run: (
     rm: Client,
