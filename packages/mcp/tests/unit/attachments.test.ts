@@ -230,9 +230,7 @@ describe("attachments_upload", () => {
       const file = await localFiles(dir).open("logs/app.log");
       rmSync(join(dir, "logs", "app.log"));
       symlinkSync(join(root, "secret.txt"), join(dir, "logs", "app.log"));
-      await expect(file.bytes()).rejects.toThrow(
-        'path "logs/app.log" changed while it was read, so nothing was sent',
-      );
+      await expect(file.bytes()).rejects.toThrow('path "logs/app.log" changed while it was read');
     });
 
     it("reads nothing when a directory on the path is swapped for a symlink after the check", async () => {

@@ -2,4 +2,4 @@
 "@redmine-ts/mcp": patch
 ---
 
-`attachments_upload` reads a file from the files directory through one handle, and refuses it, sending nothing, if its path changed after it was checked, for example into a symlink to a file outside the directory.
+`attachments_upload` reads a file from the files directory through one handle, checked after it is opened against what the path names in the directory, and reads no more than the size it checked. A FIFO no longer blocks it, and an unreadable file is refused with `invalid_input`.
