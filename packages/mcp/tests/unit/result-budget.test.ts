@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import { createRedmineMcpServer } from "../../src/index.ts";
 import { lastJson } from "../connect.ts";
+import { structured } from "../structured.ts";
 import { callOk, json, serve } from "./harness.ts";
 import type { Route } from "./harness.ts";
 
@@ -44,13 +46,16 @@ function issues(list: readonly ReturnType<typeof issue>[]): Record<string, Route
   };
 }
 
-interface Page {
-  items: { id: number; subject: string }[];
-  total_count: number;
-  offset: number;
-  limit: number;
-  next_offset: number | null;
-}
+const pageOf = <Item extends z.ZodType>(item: Item) =>
+  z.looseObject({
+    items: z.array(item),
+    total_count: z.number(),
+    offset: z.number(),
+    limit: z.number(),
+    next_offset: z.number().nullable(),
+  });
+const Page = pageOf(z.looseObject({ id: z.number(), subject: z.string() }));
+type Page = z.infer<typeof Page>;
 
 const TWENTY = Array.from({ length: 20 }, (_, n) =>
   issue(n + 1, `Issue ${n + 1} ${"x".repeat(300)}`),
@@ -69,7 +74,7 @@ describe("a list page under the result budget", () => {
         name: "issues_list",
         arguments: { limit: 20, offset },
       });
-      const page = result.structuredContent as unknown as Page;
+      const page = structured(result, Page);
       // The text block carries the same JSON that is measured.
       expect(lastJson(result)).toEqual(page);
       pages.push(page);
@@ -101,11 +106,10 @@ describe("a list page under the result budget", () => {
   it("keeps one item that alone passes the budget, so next_offset still moves on", async () => {
     const list = [issue(1, "Short"), issue(2, "y".repeat(3_000)), issue(3, "Short")];
     const { client } = await serve(issues(list), {}, { maxResultBytes: 1_000 });
-    const first = (await callOk(client, "issues_list", {})).structuredContent as unknown as Page;
+    const first = structured(await callOk(client, "issues_list", {}), Page);
     expect(first.items.map((item) => item.id)).toEqual([1]);
     expect(first.next_offset).toBe(1);
-    const alone = (await callOk(client, "issues_list", { offset: 1 }))
-      .structuredContent as unknown as Page;
+    const alone = structured(await callOk(client, "issues_list", { offset: 1 }), Page);
     expect(alone.items.map((item) => item.id)).toEqual([2]);
     expect(alone.next_offset).toBe(2);
     expect(bytes(alone)).toBeGreaterThan(1_000);
@@ -116,10 +120,11 @@ describe("a list page under the result budget", () => {
       issue(n + 1, `Задача ${n + 1} ${"ж".repeat(200)}`),
     );
     const { client } = await serve(issues(list), {}, { maxResultBytes: 2_000 });
-    const page = (await callOk(client, "issues_list", { limit: 10 }))
-      .structuredContent as unknown as Page;
-    const next = (await callOk(client, "issues_list", { limit: 1, offset: page.items.length }))
-      .structuredContent as unknown as Page;
+    const page = structured(await callOk(client, "issues_list", { limit: 10 }), Page);
+    const next = structured(
+      await callOk(client, "issues_list", { limit: 1, offset: page.items.length }),
+      Page,
+    );
     const grown = {
       ...page,
       items: [...page.items, ...next.items],
@@ -139,7 +144,7 @@ describe("a list page under the result budget", () => {
       { auth: { apiKey: key } },
       { maxResultBytes: 3_000 },
     );
-    const page = (await callOk(client, "issues_list", {})).structuredContent as unknown as Page;
+    const page = structured(await callOk(client, "issues_list", {}), Page);
     expect(page.items).toHaveLength(5);
     expect(page.next_offset).toBeNull();
     expect(page.items[0]!.subject).toBe("Pasted [hidden by @redmine-ts/mcp] by mistake");
@@ -159,8 +164,10 @@ describe("a list page under the result budget", () => {
       {},
       { maxResultBytes: 1_000 },
     );
-    const page = (await callOk(client, "issue_statuses_list", { limit: 30, offset: 2 }))
-      .structuredContent as unknown as Page;
+    const page = structured(
+      await callOk(client, "issue_statuses_list", { limit: 30, offset: 2 }),
+      pageOf(z.looseObject({ id: z.number(), name: z.string() })),
+    );
     expect(page.items.length).toBeGreaterThan(0);
     expect(page.items.length).toBeLessThan(28);
     expect(page.items[0]!.id).toBe(3);
@@ -174,8 +181,7 @@ describe("the result budget setting", () => {
     const list = Array.from({ length: 100 }, (_, n) => issue(n + 1, "x".repeat(500)));
     const { client } = await serve(issues(list));
     expect(client.getInstructions()).toContain("would pass 32,000 bytes");
-    const page = (await callOk(client, "issues_list", { limit: 100 }))
-      .structuredContent as unknown as Page;
+    const page = structured(await callOk(client, "issues_list", { limit: 100 }), Page);
     expect(page.items.length).toBeLessThan(100);
     expect(bytes(page)).toBeLessThanOrEqual(32_000);
     expect(page.next_offset).toBe(page.items.length);
