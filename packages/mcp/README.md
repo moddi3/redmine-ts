@@ -202,11 +202,23 @@ A list tool returns one page:
 
 `limit` is 25 by default and at most 100. To read the next page, call the tool again with `offset` set to `next_offset`. `next_offset` is `null` on the last page. Lists that Redmine returns whole, such as `issue_statuses_list`, are paged the same way.
 
-Items in a page leave out the long fields `description`, `notes`, `text`, `comments`, `journals`, and `changesets`. Pass `detailed: true` to keep them, or call the `get` tool for one record.
+An `issues_list` item is short. It carries only `id`, `project`, `tracker`, `status`, `assigned_to`, `subject`, and `updated_on`, which is enough to pick an issue from a search, and the associations that `include` names. On a test server, a page of 100 issues was about 27K characters instead of 69K. `fields` adds other item fields, such as `due_date` and `spent_hours`, and the tool's description names them all:
+
+```json
+{ "where": { "assigned_to_id": "me" }, "fields": ["due_date", "spent_hours"] }
+```
+
+`id` is always kept. Redmine sends `attachments` and `relations` only when asked, so naming one in `fields` asks for it, as `include` does. A name in `fields` that is not an item field is refused before any request, and the error lists the item fields.
+
+Items of the other list tools leave out the long fields `description`, `notes`, `text`, `comments`, `journals`, and `changesets`.
+
+Pass `detailed: true` to get every field of each item, the long ones included, or call the `get` tool for one record.
 
 ### Results
 
 A tool that returns a record, such as `issues_get` or `issues_create`, returns Redmine's record with the SDK's response fixes applied, such as turning the `hours` string `"8/1"` into the number 8. Each `api_key` value in it reads `[hidden by @redmine-ts/mcp]`, as [API keys](#api-keys) describes. A tool with nothing to return, such as `issues_update` or `issues_delete`, returns `{ "ok": true }`.
+
+Redmine can send hours as long floats, such as `2.1600000262260437`, or `0.3333333333333333` for the time spent on an issue with a 20-minute entry. Every tool but `raw_request` rounds `estimated_hours`, `total_estimated_hours`, `spent_hours`, `total_spent_hours`, and a time entry's `hours` to two decimals, so that one reads `2.16`. So does the issue resource. `raw_request` and the SDK return the hours as Redmine sends them.
 
 Every result carries the object twice: as `structuredContent`, and as compact JSON in a text block. The tool's `outputSchema` describes it, and the server checks each result against that schema before it answers. `attachments_download` adds the image as an image block after the JSON.
 
@@ -217,7 +229,7 @@ A failed Redmine request comes back as a tool result with `isError: true`, never
 - A 422 carries Redmine's own messages, such as `Subject cannot be blank`, in the user's language.
 - A 404 says to check the ids.
 - A 403 from a [tool that needs an admin key](#tools-that-need-an-admin-key) says so, and names what works without one.
-- Input that does not match the tool's schema, or a filter form that the filter does not take, is refused before any request. For a bad filter, the message lists the forms the filter accepts.
+- Input that does not match the tool's schema, a filter form that the filter does not take, or a name in `fields` that is not an item field, is refused before any request. For a bad filter, the message lists the forms the filter accepts, and for a bad field name, the item fields.
 
 ### Tools that need an admin key
 

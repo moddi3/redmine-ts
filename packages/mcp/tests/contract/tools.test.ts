@@ -27,6 +27,9 @@ function outputChecker(tools: readonly Tool[]) {
   };
 }
 
+/** What an issues_list item carries without fields or detailed. */
+const SHORT = ["id", "project", "tracker", "status", "assigned_to", "subject", "updated_on"];
+
 describeServers("generated tools", (server) => {
   let client: Client;
   let tools: Tool[];
@@ -110,9 +113,13 @@ describeServers("generated tools", (server) => {
       required: expect.arrayContaining(["project", "tracker", "status", "priority", "author"]),
       properties: { parent: { required: ["id"] } },
     };
+    const short = {
+      required: expect.arrayContaining(["project", "tracker", "status"]),
+      properties: { parent: { required: ["id"] } },
+    };
     const outputOf = (name: string) => tools.find((tool) => tool.name === name)?.outputSchema;
     expect(outputOf("issues_get")).toMatchObject(issue);
-    expect(outputOf("issues_list")).toMatchObject({ properties: { items: { items: issue } } });
+    expect(outputOf("issues_list")).toMatchObject({ properties: { items: { items: short } } });
 
     const marker = `mcp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const parent = await ok("issues_create", {
@@ -130,10 +137,100 @@ describeServers("generated tools", (server) => {
     expect(await ok("issues_get", { issue_id: child.id })).toMatchObject({
       parent: { id: parent.id },
     });
-    const page = await ok("issues_list", { where: { parent_id: parent.id as number } });
+    const page = await ok("issues_list", {
+      where: { parent_id: parent.id as number },
+      fields: ["parent"],
+    });
     expect(page.items).toEqual([
       expect.objectContaining({ id: child.id, parent: { id: parent.id } }),
     ]);
+  });
+
+  it("returns short issues_list items, adds what fields names, and rounds a real time entry's hours", async () => {
+    const marker = `mcp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const issue = await ok("issues_create", {
+      project_id: server.projectIdentifier,
+      subject: `MCP short item ${marker}`,
+      description: "Created by the MCP contract test.",
+      due_date: "2026-12-31",
+      estimated_hours: 2 / 3,
+    });
+    const issue_id = issue.id as number;
+    created.push(issue_id);
+    expect(issue).toMatchObject({ estimated_hours: 0.67 });
+    // 20 minutes. Redmine rounds a time entry's own hours, but not the issue's sum of them.
+    const [activity] = await sdk.enumerations.listTimeEntryActivities().all();
+    const entry = await ok("time_entries_create", {
+      issue_id,
+      activity_id: activity!.id,
+      hours: 1 / 3,
+    });
+    const time_entry_id = entry.id as number;
+    expect(entry).toMatchObject({ hours: 0.33 });
+    expect((await sdk.timeEntries.get({ time_entry_id })).hours).toBe(0.33);
+    expect(await sdk.issues.get({ issue_id })).toMatchObject({
+      estimated_hours: 2 / 3,
+      spent_hours: 1 / 3,
+      total_spent_hours: 1 / 3,
+    });
+
+    try {
+      expect(await ok("time_entries_get", { time_entry_id })).toMatchObject({ hours: 0.33 });
+      const entries = await ok("time_entries_list", { where: { issue_id } });
+      expect(entries.items).toEqual([expect.objectContaining({ id: time_entry_id, hours: 0.33 })]);
+
+      // A project's default assignee would assign the issue.
+      const carried = SHORT.filter((key) => key !== "assigned_to" || "assigned_to" in issue);
+      const where = { issue_id, status_id: "any" };
+      const short = await ok("issues_list", { where });
+      const [item] = short.items as Record<string, unknown>[];
+      expect(short.items).toHaveLength(1);
+      expect(Object.keys(item!).toSorted()).toEqual(carried.toSorted());
+      expect(item).toMatchObject({
+        id: issue_id,
+        project: { id: (issue.project as { id: number }).id },
+        subject: `MCP short item ${marker}`,
+      });
+
+      const fields = ["due_date", "estimated_hours", "spent_hours"];
+      const added = await ok("issues_list", { where, fields });
+      const [more] = added.items as Record<string, unknown>[];
+      expect(Object.keys(more!).toSorted()).toEqual([...carried, ...fields].toSorted());
+      expect(more).toMatchObject({
+        due_date: "2026-12-31",
+        estimated_hours: 0.67,
+        spent_hours: 0.33,
+      });
+
+      const detailed = await ok("issues_list", { where, detailed: true });
+      expect(detailed.items).toEqual([
+        expect.objectContaining({
+          id: issue_id,
+          description: "Created by the MCP contract test.",
+          priority: expect.objectContaining({ id: expect.any(Number) }),
+          author: expect.objectContaining({ id: expect.any(Number) }),
+          spent_hours: 0.33,
+        }),
+      ]);
+
+      const refused = await client.callTool({
+        name: "issues_list",
+        arguments: { where, fields: ["due"] },
+      });
+      expect(refused.isError).toBe(true);
+      expect(texts(refused)[0]).toContain('unknown item field "due" in fields');
+
+      expect(await ok("issues_get", { issue_id })).toMatchObject({
+        estimated_hours: 0.67,
+        spent_hours: 0.33,
+      });
+      const context = await client.callTool({ name: "issue_context", arguments: { issue_id } });
+      expect(context.structuredContent).toMatchObject({
+        issue: { estimated_hours: 0.67, spent_hours: 0.33 },
+      });
+    } finally {
+      await sdk.timeEntries.delete({ time_entry_id });
+    }
   });
 
   it("answers every list tool that needs no input within its outputSchema, concise and detailed", async () => {

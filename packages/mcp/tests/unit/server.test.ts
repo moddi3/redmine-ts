@@ -248,7 +248,8 @@ describe("tools/list", () => {
     expect(get("issues_delete")).toContain("Deletes permanently");
     expect(get("groups_remove_users")).toContain("Needs Redmine 7.0");
     expect(get("issues_list")).toContain("next_offset");
-    expect(get("issues_list")).not.toMatch(/Item fields: [^.]*description/);
+    expect(get("projects_list")).toContain("Item fields: ");
+    expect(get("projects_list")).not.toMatch(/Item fields: [^.]*description/);
   });
 });
 
