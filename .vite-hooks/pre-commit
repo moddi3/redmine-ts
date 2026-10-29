@@ -1,1 +1,2 @@
 vp staged
+node scripts/slop/fence.ts --check

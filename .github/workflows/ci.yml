@@ -32,6 +32,13 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: true
       - run: vp check
+      - run: node scripts/slop/fence.ts --check
+      - if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          node scripts/slop/fence.ts --base FETCH_HEAD
+        env:
+          BASE_REF: ${{ github.base_ref }}
       - run: vp run --no-cache -r test
       - run: vp run -r build
       - run: vp run gen:check
