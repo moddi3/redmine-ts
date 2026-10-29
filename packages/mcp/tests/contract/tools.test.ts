@@ -55,7 +55,7 @@ describeServers("generated tools", (server) => {
 
   it("lists groups_remove_users only where the declared version has it", () => {
     const names = tools.map((tool) => tool.name);
-    expect(names).toHaveLength(server.version === "6.1" ? 91 : 92);
+    expect(names).toHaveLength(server.version === "6.1" ? 92 : 93);
     if (server.version === "6.1") expect(names).not.toContain("groups_remove_users");
     else expect(names).toContain("groups_remove_users");
   });
@@ -145,6 +145,33 @@ describeServers("generated tools", (server) => {
       await ok(tool.name, { limit: 5 });
       await ok(tool.name, { limit: 5, detailed: true });
     }
+  });
+
+  it("answers a key that is not an admin's with 403 exactly on the lists that need an admin key, and says so", async () => {
+    const jsmith = await connectTo(server, "read-only", { apiKey: server.userKey });
+    const lists = (await jsmith.listTools()).tools.filter(
+      (tool) => tool.name.includes("_list") && (tool.inputSchema.required ?? []).length === 0,
+    );
+    const adminOnly = lists
+      .filter((tool) => tool.description?.includes("Needs an admin key."))
+      .map((tool) => tool.name);
+    expect(adminOnly.toSorted()).toEqual(["custom_fields_list", "groups_list", "users_list"]);
+    for (const { name } of lists) {
+      const result = await jsmith.callTool({ name, arguments: { limit: 1 } });
+      if (adminOnly.includes(name)) {
+        expect(result.isError, name).toBe(true);
+        expect(lastJson(result)).toMatchObject({ kind: "forbidden", status: 403 });
+        expect(texts(result)[0]).toMatch(
+          new RegExp(
+            `^Redmine answered 403 for ${name}: it needs an admin key, or the REST API is disabled\\.`,
+          ),
+        );
+      } else {
+        expect(result.isError, `${name}: ${texts(result).join("\n")}`).toBeFalsy();
+      }
+    }
+    const users = await jsmith.callTool({ name: "users_list", arguments: {} });
+    expect(texts(users)[0]).toContain("call people_find, or memberships_list and then users_get.");
   });
 
   it("maps a real 422 to Redmine's messages", async () => {

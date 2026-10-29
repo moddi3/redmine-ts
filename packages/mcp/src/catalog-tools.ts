@@ -82,6 +82,29 @@ export const BY_METHOD: Readonly<
   },
 };
 
+/**
+ * Catalog entries whose Redmine action is behind `before_action :require_admin` in UsersController,
+ * GroupsController, CustomFieldsController and ProjectsController on 6.1-stable and 7.0-stable, so
+ * Redmine answers 403 to every other key. Each maps to what works without an admin key, or "".
+ */
+export const ADMIN_ONLY: Readonly<Record<string, string>> = {
+  getUsers:
+    "To find a user's id and login by name without one, call people_find, or memberships_list and then users_get.",
+  createUser: "",
+  updateUser: "my_account_update changes the key's own account.",
+  deleteUser: "",
+  getGroups: "memberships_list lists the groups in a project, and groups_get reads one by id.",
+  createGroup: "",
+  updateGroup: "",
+  deleteGroup: "",
+  addUserToGroup: "",
+  removeUsersFromGroup: "",
+  removeUserFromGroup: "",
+  getCustomFields: "reference_data with project_id names the project's issue custom fields.",
+  archiveProject: "",
+  unarchiveProject: "",
+};
+
 /** Where an agent finds the id an input field wants. Names are tool names. */
 export const ID_SOURCES: Readonly<Record<string, string>> = {
   project_id: "projects_list",
@@ -92,7 +115,21 @@ export const ID_SOURCES: Readonly<Record<string, string>> = {
   category_id: "issue_categories_list",
   fixed_version_id: "versions_list",
   assigned_to_id: "memberships_list",
+  user_id: "people_find",
   role_ids: "roles_list",
+};
+
+/**
+ * Catalog entries whose user_id people_find cannot give, because it searches only a project's
+ * members and an issue's people: the tools that need an admin key, and adding a member. Each maps to
+ * where the id comes from instead.
+ */
+const USER_ID_SOURCES: Readonly<Record<string, string>> = {
+  updateUser: "users_list",
+  deleteUser: "users_list",
+  addUserToGroup: "users_list",
+  removeUserFromGroup: "users_list",
+  createMembership: "users_list with an admin key",
 };
 
 const FORMS: Readonly<Record<string, string>> = {
@@ -173,14 +210,16 @@ function toolFor(entry: CatalogEntry): ToolSpec {
     const namespaces = rm as unknown as Record<string, Record<string, Method>>;
     return namespaces[entry.namespace]![entry.verb]!(input);
   };
+  const adminOnly = ADMIN_ONLY[entry.id];
   const common = {
     name: toolName(entry),
     title: entry.title,
-    description: describeTool(entry),
+    description: describeTool(entry, adminOnly),
     annotations,
     tier,
     since: entry.since,
     until: entry.until,
+    ...(adminOnly === undefined ? {} : { adminOnly }),
   };
   const { output } = entry;
   switch (output.kind) {
@@ -449,7 +488,7 @@ function specOf(filter: JsonSchema): Spec {
   return { summary, codes, words, values };
 }
 
-function describeTool(entry: CatalogEntry): string {
+function describeTool(entry: CatalogEntry, adminOnly: string | undefined): string {
   const { output } = entry;
   const fields = (schema: JsonSchema, omit: readonly string[] = []): string => {
     const keys = Object.keys(schema.properties ?? {}).filter((key) => !omit.includes(key));
@@ -480,17 +519,23 @@ function describeTool(entry: CatalogEntry): string {
   };
   const ids = Object.keys(ID_SOURCES)
     .filter((key) => key in inputs)
-    .map((key) => `${key} from ${ID_SOURCES[key]}`);
+    .map(
+      (key) => `${key} from ${(key === "user_id" && USER_ID_SOURCES[entry.id]) || ID_SOURCES[key]}`,
+    );
   const version = [
     entry.since !== VERSIONS[0] ? `Needs Redmine ${entry.since} or newer.` : "",
     entry.until !== null ? `Removed after Redmine ${entry.until}.` : "",
   ];
   return [
     `${entry.title}.`,
+    adminOnly === undefined ? "" : `Needs an admin key. ${adminOnly}`.trimEnd(),
     clip(entry.description, 300),
     effect,
     returns,
     ids.length > 0 ? `Ids, not names: ${ids.join(", ")}.` : "",
+    entry.id === "createMembership"
+      ? "people_find searches only a project's members and an issue's people, so it does not find a user who is not a member yet."
+      : "",
     ...version,
     entry.docsUrl ? `Docs: ${entry.docsUrl}` : "",
   ]

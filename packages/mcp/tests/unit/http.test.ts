@@ -413,7 +413,7 @@ describe("createRedmineMcpHandler", () => {
         era === "modern" ? "2026-07-28" : "2025-11-25",
       );
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(43);
+      expect(tools).toHaveLength(44);
       expect(tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
       // An HTTP server has no files directory, so nothing it lists can touch local files.
       expect(tools.map((tool) => tool.name)).not.toContain("attachments_save");
@@ -647,8 +647,8 @@ describe("createRedmineMcpHandler with a verifier", () => {
   it("sends the grant's Redmine credential, never the token, in the token's access mode", async () => {
     const { call, seen } = gated();
     const listed = await call({ Authorization: "Bearer alice" });
-    // redmine:write is no-delete: 76 tools, the deletes hidden.
-    expect((await listed.text()).match(/"name":"/g)).toHaveLength(76);
+    // redmine:write is no-delete: 77 tools, the deletes hidden.
+    expect((await listed.text()).match(/"name":"/g)).toHaveLength(77);
     const called = await call({ Authorization: "Bearer alice" }, "tools/call");
     expect(await called.text()).toContain("New for Bearer [hidden by @redmine-ts/mcp]");
     expect(seen).toEqual(["Bearer redmine-token-of-alice"]);

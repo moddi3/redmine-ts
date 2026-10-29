@@ -111,12 +111,12 @@ async function toolNames(access: Access, version?: RedmineVersion): Promise<stri
 
 describe("tools/list", () => {
   it.each([
-    ["full", undefined, 92],
-    ["no-delete", undefined, 76],
-    ["read-only", undefined, 43],
-    ["full", "6.1", 91],
-    ["no-delete", "6.1", 76],
-    ["read-only", "6.1", 43],
+    ["full", undefined, 93],
+    ["no-delete", undefined, 77],
+    ["read-only", undefined, 44],
+    ["full", "6.1", 92],
+    ["no-delete", "6.1", 77],
+    ["read-only", "6.1", 44],
   ] as const)("lists the tools %s access allows on version %s", async (access, version, count) => {
     expect(await toolNames(access, version)).toHaveLength(count);
   });

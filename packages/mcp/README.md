@@ -4,7 +4,7 @@
 
 Let ChatGPT, Claude, and your coding agents work in Redmine as you.
 
-`@redmine-ts/mcp` is an MCP server with 92 tools for the Redmine REST API, over stdio or Streamable HTTP. Agents on your machine use your API key. claude.ai and ChatGPT sign you in through Redmine's own OAuth, so each call runs with your Redmine permissions and Redmine records each change under your name.
+`@redmine-ts/mcp` is an MCP server with 93 tools for the Redmine REST API, over stdio or Streamable HTTP. Agents on your machine use your API key. claude.ai and ChatGPT sign you in through Redmine's own OAuth, so each call runs with your Redmine permissions and Redmine records each change under your name.
 
 ## Quick start
 
@@ -23,8 +23,8 @@ Then ask Claude what is assigned to you in Redmine. `--no-delete` leaves every t
 
 - **Tested with claude.ai and ChatGPT.** On 2026-10-26 both signed in to Redmine 7.0 through this server, ran tool calls, and refreshed their tokens. ChatGPT proves who it is with a signed JWT, which the server checks at the token endpoint.
 - **A typed tool for every SDK operation.** 86 tools come from [`@redmine-ts/sdk`](https://www.npmjs.com/package/@redmine-ts/sdk), each with a JSON Schema for its input and its output, and hints that tell the client whether it reads, writes, or deletes.
-- **Workflow tools for the common jobs.** `issue_context` returns an issue with the statuses it can move to, its relations, and its journals as readable changes, in one call. `issues_transition` changes a status by name and lists the allowed ones when the workflow refuses.
-- **Access modes the SDK enforces.** `--read-only` lists 43 tools and sends only `GET`. `--no-delete` lists 76 and never sends `DELETE`. A hidden tool called anyway gets an error, and Redmine sees nothing.
+- **Workflow tools for the common jobs.** `issue_context` returns an issue with the statuses it can move to, its relations, and its journals as readable changes, in one call. `issues_transition` changes a status by name and lists the allowed ones when the workflow refuses. `people_find` returns a colleague's login by name, for any key.
+- **Access modes the SDK enforces.** `--read-only` lists 44 tools and sends only `GET`. `--no-delete` lists 77 and never sends `DELETE`. A hidden tool called anyway gets an error, and Redmine sees nothing.
 - **One server for a team.** With `--http`, each request brings its own API key or OAuth token. The server needs no database, because it seals codes and tokens with one secret.
 - **Node, Bun, and Cloudflare Workers.** `npx` runs the CLI on Node 22 or later. `createRedmineMcpHandler` is the same server as a web-standard request handler. CI runs it on Node and Bun, and it was checked on Workers in workerd.
 
@@ -89,12 +89,13 @@ Each person then allows the client on the server's consent page, signs in to Red
 
 ## Workflow tools
 
-Six hand-written tools cover what an agent does most, in fewer calls than the generated tools need. They are listed first, and they share the generated tools' validation, error results, and the warning on user-written text.
+Seven hand-written tools cover what an agent does most, in fewer calls than the generated tools need. They are listed first, and they share the generated tools' validation, error results, and the warning on user-written text.
 
 | Tool                   | Kind  | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `issue_context`        | read  | One issue with everything needed to work on it: the full description, the statuses it can move to, relations read from this issue (`{relation: "blocked by", issue_id: 12}`), subtasks with their status, attachment metadata, watchers, and the newest journals as readable changes.                                                                                                                                                            |
 | `reference_data`       | read  | Statuses, trackers, priorities, time entry activities, the current user, and custom field definitions for an admin key. With `project_id`, also the project's trackers, categories, versions, members with roles, issue custom fields, and modules.                                                                                                                                                                                              |
+| `people_find`          | read  | Finds people by name among a project's members, or on an issue and in its project, and returns each one's id, name, and login for an `@login` mention. Works with any key, unlike `users_list`.                                                                                                                                                                                                                                                  |
 | `issues_transition`    | write | Changes the status by id or by name, checked against the workflow first. A refusal lists the allowed statuses by id and name.                                                                                                                                                                                                                                                                                                                    |
 | `attachments_upload`   | write | Uploads a file from `content_text`, `content_base64`, or, with a files directory, `path`, and returns the reference to pass in `uploads` of `issues_create`, `issues_update`, `news_create`, `news_update`, or `wiki_update`. At most 5 MB, Redmine's default limit. Over HTTP, a `content_text` near 5 MB can exceed the request limit once JSON escapes its line breaks, quotes, and control characters. Send such a file as `content_base64`. |
 | `attachments_download` | read  | Returns an image up to 1 MB as image content, a text file up to 100 KB as text, or a thumbnail. Any other file returns its metadata and a note.                                                                                                                                                                                                                                                                                                  |
@@ -109,6 +110,37 @@ A line longer than 350 characters shows an excerpt of at most 350 characters, wi
 Descriptions and notes longer than 4000 characters are cut with a marker that names the call for the full text, and the result says how many journals it left out. For a description, that call is `issues_get`. For a journal, it is `issue_context` with the journal's id in `full`, which returns that journal unclipped even when it is older than the newest `journals`.
 
 Each journal's `note` is its N in the issue page's `#note-N`, and the issue resource puts `#note-N` in each journal heading. Redmine numbers all journals of an issue before it hides some of them. It hides other users' private notes from a user who may not view them. It also hides a journal without notes when the user may not see any of its changes, such as a relation to an issue that the user cannot see or that was deleted later, or a custom field the user cannot see. After a hidden journal, `note` is lower than Redmine's number. The deleted issue lowers it for an admin key too.
+
+### Find people
+
+An `@login` mention needs the person's login. `users_list` would find it by name, but Redmine answers it to an admin key only. `people_find` searches the people that a project or an issue involves, which any key that sees them may read:
+
+- With `project_id`, the project's members.
+- With `issue_id`, the members of the issue's project, and the issue's author, assignee, watchers, and the users of its journals.
+
+Each match comes as `{id, name, login, match, found_as}`. `name` is as Redmine shows it, in the users display format set under **Administration**, **Settings**, **Display**. `found_as` lists where the name was found: `member`, `author`, `assignee`, `watcher`, or `journal`. A person on the issue without `member` is not a member of its project now, such as an admin or someone who left.
+
+Matching works on words. Case, accents, and other marks do not count, so `семен` finds Семён and `jose` finds José. Letters with no mark to drop are spelled in Latin, so `lukasz` finds Łukasz and `strauss` finds Strauß. Punctuation splits words, except an apostrophe, and `'`, `’`, and `ʼ` are the same. Each word of `name` pairs with a different word of the person's name, in any order, so `petrov ivan` finds Ivan Petrov. A word may be the start of one, so `Iv Pet` finds him too, but `van` does not. A Latin spelling does not find a name in Cyrillic, or the other way round. A name in a script without spaces matches only from its start.
+
+`match` says how the person matched:
+
+- `exact`: each word of `name` is a whole word of the person's name, as `Petrov` for Ivan Petrov.
+- `prefix`: each word of `name` is a whole word or the start of one, as `Iv Pet` for Ivan Petrov.
+- `partial`: the name as Redmine shows it holds less than `name`. Each of its words is a word of `name` or the initial of one, so `Ivan Petrov` finds someone shown as Ivan P., I. Petrov, or Ivan, and `Ivan Ivanovich Petrov` finds Ivan Petrov. When the shown name has as many words as `name`, a word of `name` may also start one of them, so `Iv Petrov` finds Ivan P.
+
+A partial match may be someone else, so `people_find` returns partial matches only when nothing matched better. The best matches come first: the same words, then whole words of a longer name, then starts of words, then partial matches. People on the issue come before the other members, and ties go by name.
+
+`people_find` matches the names that Redmine shows. Under the `username` display format, Redmine shows logins, so search by login. Under `lastnamefirstname`, Redmine runs the last and first name together, so search by the last name or its start.
+
+Groups are left out, because a mention names a user. A user who is a member only through a group is matched, because Redmine gives each user of a member group a membership of their own. An issue may be assigned to a group, and a group may watch it without being a member. `users_get` answers 404 for a group, so for a watcher or assignee that `users_get` does not find, `people_find` calls `groups_get` and drops the group. A group the key may not see stays, with `login: null`.
+
+`people_find` makes at most 26 calls: the issue, at most 5 pages of members, which is 500 members, and for each match it returns, `users_get`, then `groups_get` for a watcher or assignee that `users_get` does not find. With its default settings, the SDK retries each call up to twice on a 429, a 502, 503, or 504, a network error, or a timeout, so `people_find` sends at most 78 requests. It returns at most 10 matches, and `more` counts the matches after the first 10. A group among the first 10 is dropped after its lookup, so fewer than 10 can come back while `more` is above 0. In a project of more than 500 members, `unavailable` says that the rest were not searched, and `memberships_list` pages through all of them.
+
+`users_get` returns the login to any key that may see the user. A key that is not an admin's sees only active users, and, depending on its roles, only users in the projects it can see. For a user the key may not see, `login` is `null`, and `unavailable` names the user's id. Redmine resolves a mention from that key to the same users, so the mention would not reach them either. With an admin key, a locked user comes with `locked: true`, because Redmine notifies no locked user of a mention.
+
+Redmine shows the issues and journals of a deleted user as its Anonymous user's, which has no login. `people_find` returns the Anonymous user with `login: null`, and `unavailable` says why. A key that is not an admin's gets 404 from `users_get` for it, as for a user it may not see.
+
+A key whose role may not view watchers gets no watchers, and `unavailable` says so. When the key may not read the members of the issue's project, `people_find` searches the issue's people alone and says so in `unavailable`. When a page of members after the first fails, it searches the members read before that page, and `unavailable` says how many. With `project_id`, a failed first page is an error.
 
 ### Files
 
@@ -137,7 +169,7 @@ Every tool has a `title` and all four hints, set from its HTTP method:
 
 An update counts as destructive because it overwrites data that exists. `openWorldHint` is `false` because the tools reach only your Redmine instance.
 
-Inputs take ids, not names. `reference_data` maps the common names to ids in one call. A tool's description also names the list tool for each id it takes.
+Inputs take ids, not names. `reference_data` maps the common names to ids in one call. A tool's description also names where to find each id it takes. For `user_id` that is `people_find`, which finds only a project's members and an issue's people. Where it cannot find the user, the description names `users_list`: on the tools that need an admin key, and on `memberships_create`, which adds someone who is not a member yet.
 
 ### Filters
 
@@ -184,7 +216,19 @@ A failed Redmine request comes back as a tool result with `isError: true`, never
 
 - A 422 carries Redmine's own messages, such as `Subject cannot be blank`, in the user's language.
 - A 404 says to check the ids.
+- A 403 from a [tool that needs an admin key](#tools-that-need-an-admin-key) says so, and names what works without one.
 - Input that does not match the tool's schema, or a filter form that the filter does not take, is refused before any request. For a bad filter, the message lists the forms the filter accepts.
+
+### Tools that need an admin key
+
+Redmine answers 403 to every key but an admin's on these tools, because their actions in Redmine 6.1 and 7.0 run `require_admin` first: `users_list`, `users_create`, `users_update`, `users_delete`, `groups_list`, `groups_create`, `groups_update`, `groups_delete`, `groups_add_user`, `groups_remove_user`, `groups_remove_users`, `custom_fields_list`, `projects_archive`, and `projects_unarchive`. Their descriptions say "Needs an admin key". Their 403 errors say that the tool needs an admin key or that the REST API is disabled, because with the REST API off Redmine answers 403 to every key, an admin's too. Where something works without an admin key, both name it:
+
+- `users_list`: `people_find`, or `memberships_list` and then `users_get`.
+- `users_update`: `my_account_update`, for the key's own account.
+- `groups_list`: `memberships_list` for the groups in a project, and `groups_get` for one group.
+- `custom_fields_list`: `reference_data` with `project_id`, for the project's issue custom fields.
+
+The server lists these tools for every key, because it lists tools without asking Redmine whose key it holds. A sign-in through a Redmine OAuth application gets 403 from them even for an admin, because the server never asks Redmine for the `admin` scope. Use an admin's key in the header for that work.
 
 ## Access modes
 
@@ -192,9 +236,9 @@ The access mode decides which tools the server lists and which requests the SDK 
 
 | Mode        | Lists                                                    | Sends                          |
 | ----------- | -------------------------------------------------------- | ------------------------------ |
-| `full`      | All 92 tools.                                            | Every method.                  |
-| `no-delete` | 76 tools. The `DELETE` tools are gone.                   | `GET`, `POST`, `PUT`, `PATCH`. |
-| `read-only` | 43 tools: the reads, and `raw_request` limited to `GET`. | `GET` only.                    |
+| `full`      | All 93 tools.                                            | Every method.                  |
+| `no-delete` | 77 tools. The `DELETE` tools are gone.                   | `GET`, `POST`, `PUT`, `PATCH`. |
+| `read-only` | 44 tools: the reads, and `raw_request` limited to `GET`. | `GET` only.                    |
 
 With `REDMINE_MCP_FILES_DIR` set, each mode lists one more tool, `attachments_save`.
 
@@ -204,7 +248,7 @@ The mode limits what the server does. It does not limit the API key. A key that 
 
 ## Version handling
 
-Redmine does not report its version over the API, so you declare it with `REDMINE_VERSION`. With a declared version, the server hides tools the version lacks. On `6.1` that is `groups_remove_users`, which Redmine added in 7.0, so a 6.1 server lists 91 tools in `full` mode. A call to a hidden tool returns an error that names the version the tool needs.
+Redmine does not report its version over the API, so you declare it with `REDMINE_VERSION`. With a declared version, the server hides tools the version lacks. On `6.1` that is `groups_remove_users`, which Redmine added in 7.0, so a 6.1 server lists 92 tools in `full` mode. A call to a hidden tool returns an error that names the version the tool needs.
 
 Without `REDMINE_VERSION`, the server lists every tool. A tool newer than your server then fails with a 404, and the error says that the server may be older than the operation.
 

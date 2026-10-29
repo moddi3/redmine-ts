@@ -5,6 +5,7 @@ import type { Access } from "@redmine-ts/sdk";
 import type { ToolSpec } from "../tools.ts";
 import { downloadTool, saveTool, uploadTool } from "./attachments.ts";
 import { issueContextTool } from "./issue-context.ts";
+import { peopleFindTool } from "./people.ts";
 import { rawRequestTool } from "./raw-request.ts";
 import { referenceDataTool } from "./reference-data.ts";
 import { transitionTool } from "./transition.ts";
@@ -18,6 +19,7 @@ export function workflowTools(access: Access, dir: string | undefined): readonly
     tools = [
       issueContextTool,
       referenceDataTool,
+      peopleFindTool,
       transitionTool(access),
       uploadTool(dir),
       downloadTool(dir !== undefined),

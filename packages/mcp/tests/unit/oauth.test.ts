@@ -432,7 +432,7 @@ describe("built-in authorization server", () => {
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
     });
-    expect((await list.text()).match(/"name":"/g)?.length).toBe(43);
+    expect((await list.text()).match(/"name":"/g)?.length).toBe(44);
     const bearer = { Authorization: `Bearer ${read.access_token}` };
     const posted = await callTool(setupped.handle, bearer, "raw_request", {
       method: "POST",
