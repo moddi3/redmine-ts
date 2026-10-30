@@ -497,11 +497,46 @@ describe("tools/call", () => {
     expect(seen).toEqual([]);
   });
 
-  it("refuses arguments the input schema rejects, before sending", async () => {
+  it("refuses arguments the input schema rejects as invalid_input, before sending", async () => {
     const { client, seen } = await server();
     const result = await client.callTool({ name: "issues_list", arguments: { limit: 500 } });
     expect(result.isError).toBe(true);
-    expect(texts(result)[0]).toContain("Invalid arguments for issues_list");
+    expect(texts(result)[0]).toBe(
+      "Invalid input for issues_list: data/limit must be <= 100. Nothing was sent.",
+    );
+    expect(lastJson(result)).toMatchObject({
+      kind: "invalid_input",
+      detail: "data/limit must be <= 100",
+    });
+    expect(seen).toEqual([]);
+  });
+
+  it("names an unknown argument and lists the arguments of every tool, before sending", async () => {
+    const { client, seen } = await server();
+    for (const tool of (await client.listTools()).tools) {
+      const takes = Object.keys(tool.inputSchema.properties ?? {});
+      if (takes.length === 0) continue;
+      const result = await client.callTool({
+        name: tool.name,
+        arguments: { colour: "red" },
+      });
+      expect(texts(result)[0]).toBe(
+        `Invalid input for ${tool.name}: unknown argument "colour"; ${tool.name} takes ${takes.join(", ")}. Nothing was sent.`,
+      );
+      expect(lastJson(result)).toMatchObject({ kind: "invalid_input" });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it("says a tool without arguments takes none", async () => {
+    const { client, seen } = await server();
+    const result = await client.callTool({
+      name: "my_account_get",
+      arguments: { include: ["groups"] },
+    });
+    expect(texts(result)[0]).toBe(
+      'Invalid input for my_account_get: unknown argument "include"; my_account_get takes no arguments. Nothing was sent.',
+    );
     expect(seen).toEqual([]);
   });
 });

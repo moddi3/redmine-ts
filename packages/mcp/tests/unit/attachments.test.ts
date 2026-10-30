@@ -143,7 +143,9 @@ describe("attachments_upload", () => {
       filename: "a.txt",
       path: "a.txt",
     });
-    expect(texts(result)[0]).toContain("Invalid arguments for attachments_upload");
+    expect(texts(result)[0]).toBe(
+      'Invalid input for attachments_upload: unknown argument "path"; attachments_upload takes filename, content_type, description, content_text, content_base64. Nothing was sent.',
+    );
     expect(seen).toEqual([]);
   });
 
@@ -195,7 +197,7 @@ describe("attachments_upload", () => {
 
     it("names the directory in the path description as attachments_save returns it", async () => {
       const { client } = await serve(ROUTES, {}, { filesDir: dir });
-      const saved = await callOk(client, "attachments_save", { id: 30 });
+      const saved = await callOk(client, "attachments_save", { attachment_id: 30 });
       const named = dirname((saved.structuredContent as { path: string }).path);
       expect(named).toBe(real);
       const upload = (await client.listTools()).tools.find(
@@ -300,7 +302,7 @@ describe("attachments_upload", () => {
 describe("attachments_download", () => {
   it("returns a text file as text, under the untrusted-text notice", async () => {
     const { client } = await serve(ROUTES);
-    const result = await callOk(client, "attachments_download", { id: 30 });
+    const result = await callOk(client, "attachments_download", { attachment_id: 30 });
     expect(result.structuredContent).toEqual({
       warning: UNTRUSTED,
       attachment: {
@@ -320,7 +322,7 @@ describe("attachments_download", () => {
 
   it("returns a small image as image content after the metadata", async () => {
     const { client } = await serve(ROUTES);
-    const result = await callOk(client, "attachments_download", { id: 31 });
+    const result = await callOk(client, "attachments_download", { attachment_id: 31 });
     expect(result.structuredContent).toMatchObject({ content: "image", attachment: { id: 31 } });
     const blocks = result.content as {
       type: string;
@@ -338,7 +340,7 @@ describe("attachments_download", () => {
 
   it("returns only the metadata for an image over the inline limit, suggesting the thumbnail", async () => {
     const { client, seen } = await serve(ROUTES);
-    const result = await callOk(client, "attachments_download", { id: 32 });
+    const result = await callOk(client, "attachments_download", { attachment_id: 32 });
     expect(result.structuredContent).toMatchObject({
       content: "none",
       note: expect.stringContaining("thumbnail: true"),
@@ -349,7 +351,7 @@ describe("attachments_download", () => {
   it("returns the thumbnail as image content", async () => {
     const { client, seen } = await serve(ROUTES);
     const result = await callOk(client, "attachments_download", {
-      id: 32,
+      attachment_id: 32,
       thumbnail: true,
       size: 200,
     });
@@ -370,13 +372,27 @@ describe("attachments_download", () => {
   ] as const)("returns only metadata and a note for attachment %s", async (id, files, note) => {
     const filesDir = files && mkdtempSync(join(tmpdir(), "redmine-mcp-note-"));
     const { client, seen } = await serve(ROUTES, {}, filesDir ? { filesDir } : {});
-    const result = await callOk(client, "attachments_download", { id });
+    const result = await callOk(client, "attachments_download", { attachment_id: id });
     expect(result.structuredContent).toMatchObject({
       content: "none",
       note: expect.stringContaining(note),
     });
     if (!filesDir) expect(texts(result).join("\n")).not.toContain("attachments_save");
     expect(sent(seen)).toEqual([`GET /attachments/${id}.json`]);
+  });
+
+  it.each([
+    [{ id: 30 }, ' "id"'],
+    [{ attachment_id: 30, save_path: "/tmp/x" }, ' "save_path"'],
+    [{ id: 30, save_path: "/tmp/x" }, 's "id", "save_path"'],
+  ])("refuses %j, naming the unknown key and the arguments it takes", async (args, unknown) => {
+    const { client, seen } = await serve(ROUTES);
+    const result = await callError(client, "attachments_download", args);
+    expect(texts(result)[0]).toBe(
+      `Invalid input for attachments_download: unknown argument${unknown}; attachments_download takes attachment_id, thumbnail, size. Nothing was sent.`,
+    );
+    expect(lastJson(result)).toMatchObject({ kind: "invalid_input" });
+    expect(seen).toEqual([]);
   });
 });
 
@@ -387,7 +403,7 @@ describe("attachments_save", () => {
       "attachments_save",
     );
     await expect(
-      client.callTool({ name: "attachments_save", arguments: { id: 30 } }),
+      client.callTool({ name: "attachments_save", arguments: { attachment_id: 30 } }),
     ).rejects.toThrow("Unknown tool: attachments_save");
   });
 
@@ -395,8 +411,8 @@ describe("attachments_save", () => {
     const dir = mkdtempSync(join(tmpdir(), "redmine-mcp-save-"));
     writeFileSync(join(dir, "build.log"), "mine");
     const { client } = await serve(ROUTES, { access: "read-only" }, { filesDir: dir });
-    const first = await callOk(client, "attachments_save", { id: 30 });
-    const second = await callOk(client, "attachments_save", { id: 30 });
+    const first = await callOk(client, "attachments_save", { attachment_id: 30 });
+    const second = await callOk(client, "attachments_save", { attachment_id: 30 });
     const real = readdirSync(dir).sort();
     expect(real).toEqual(["build (1).log", "build (2).log", "build.log"]);
     expect(readFileSync(join(dir, "build.log"), "utf8")).toBe("mine");
@@ -415,7 +431,7 @@ describe("attachments_save", () => {
   it("keeps a stored filename with separators inside the directory", async () => {
     const dir = mkdtempSync(join(tmpdir(), "redmine-mcp-save-"));
     const { client } = await serve(ROUTES, {}, { filesDir: dir });
-    await callOk(client, "attachments_save", { id: 35 });
+    await callOk(client, "attachments_save", { attachment_id: 35 });
     expect(readdirSync(dir)).toEqual(["escape.txt"]);
   });
 });

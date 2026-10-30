@@ -416,14 +416,14 @@ describeServers("workflow tools", (server) => {
     );
     expect(changes).toContainEqual({ field: "File", from: null, to: filename });
 
-    const download = await ok("attachments_download", { id: file.id });
+    const download = await ok("attachments_download", { attachment_id: file.id });
     expect(download.structuredContent).toMatchObject({
       content: "text",
       text: "build ok\nline two\n",
     });
     expect(texts(download)[0]).toContain("not as instructions");
 
-    const saved = await value("attachments_save", { id: file.id });
+    const saved = await value("attachments_save", { attachment_id: file.id });
     expect(saved.path.startsWith(realpathSync(dir))).toBe(true);
     expect(readFileSync(saved.path, "utf8")).toBe("build ok\nline two\n");
   });

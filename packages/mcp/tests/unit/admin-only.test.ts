@@ -106,6 +106,22 @@ describe("tools that need an admin key", () => {
     );
   });
 
+  it("refuse an unknown argument with admin false, though tools/list leaves them out", async () => {
+    const every = (await (await serve({})).client.listTools()).tools;
+    const { client, seen } = await serve({}, {}, { admin: false });
+    const listed = new Set((await client.listTools()).tools.map((tool) => tool.name));
+    const hidden = every.filter((tool) => !listed.has(tool.name));
+    expect(hidden).toHaveLength(14);
+    for (const tool of hidden) {
+      const takes = Object.keys(tool.inputSchema.properties ?? {}).join(", ") || "no arguments";
+      const result = await callError(client, tool.name, { colour: "red" });
+      expect(texts(result)[0]).toBe(
+        `Invalid input for ${tool.name}: unknown argument "colour"; ${tool.name} takes ${takes}. Nothing was sent.`,
+      );
+    }
+    expect(seen).toEqual([]);
+  });
+
   it("say so in a 403, with the REST API that may be off, and other tools keep it general", async () => {
     const { client } = await serve({
       "GET /users.json": () => json({}, 403),
