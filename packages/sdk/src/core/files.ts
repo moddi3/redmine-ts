@@ -94,7 +94,7 @@ export function createAttachmentFiles(
  * it, and a WeakSet keeps no stream alive.
  */
 const sentStreams = new WeakSet<ReadableStream>();
-/** Streams an inline upload took, until the call sends them or fails first, so a call made meanwhile refuses them. */
+/** Streams an inline upload took, so a call made meanwhile refuses them. */
 const claimedStreams = new WeakSet<ReadableStream>();
 
 /** The engine calls this as it hands a request body to fetch, so a call refused before that leaves the stream unused. */

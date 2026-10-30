@@ -70,7 +70,7 @@ const FLIGHT_MS = FETCH_TIMEOUT_MS + 1000;
  * While every slot is taken, a document or key set fetched within this time still serves its client,
  * so a flood of unknown client_ids or slow key sets cannot lock out a client the server has seen.
  */
-const DOCUMENT_STALE_MS = 60 * 60_000;
+const STALE_MS = 60 * 60_000;
 const UNFETCHED = "its metadata document could not be fetched";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -87,7 +87,7 @@ const KEY_SET_REFETCH_MS = 60_000;
 
 /**
  * What resolve answers when the client needs a fetch that cannot answer in time, because every slot is
- * taken or its own fetch did not settle, and no document fetched within DOCUMENT_STALE_MS can serve it.
+ * taken or its own fetch did not settle, and no document or key set fetched within STALE_MS can serve it.
  */
 export const BUSY: unique symbol = Symbol("busy");
 /** Most slots free within one fetch timeout. */
@@ -186,17 +186,16 @@ export function createClients({ sealer, fetch, allowedHosts, audiences }: Client
     );
   }
 
-  /** The document fetched within DOCUMENT_STALE_MS, for when no fetch can answer now, or BUSY. */
+  /** The document fetched within STALE_MS, for when no fetch can answer now, or BUSY. */
   function recent(clientId: string): Client | typeof BUSY {
     const kept = documents.get(clientId);
-    return kept !== undefined && kept.fetched + DOCUMENT_STALE_MS > Date.now() ? kept.client : BUSY;
+    return kept !== undefined && kept.fetched + STALE_MS > Date.now() ? kept.client : BUSY;
   }
 
   /**
    * Fetches and checks a document, and keeps a valid one. A failure keeps nothing, as draft 02 of
    * Client ID Metadata Documents forbids caching error responses and invalid documents (section 5.2).
    * It also drops the copy held before, so a busy server never serves a client whose document fails.
-   * Only the current flight writes, so a fetch that lands after a newer one started leaves its document.
    */
   async function load(
     clientId: string,
@@ -273,8 +272,7 @@ export function createClients({ sealer, fetch, allowedHosts, audiences }: Client
   /**
    * The key set at `uri`, kept for CACHE_MS. A `kid` it lacks fetches it again, at most once per
    * KEY_SET_REFETCH_MS, so a rotated key works within a minute. A failed fetch is not kept, and the
-   * set fetched before stays until its time is up. When no fetch can answer now, the set fetched
-   * within DOCUMENT_STALE_MS answers if it holds the `kid`.
+   * set fetched before stays until its time is up.
    */
   async function keySet(
     uri: string,
@@ -301,7 +299,7 @@ export function createClients({ sealer, fetch, allowedHosts, audiences }: Client
       () => {
         const recent = keySets.get(uri);
         return recent !== undefined &&
-          recent.fetched + DOCUMENT_STALE_MS > Date.now() &&
+          recent.fetched + STALE_MS > Date.now() &&
           holds(recent.set, kid)
           ? recent.set
           : BUSY;
@@ -439,9 +437,8 @@ type Flights<T> = <L>(
 ) => Promise<T | L>;
 
 function createFlights<T>(cap: number): Flights<T> {
-  // The newest flight started for each key, until it lands. One past its time holds no slot and is not
-  // shared. At most `cap` are within their time, and the map drops in start order, so it drops only
-  // flights past their time.
+  // At most `cap` flights are within their time, and they started last, so dropping the oldest when
+  // the map is full drops only a flight past its time.
   const flights = new Map<string, { outcome: Promise<T>; until: number }>();
   return async (key, start, late) => {
     const now = Date.now();
