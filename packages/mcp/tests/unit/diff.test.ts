@@ -360,4 +360,22 @@ describe("lineDiff on a long line", () => {
       ].join("\n"),
     );
   });
+
+  it("keeps a … that hides two characters", () => {
+    const old = "0123456789".repeat(60);
+    const next = `${old.slice(0, 42)}x${old.slice(43, 557)}y${old.slice(558)}`;
+    expect(lineDiff(old, next, REST).split("\n").slice(1, 3)).toEqual([
+      `- …${old.slice(2, 83)}…${old.slice(517, 598)}…`,
+      `+ …${next.slice(2, 83)}…${next.slice(517, 598)}…`,
+    ]);
+  });
+
+  it("shows the first character in place of a … that would hide only it once the window steps back off an emoji", () => {
+    const old = `a😀${"0123456789".repeat(60)}`;
+    const next = `${old.slice(0, 42)}x${old.slice(43)}`;
+    expect(lineDiff(old, next, REST).split("\n").slice(1, 3)).toEqual([
+      `- ${old.slice(0, 83)}…`,
+      `+ ${next.slice(0, 83)}…`,
+    ]);
+  });
 });
