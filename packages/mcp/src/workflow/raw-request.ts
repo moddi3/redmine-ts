@@ -8,6 +8,7 @@ import { BY_METHOD } from "../catalog-tools.ts";
 import { fitCount } from "../result-budget.ts";
 import { isApiPath } from "../tools.ts";
 import type { Annotations, ToolSpec } from "../tools.ts";
+import { hasUserText, UNTRUSTED } from "../user-text.ts";
 import { defineTool, ToolError } from "./define.ts";
 
 const BY_ACCESS: Readonly<Record<Access, { sends: string; annotations: Annotations }>> = {
@@ -105,10 +106,12 @@ export function rawRequestTool(access: Access): ToolSpec {
       if (budget.size(whole) <= budget.bytes) return { structured: whole };
       const text = budget.redactedJson(whole.response);
       const bytes = new TextEncoder().encode(text).length;
+      const warned = hasUserText(whole.response) ? { warning: UNTRUSTED } : {};
       // JSON escapes a lone surrogate in 6 bytes, more than the 4 of its whole pair, so the longest
       // start that fits never ends inside a pair.
       return {
         structured: fitCount(budget, text.length, (length) => ({
+          ...warned,
           status,
           truncated: true as const,
           bytes,

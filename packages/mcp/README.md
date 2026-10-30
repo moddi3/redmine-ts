@@ -240,7 +240,7 @@ The budget counts UTF-8 bytes, because those clients count bytes, and Cyrillic l
 
 `issues_get` with `include: ["journals"]` leaves out the oldest journals that do not fit, and adds `journals_omitted`, which counts them, and `journals_before`, which `issue_context` takes to return them, as its own pages do. Both come with every record that has journals, `0` and `null` when none is left out.
 
-`raw_request` returns a response over the budget as `{status, truncated: true, bytes, response_text, message}`. `status` is Redmine's HTTP status, such as 201 for a create or 202 for a request Redmine accepted but has not finished. `response_text` holds the start of the response's compact JSON, as much as fits, `bytes` counts the whole of it, and `message` suggests `limit` and `offset` or fewer `include` values to narrow the request.
+`raw_request` returns a response over the budget as `{status, truncated: true, bytes, response_text, message}`. `status` is Redmine's HTTP status, such as 201 for a create or 202 for a request Redmine accepted but has not finished. `response_text` holds the start of the response's compact JSON, as much as fits, `bytes` counts the whole of it, and `message` suggests `limit` and `offset` or fewer `include` values to narrow the request. When the whole response holds user-written text, the result starts with the [`warning` field](#safety), as a `{response}` result would, and the budget counts it.
 
 ### Errors
 
