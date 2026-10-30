@@ -7,7 +7,7 @@ import { catalog } from "@redmine-ts/sdk/catalog";
 import type { CatalogEntry, JsonSchema } from "@redmine-ts/sdk/catalog";
 import { roundHours } from "./hours.ts";
 import { portable } from "./portable.ts";
-import { fitPage } from "./result-budget.ts";
+import { fitJournals, fitPage } from "./result-budget.ts";
 import type { Annotations, Client, Schema, Tier, ToolSpec } from "./tools.ts";
 import { allowWarning } from "./user-text.ts";
 import { invalidInput } from "./workflow/define.ts";
@@ -153,6 +153,19 @@ const USER_ID_SOURCES: Readonly<Record<string, string>> = {
   createMembership: "users_list with an admin key",
 };
 
+/** What issues_get adds beside journals, as issue_context returns them. */
+const JOURNAL_CURSOR: Readonly<Record<string, JsonSchema>> = {
+  journals_omitted: {
+    type: "integer",
+    description: "With journals: the older journals left out to fit the result budget.",
+  },
+  journals_before: {
+    type: ["integer", "null"],
+    description:
+      "With journals: pass to issue_context as journals_before for the journals left out. null when none is.",
+  },
+};
+
 const OK: JsonSchema = {
   type: "object",
   properties: { ok: { const: true } },
@@ -265,19 +278,32 @@ function toolFor(entry: CatalogEntry): ToolSpec {
         }),
       };
     }
-    case "item":
+    case "item": {
+      const record = async (rm: Client, input: Record<string, unknown>) =>
+        roundHours(
+          ((await call(rm, input)) as Record<string, unknown> | undefined) ?? { ok: true },
+        );
+      if (entry.id === "getIssue") {
+        const { properties } = output.schema;
+        return {
+          ...common,
+          inputSchema: entry.inputSchema,
+          outputSchema: { ...output.schema, properties: { ...properties, ...JOURNAL_CURSOR } },
+          budgeted: true,
+          run: async (rm, input, { budget }) => ({
+            structured: fitJournals(await record(rm, input), budget),
+          }),
+        };
+      }
       return {
         ...common,
         inputSchema: entry.inputSchema,
         outputSchema: output.optional
           ? { $schema: DRAFT, type: "object", anyOf: [withoutDraft(output.schema), OK] }
           : output.schema,
-        run: async (rm, input) => ({
-          structured: roundHours(
-            ((await call(rm, input)) as Record<string, unknown> | undefined) ?? { ok: true },
-          ),
-        }),
+        run: async (rm, input) => ({ structured: await record(rm, input) }),
       };
+    }
     case "empty":
       return {
         ...common,
@@ -516,7 +542,7 @@ function describeTool(entry: CatalogEntry, adminOnly: string | undefined): strin
       ? "people_find searches only a project's members and an issue's people, so it does not find a user who is not a member yet."
       : "",
     entry.id === "getIssue"
-      ? "include journals returns every journal in one result, which may pass the client's limit: for a long history, issue_context pages through them."
+      ? "With include journals, the oldest journals that do not fit in the result budget are left out: journals_omitted counts them, and issue_context with journals_before returns them."
       : "",
     ...version,
     entry.docsUrl ? `Docs: ${entry.docsUrl}` : "",

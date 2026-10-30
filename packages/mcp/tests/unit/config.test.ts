@@ -98,12 +98,19 @@ describe("parseCli", () => {
     expect(parseCli([], { ...env, REDMINE_MCP_MAX_RESULT_BYTES: " " })).not.toHaveProperty(
       "maxResultBytes",
     );
+    expect(parseCli([], { ...env, REDMINE_MCP_MAX_RESULT_BYTES: "499000" })).toMatchObject({
+      maxResultBytes: 499_000,
+    });
   });
 
   it.each([
     ["32k", "REDMINE_MCP_MAX_RESULT_BYTES must be a whole number of bytes, such as 32000"],
     ["-1", "REDMINE_MCP_MAX_RESULT_BYTES must be a whole number of bytes, such as 32000"],
     ["32", "REDMINE_MCP_MAX_RESULT_BYTES must be at least 1000 bytes"],
+    ...["499001", "9007199254740993", "99999999999999999999"].map((value) => [
+      value,
+      "REDMINE_MCP_MAX_RESULT_BYTES must be at most 499000 bytes, because Claude Code keeps at most 500000 characters inline",
+    ]),
   ])("refuses REDMINE_MCP_MAX_RESULT_BYTES=%s", (value, message) => {
     expect(parseCli([], { ...env, REDMINE_MCP_MAX_RESULT_BYTES: value })).toEqual({
       kind: "error",

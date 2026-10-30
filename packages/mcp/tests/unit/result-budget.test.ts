@@ -181,16 +181,18 @@ describe("the result budget setting", () => {
     expect(page.next_offset).toBe(page.items.length);
   });
 
-  it("takes maxResultBytes, and refuses a budget under 1,000 bytes or not a whole number", async () => {
+  it("takes maxResultBytes, and refuses a budget under 1,000 bytes, over 499,000 or not a whole number", async () => {
     const { client } = await serve(issues(TWENTY), {}, { maxResultBytes: 60_000 });
     expect(client.getInstructions()).toContain("would pass 60,000 bytes");
     const config = { baseUrl: "http://redmine.test", auth: { apiKey: "test-key" } };
-    for (const maxResultBytes of [999, 1_500.5, 0, -1]) {
+    for (const maxResultBytes of [999, 1_500.5, 0, -1, 499_001, 1_000_000]) {
       expect(() => createRedmineMcpServer(config, { maxResultBytes })).toThrow(
-        "maxResultBytes must be an integer of at least 1000",
+        "maxResultBytes must be an integer from 1000 to 499000, as Claude Code keeps at most 500000 characters inline",
       );
     }
-    expect(() => createRedmineMcpServer(config, { maxResultBytes: 1_000 })).not.toThrow();
+    for (const maxResultBytes of [1_000, 499_000]) {
+      expect(() => createRedmineMcpServer(config, { maxResultBytes })).not.toThrow();
+    }
   });
 });
 
@@ -200,7 +202,7 @@ describe("anthropic/maxResultSizeChars", () => {
     const { tools } = await client.listTools();
     const budgeted = tools.filter(
       (tool) =>
-        tool.name === "issue_context" ||
+        ["issue_context", "issues_get", "raw_request"].includes(tool.name) ||
         Object.hasOwn(tool.outputSchema?.properties ?? {}, "next_offset"),
     );
     return { tools, budgeted };
@@ -213,15 +215,21 @@ describe("anthropic/maxResultSizeChars", () => {
     }
   });
 
-  it("raises Claude Code's limit to the budget plus 1,000 characters on list tools and issue_context only", async () => {
+  it("raises Claude Code's limit to the budget plus 1,000 characters on the budgeted tools only", async () => {
     for (const [maxResultBytes, chars] of [
       [49_001, 50_001],
       [60_000, 61_000],
-      [600_000, 500_000],
+      [499_000, 500_000],
     ] as const) {
       const { tools, budgeted } = await meta(maxResultBytes);
       expect(budgeted.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["issue_context", "issues_list", "time_entries_list"]),
+        expect.arrayContaining([
+          "issue_context",
+          "issues_get",
+          "raw_request",
+          "issues_list",
+          "time_entries_list",
+        ]),
       );
       for (const tool of tools) {
         expect(tool._meta, tool.name).toEqual(
@@ -229,5 +237,119 @@ describe("anthropic/maxResultSizeChars", () => {
         );
       }
     }
+  });
+});
+
+describe("issues_get with journals under the result budget", () => {
+  const FORTY = Array.from({ length: 40 }, (_, n) => ({
+    id: n + 1,
+    user: { id: 1, name: "Redmine Admin" },
+    notes: `Note ${n + 1} ${"y".repeat(300)}`,
+    created_on: `2026-10-01T10:${String(n).padStart(2, "0")}:00Z`,
+    updated_on: "2026-10-01T10:00:00Z",
+    private_notes: false,
+    details: [],
+  }));
+  const routes = {
+    "GET /issues/7.json": () => json({ issue: { ...issue(7, "Long history"), journals: FORTY } }),
+  };
+
+  interface Record {
+    journals: { id: number }[];
+    journals_omitted: number;
+    journals_before: number | null;
+  }
+
+  it("drops the oldest journals until the record fits, and issue_context returns the rest from journals_before", async () => {
+    const { client } = await serve(routes, {}, { maxResultBytes: 4_000 });
+    const record = (await callOk(client, "issues_get", { issue_id: 7, include: ["journals"] }))
+      .structuredContent as unknown as Record;
+    const kept = record.journals.map((entry) => entry.id);
+    expect(bytes(record)).toBeLessThanOrEqual(4_000);
+    expect(kept.length).toBeGreaterThan(1);
+    expect(kept).toEqual(FORTY.slice(-kept.length).map((entry) => entry.id));
+    expect(record).toMatchObject({ journals_omitted: 40 - kept.length, journals_before: kept[0] });
+    const grown = {
+      ...record,
+      journals: [FORTY[39 - kept.length], ...record.journals],
+      journals_omitted: record.journals_omitted - 1,
+    };
+    expect(bytes(grown)).toBeGreaterThan(4_000);
+
+    const read = [...kept];
+    let before: number | null = record.journals_before;
+    while (before !== null && read.length < 40) {
+      const page = (
+        await client.callTool({
+          name: "issue_context",
+          arguments: { issue_id: 7, journals: 100, journals_before: before },
+        })
+      ).structuredContent as unknown as Record;
+      expect(page.journals_omitted).toBe(40 - read.length - page.journals.length);
+      read.unshift(...page.journals.map((entry) => entry.id));
+      before = page.journals_before;
+    }
+    expect(read).toEqual(FORTY.map((entry) => entry.id));
+  });
+
+  it("says nothing is left out when the journals fit, and adds nothing without them", async () => {
+    const { client } = await serve(routes);
+    const record = (await callOk(client, "issues_get", { issue_id: 7, include: ["journals"] }))
+      .structuredContent as unknown as Record;
+    expect(record.journals).toHaveLength(40);
+    expect(record).toMatchObject({ journals_omitted: 0, journals_before: null });
+    const { client: plain } = await serve({
+      "GET /issues/7.json": () => json({ issue: issue(7, "No history") }),
+    });
+    const bare = (await callOk(plain, "issues_get", { issue_id: 7 })).structuredContent;
+    expect(bare).not.toHaveProperty("journals_omitted");
+    expect(bare).not.toHaveProperty("journals_before");
+  });
+});
+
+describe("raw_request under the result budget", () => {
+  const KEY = "a".repeat(40);
+  const user = { id: 1, login: "admin", api_key: KEY, bio: "😀".repeat(1_000) };
+  const routes = { "GET /users/current.json": () => json({ user }) };
+  const request = { method: "GET", path: "users/current.json" };
+
+  it("returns the start of a response over the budget, cut between characters, with API keys hidden", async () => {
+    const { client } = await serve(routes, {}, { maxResultBytes: 1_000 });
+    const result = (await callOk(client, "raw_request", request)).structuredContent as {
+      truncated: true;
+      bytes: number;
+      response_text: string;
+      message: string;
+    };
+    const whole = JSON.stringify({ user: { ...user, api_key: "[hidden by @redmine-ts/mcp]" } });
+    expect(result).toMatchObject({ truncated: true, bytes: bytes(JSON.parse(whole)) });
+    expect(result).not.toHaveProperty("response");
+    expect(result.message).toContain("limit and offset");
+    expect(whole.startsWith(result.response_text)).toBe(true);
+    expect(result.response_text).toContain('"api_key":"[hidden by @redmine-ts/mcp]"');
+    expect(result.response_text.at(-1)).toBe("😀".at(-1));
+    expect(bytes(result)).toBeLessThanOrEqual(1_000);
+    const grown = {
+      ...result,
+      response_text: whole.slice(0, result.response_text.length + 2),
+    };
+    expect(bytes(grown)).toBeGreaterThan(1_000);
+  });
+
+  it("never ends response_text inside a character's surrogate pair", async () => {
+    for (let maxResultBytes = 1_000; maxResultBytes < 1_008; maxResultBytes += 1) {
+      const { client } = await serve(routes, {}, { maxResultBytes });
+      const result = await client.callTool({ name: "raw_request", arguments: request });
+      const { response_text } = result.structuredContent as { response_text: string };
+      expect(response_text.at(-1), `budget ${maxResultBytes}`).toBe("😀".at(-1));
+    }
+  });
+
+  it("returns a response that fits as {response}", async () => {
+    const { client } = await serve(routes, {}, { maxResultBytes: 10_000 });
+    const result = (await callOk(client, "raw_request", request)).structuredContent;
+    expect(result).toEqual({
+      response: { user: { ...user, api_key: "[hidden by @redmine-ts/mcp]" } },
+    });
   });
 });

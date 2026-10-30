@@ -45,82 +45,99 @@ const REVERSE: Readonly<Record<string, string>> = {
 const Ref = z.looseObject({ id: z.int(), name: z.string() });
 const day = z.string().nullable().optional();
 
-const IssueContextSchema = z.object({
-  issue: z
-    .looseObject({
-      id: z.int(),
-      project: Ref.optional(),
-      tracker: Ref.optional(),
-      status: Ref.optional(),
-      priority: Ref.optional(),
-      author: Ref.optional(),
-      assigned_to: Ref.optional(),
-      category: Ref.optional(),
-      fixed_version: Ref.optional(),
-      parent: z.looseObject({ id: z.int().optional() }).optional(),
-      subject: z.string(),
-      description: z.string().nullable().optional(),
-      start_date: day,
-      due_date: day,
-      done_ratio: z.number().optional(),
-      is_private: z.boolean().optional(),
-      estimated_hours: z.number().nullable().optional(),
-      spent_hours: z.number().optional(),
-      custom_fields: z
-        .array(
-          z.looseObject({
-            id: z.int(),
-            name: z.string(),
-            value: z.union([z.string(), z.null(), z.array(z.string())]).optional(),
-          }),
-        )
-        .optional(),
-      created_on: z.string().optional(),
-      updated_on: z.string().optional(),
-      closed_on: day,
-    })
-    .describe("The issue as Redmine returns it, description included."),
-  allowed_statuses: z
-    .array(z.object({ id: z.int(), name: z.string(), is_closed: z.boolean() }))
-    .describe("Statuses the workflow lets this API key's user set, the current one included."),
-  relations: z
-    .array(
-      z.object({
-        id: z.int().optional(),
-        relation: z.string(),
-        issue_id: z.int(),
-        delay: z.int().optional(),
-      }),
-    )
-    .describe(
-      'Read from this issue: {relation: "blocked by", issue_id: 12} means this issue is blocked by #12.',
-    ),
-  children: z
-    .array(
-      z.object({
-        id: z.int(),
-        subject: z.string().nullable(),
-        tracker: z.string().nullable(),
-        status: z.string().nullable(),
-        is_closed: z.boolean().nullable(),
-      }),
-    )
-    .describe("Direct subtasks."),
-  attachments: z.array(
+const IssueSchema = z
+  .looseObject({
+    id: z.int(),
+    project: Ref.optional(),
+    tracker: Ref.optional(),
+    status: Ref.optional(),
+    priority: Ref.optional(),
+    author: Ref.optional(),
+    assigned_to: Ref.optional(),
+    category: Ref.optional(),
+    fixed_version: Ref.optional(),
+    parent: z.looseObject({ id: z.int().optional() }).optional(),
+    subject: z.string(),
+    description: z.string().nullable().optional(),
+    start_date: day,
+    due_date: day,
+    done_ratio: z.number().optional(),
+    is_private: z.boolean().optional(),
+    estimated_hours: z.number().nullable().optional(),
+    spent_hours: z.number().optional(),
+    custom_fields: z
+      .array(
+        z.looseObject({
+          id: z.int(),
+          name: z.string(),
+          value: z.union([z.string(), z.null(), z.array(z.string())]).optional(),
+        }),
+      )
+      .optional(),
+    created_on: z.string().optional(),
+    updated_on: z.string().optional(),
+    closed_on: day,
+  })
+  .describe("The issue as Redmine returns it, description included.");
+
+const Statuses = z
+  .array(z.object({ id: z.int(), name: z.string(), is_closed: z.boolean() }))
+  .describe("Statuses the workflow lets this API key's user set, the current one included.");
+
+const Relations = z
+  .array(
+    z.object({
+      id: z.int().optional(),
+      relation: z.string(),
+      issue_id: z.int(),
+      delay: z.int().optional(),
+    }),
+  )
+  .describe(
+    'Read from this issue: {relation: "blocked by", issue_id: 12} means this issue is blocked by #12.',
+  );
+
+const Children = z
+  .array(
     z.object({
       id: z.int(),
-      filename: z.string(),
-      filesize: z.int(),
-      content_type: z.string().nullable(),
-      description: z.string().nullable(),
-      author: z.string().nullable(),
-      created_on: z.string(),
+      subject: z.string().nullable(),
+      tracker: z.string().nullable(),
+      status: z.string().nullable(),
+      is_closed: z.boolean().nullable(),
     }),
-  ),
+  )
+  .describe("Direct subtasks.");
+
+const Attachments = z.array(
+  z.object({
+    id: z.int(),
+    filename: z.string(),
+    filesize: z.int(),
+    content_type: z.string().nullable(),
+    description: z.string().nullable(),
+    author: z.string().nullable(),
+    created_on: z.string(),
+  }),
+);
+
+const LATER_PAGE = "Left out on a journals_before or journals_after page.";
+
+const IssueContextSchema = z.object({
+  issue: z.union([
+    IssueSchema,
+    z
+      .object({ id: z.int(), updated_on: z.string().optional() })
+      .describe("On a journals_before or journals_after page: the issue's id and updated_on only."),
+  ]),
+  allowed_statuses: Statuses.optional().describe(LATER_PAGE),
+  relations: Relations.optional().describe(LATER_PAGE),
+  children: Children.optional().describe(LATER_PAGE),
+  attachments: Attachments.optional().describe(LATER_PAGE),
   watchers: z
     .array(z.object({ id: z.int(), name: z.string() }))
     .optional()
-    .describe("Absent when the key may not see watchers."),
+    .describe(`Absent when the key may not see watchers. ${LATER_PAGE}`),
   journals: z
     .array(
       z.object({
@@ -150,21 +167,36 @@ const IssueContextSchema = z.object({
       }),
     )
     .describe(
-      "The newest journals before journals_before, and those in full, oldest first, with ids in changes resolved to names.",
+      "The newest journals after journals_after and before journals_before, and those in full, oldest first, with ids in changes resolved to names.",
     ),
   journals_total: z.int(),
   journals_omitted: z
     .int()
-    .describe("Journals older than these that this result leaves out, for the next pages."),
+    .describe(
+      "Journals after journals_after and older than this page that the next pages return, a journal in full included.",
+    ),
   journals_before: z
     .int()
     .nullable()
     .describe(
-      "Pass as journals_before for the next older page. null when no older journal is left out, or when journals is 0.",
+      "Pass as journals_before, with the same journals_after, for the next older page. null when no older journal is left out, or when journals is 0.",
     ),
 });
 
 type IssueContext = z.output<typeof IssueContextSchema>;
+
+type FirstPage = IssueContext & {
+  issue: z.output<typeof IssueSchema>;
+  allowed_statuses: z.output<typeof Statuses>;
+  relations: z.output<typeof Relations>;
+  children: z.output<typeof Children>;
+  attachments: z.output<typeof Attachments>;
+};
+
+type Journals = Pick<
+  IssueContext,
+  "journals" | "journals_total" | "journals_omitted" | "journals_before"
+>;
 
 export const issueContextTool: ToolSpec = defineTool({
   name: "issue_context",
@@ -174,7 +206,7 @@ export const issueContextTool: ToolSpec = defineTool({
     "Call it first when asked to work on, triage or summarize an issue, instead of issues_get.",
     `Descriptions and notes longer than ${TEXT_CAP} characters are clipped with a marker that names the call returning them whole.`,
     "Returns {issue, allowed_statuses, relations, children, attachments, watchers, journals, journals_total, journals_omitted, journals_before}.",
-    "Journals stop at the result budget; call again with journals_before for the older ones.",
+    "Journals stop at the result budget; call again with journals_before for the older ones, or with journals_after for the ones newer than a journal you read. Those pages return the issue as {id, updated_on} with the journals only.",
     "Next: issues_transition to change the status by name, issues_update for other fields or a note, attachments_download to read a file.",
   ].join(" "),
   input: z.strictObject({
@@ -191,11 +223,22 @@ export const issueContextTool: ToolSpec = defineTool({
       .int()
       .positive()
       .optional()
-      .describe("A journal id, from journals_before of the last result: returns older journals."),
+      .describe(
+        "A journal id, from journals_before of the last result: returns older journals, and the issue as {id, updated_on} only, because the first page carried the rest.",
+      ),
+    journals_after: z
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "A journal id, such as the newest one read: returns only newer journals, and the issue as {id, updated_on} only. Use it to check for replies.",
+      ),
     full: z
       .array(z.int().positive())
       .default([])
-      .describe("Ids of journals to return unclipped, even if older than the newest `journals`."),
+      .describe(
+        "Ids of journals to return unclipped, even if older than the newest `journals`. An older one still counts in journals_omitted and comes again on its own page.",
+      ),
   }),
   output: IssueContextSchema,
   ...BY_METHOD.GET,
@@ -210,43 +253,48 @@ interface ContextInput {
   readonly journals: number;
   readonly full: readonly number[];
   readonly journals_before?: number | undefined;
+  readonly journals_after?: number | undefined;
 }
 
-/**
- * The page is the newest `journals` before journals_before, as many as the budget fits with the rest
- * of the result, and one at least, so paging moves on even when the issue alone is over the budget.
- * Journals in full come on top of it, never cut. Without a budget, as for the issue resource, the
- * count alone decides.
- */
 async function issueContext(
   rm: Client,
   lookups: Lookups,
-  { issue_id, journals, full, journals_before }: ContextInput,
+  input: ContextInput,
   budget: ResultBudget | undefined,
 ): Promise<IssueContext> {
-  const issue = await rm.issues.get({ issue_id, include: [...INCLUDES] });
-  const all = issue.journals ?? [];
-  const whole = new Set(full);
-  const unknown = [...whole].filter((id) => !all.some((journal) => journal.id === id));
+  const issue = await rm.issues.get({ issue_id: input.issue_id, include: [...INCLUDES] });
+  const unknown = input.full.filter(
+    (id) => !(issue.journals ?? []).some((journal) => journal.id === id),
+  );
   if (unknown.length > 0) {
     throw new ToolError(
       `Issue ${issue.id} has no journal ${unknown.join(" or ")} that this API key can read. Journal ids come from journals[].id or a clip marker.`,
       { kind: "unknown_journal", issue_id: issue.id, journal_ids: unknown },
     );
   }
-  const window = before(all, journals_before);
-  const newest = journals === 0 ? [] : window.slice(-journals);
-  const candidates = all.filter((journal) => newest.includes(journal) || whole.has(journal.id));
-  const [names, children] = await Promise.all([
-    resolveNames(rm, lookups, issue, candidates),
+  if (input.journals_before === undefined && input.journals_after === undefined) {
+    return firstPage(rm, lookups, issue, input, budget);
+  }
+  const page = await journalPage(rm, lookups, issue, input);
+  return fit({ issue: { id: issue.id, updated_on: issue.updated_on } }, page, budget);
+}
+
+async function firstPage(
+  rm: Client,
+  lookups: Lookups,
+  issue: Issue,
+  input: ContextInput,
+  budget: ResultBudget | undefined,
+): Promise<FirstPage> {
+  const [page, children] = await Promise.all([
+    journalPage(rm, lookups, issue, input),
     childrenOf(rm, issue),
   ]);
-  const customFields = new Map((issue.custom_fields ?? []).map((cf) => [String(cf.id), cf.name]));
   const fields = Object.fromEntries(
     Object.entries(issue).filter(([key]) => !(INCLUDES as readonly string[]).includes(key)),
   );
   const { description } = issue;
-  const context: Omit<IssueContext, "journals_omitted" | "journals_before"> = {
+  const head = {
     issue: roundHours({
       ...fields,
       id: issue.id,
@@ -275,9 +323,33 @@ async function issueContext(
     ...(issue.watchers === undefined
       ? {}
       : { watchers: issue.watchers.map(({ id, name }) => ({ id, name })) }),
-    journals: [],
-    journals_total: all.length,
   };
+  return fit(head, page, budget);
+}
+
+interface JournalPage {
+  readonly available: number;
+  page(count: number): Journals;
+}
+
+/**
+ * The page is the newest `journals` after journals_after and before journals_before. Journals in full
+ * come on top of it, never cut. journals_omitted counts the rest of that range, which the next pages
+ * return, so a journal in full comes again on its own page.
+ */
+async function journalPage(
+  rm: Client,
+  lookups: Lookups,
+  issue: Issue,
+  { journals, full, journals_before, journals_after }: ContextInput,
+): Promise<JournalPage> {
+  const all = issue.journals ?? [];
+  const whole = new Set(full);
+  const range = before(after(all, journals_after), journals_before);
+  const newest = journals === 0 ? [] : range.slice(-journals);
+  const candidates = all.filter((journal) => newest.includes(journal) || whole.has(journal.id));
+  const names = await resolveNames(rm, lookups, issue, candidates);
+  const customFields = new Map((issue.custom_fields ?? []).map((cf) => [String(cf.id), cf.name]));
   const entries = new Map(
     candidates.map((journal) => {
       const rest = whole.has(journal.id) ? undefined : journalRest(issue.id, journal.id);
@@ -293,20 +365,37 @@ async function issueContext(
       return [journal, entry];
     }),
   );
-  /** The result with the newest `count` journals of the page. */
-  const build = (count: number): IssueContext => {
-    const page = count === 0 ? [] : newest.slice(-count);
-    const older = window.slice(0, window.length - page.length);
-    const shown = candidates.filter((journal) => page.includes(journal) || whole.has(journal.id));
-    const omitted = older.filter((journal) => !whole.has(journal.id)).length;
-    return {
-      ...context,
-      journals: shown.map((journal) => entries.get(journal)!),
-      journals_omitted: omitted,
-      journals_before: page.length > 0 && omitted > 0 ? page[0]!.id : null,
-    };
+  return {
+    available: newest.length,
+    page: (count) => {
+      const page = count === 0 ? [] : newest.slice(-count);
+      const omitted = range.length - page.length;
+      return {
+        journals: candidates
+          .filter((journal) => page.includes(journal) || whole.has(journal.id))
+          .map((journal) => entries.get(journal)!),
+        journals_total: all.length,
+        journals_omitted: omitted,
+        journals_before: page.length > 0 && omitted > 0 ? page[0]!.id : null,
+      };
+    },
   };
-  return budget === undefined ? build(newest.length) : fitCount(budget, newest.length, build);
+}
+
+/**
+ * `head` with as many journals of the page as the budget fits, and one at least, so paging moves on
+ * even when the issue alone is over the budget. Without a budget, as for the issue resource, the
+ * count alone decides.
+ */
+function fit<H extends object>(
+  head: H,
+  journals: JournalPage,
+  budget: ResultBudget | undefined,
+): H & Journals {
+  const build = (count: number) => ({ ...head, ...journals.page(count) });
+  return budget === undefined
+    ? build(journals.available)
+    : fitCount(budget, journals.available, build);
 }
 
 /**
@@ -319,12 +408,18 @@ function before(all: readonly Journal[], id: number | undefined): readonly Journ
   return at === -1 ? all.filter((journal) => journal.id < id) : all.slice(0, at);
 }
 
+function after(all: readonly Journal[], id: number | undefined): readonly Journal[] {
+  if (id === undefined) return all;
+  const at = all.findIndex((journal) => journal.id === id);
+  return at === -1 ? all.filter((journal) => journal.id > id) : all.slice(at + 1);
+}
+
 type Journal = NonNullable<Issue["journals"]>[number];
 
 function relationFrom(
   issueId: number,
   { id, issue_id: from, issue_to_id: to, relation_type: type, delay }: Relation,
-): IssueContext["relations"] {
+): z.output<typeof Relations> {
   if (from === undefined || to === undefined || type === undefined) return [];
   const outgoing = from === issueId;
   const own = outgoing ? type : (REVERSE[type] ?? type);
@@ -341,7 +436,7 @@ function relationFrom(
 type Relation = NonNullable<Issue["relations"]>[number];
 
 /** include=children carries no status, so one list of the direct subtasks adds it. */
-async function childrenOf(rm: Client, issue: Issue): Promise<IssueContext["children"]> {
+async function childrenOf(rm: Client, issue: Issue): Promise<z.output<typeof Children>> {
   const direct = issue.children ?? [];
   if (direct.length === 0) return [];
   const statuses = await bestEffort(async () => {
@@ -370,12 +465,12 @@ export async function issueMarkdown(
   lookups: Lookups,
   issue_id: number,
 ): Promise<string> {
-  return markdown(
-    await issueContext(rm, lookups, { issue_id, journals: DEFAULT_JOURNALS, full: [] }, undefined),
-  );
+  const issue = await rm.issues.get({ issue_id, include: [...INCLUDES] });
+  const input = { issue_id, journals: DEFAULT_JOURNALS, full: [] };
+  return markdown(await firstPage(rm, lookups, issue, input, undefined));
 }
 
-function markdown(context: IssueContext): string {
+function markdown(context: FirstPage): string {
   const { issue, journals } = context;
   const facts: [string, string | number | null | undefined][] = [
     ["Project", issue.project?.name],

@@ -72,13 +72,14 @@ export interface RedmineMcpOptions {
    */
   dangerouslyRevealApiKeys?: boolean;
   /**
-   * UTF-8 bytes of compact JSON at which list tools and issue_context stop filling a result. A list
-   * page then ends early, with next_offset at the first item left out, and issue_context returns
-   * journals_before for the older journals. Each result carries its JSON twice, and the budget counts
-   * one copy, because clients read one. Default 32,000, under Cursor's 40,000 bytes and Codex's about
+   * UTF-8 bytes of compact JSON at which list tools, issue_context, issues_get and raw_request stop
+   * filling a result. A list page then ends early, with next_offset at the first item left out,
+   * issue_context and issues_get return journals_before for the older journals, and raw_request
+   * returns the start of the response. Each result carries its JSON twice, and the budget counts one
+   * copy, because clients read one. Default 32,000, under Cursor's 40,000 bytes and Codex's about
    * 48,000. Above 49,000, those tools also carry `_meta["anthropic/maxResultSizeChars"]`, set to the
-   * budget plus 1,000 and at most 500,000, so Claude Code keeps their results inline instead of saving
-   * those over 50,000 characters to a file. At least 1,000.
+   * budget plus 1,000, so Claude Code keeps their results inline instead of saving those over 50,000
+   * characters to a file. From 1,000 to 499,000, as Claude Code takes at most 500,000 there.
    */
   maxResultBytes?: number;
   /**
@@ -340,7 +341,7 @@ function instructions(
     `people_find returns the id and login of people by name in a project or an issue, for any key.${admin === false ? "" : ' Tools whose description says "Needs an admin key", such as users_list, answer 403 to other keys.'}`,
     'Filters go in `where`, keyed by Redmine filter name. A value or an array means equals any of them. The description of `where` lists each filter with its value and which of {not}, {gte}, {lte}, {between: [a, b]}, {contains}, {any: true}, {none: true} it accepts, and {raw: "..."} takes Redmine filter syntax. status_id also takes "open", "closed" and "any".',
     `List tools return {items, total_count, offset, limit, next_offset}. limit is ${DEFAULT_LIMIT} by default, at most ${MAX_LIMIT}. Call again with offset = next_offset until it is null. issues_list items carry only ${SHORT_ISSUE.join(", ")}, and fields adds others. Items of other lists leave out ${HEAVY_KEYS.join(", ")}. detailed: true returns every field, and the get tool returns one record in full.`,
-    `A list page stops before limit when its JSON would pass ${resultBytes.toLocaleString("en-US")} bytes, keeping one item at least, and next_offset names the first item left out. issue_context stops adding journals there too; pass its journals_before for the older ones.`,
+    `A list page stops before limit when its JSON would pass ${resultBytes.toLocaleString("en-US")} bytes, keeping one item at least, and next_offset names the first item left out. issue_context and issues_get with journals stop adding journals there too; pass journals_before to issue_context for the older ones. Its journals_after returns only the journals newer than one you read. raw_request returns the start of a larger response, marked truncated.`,
     "Errors come back as tool results with isError and the error as JSON. A 422 carries Redmine's own messages; fix the named fields and retry.",
   ].join("\n");
 }
