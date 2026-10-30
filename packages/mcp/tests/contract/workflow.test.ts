@@ -288,8 +288,12 @@ describeServers("workflow tools", (server) => {
       journals: 100,
       full: [ids[0]],
     })) as Page;
-    expect(withOldest.journals[0]!.id).toBe(ids[0]);
-    expect(withOldest.journals_omitted).toBe(pages[0]!.journals_omitted);
+    const [oldest, next] = withOldest.journals.map((journal) => journal.id);
+    expect(oldest).toBe(ids[0]);
+    expect(withOldest).toMatchObject({
+      journals_omitted: ids.indexOf(next!),
+      journals_before: next,
+    });
 
     const newer = (await value("issue_context", { issue_id, journals_after: ids[26] })) as Page;
     expect(newer.journals.map((journal) => journal.id)).toEqual(ids.slice(27));
