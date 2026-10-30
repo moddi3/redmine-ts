@@ -67,10 +67,10 @@ const DOCUMENT_FETCHES = 8;
  */
 const FLIGHT_MS = FETCH_TIMEOUT_MS + 1000;
 /**
- * While every slot is taken, a document fetched within this time still serves its client, so a flood
- * of unknown client_ids cannot lock out a client the server has seen.
+ * While every slot is taken, a document or key set fetched within this time still serves its client,
+ * so a flood of unknown client_ids or slow key sets cannot lock out a client the server has seen.
  */
-const DOCUMENT_STALE_MS = 60 * 60_000;
+const STALE_MS = 60 * 60_000;
 const UNFETCHED = "its metadata document could not be fetched";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -87,7 +87,7 @@ const KEY_SET_REFETCH_MS = 60_000;
 
 /**
  * What resolve answers when the client needs a fetch that cannot answer in time, because every slot is
- * taken or its own fetch did not settle, and no document fetched within DOCUMENT_STALE_MS can serve it.
+ * taken or its own fetch did not settle, and no document or key set fetched within STALE_MS can serve it.
  */
 export const BUSY: unique symbol = Symbol("busy");
 /** Most slots free within one fetch timeout. */
@@ -186,17 +186,16 @@ export function createClients({ sealer, fetch, allowedHosts, audiences }: Client
     );
   }
 
-  /** The document fetched within DOCUMENT_STALE_MS, for when no fetch can answer now, or BUSY. */
+  /** The document fetched within STALE_MS, for when no fetch can answer now, or BUSY. */
   function recent(clientId: string): Client | typeof BUSY {
     const kept = documents.get(clientId);
-    return kept !== undefined && kept.fetched + DOCUMENT_STALE_MS > Date.now() ? kept.client : BUSY;
+    return kept !== undefined && kept.fetched + STALE_MS > Date.now() ? kept.client : BUSY;
   }
 
   /**
    * Fetches and checks a document, and keeps a valid one. A failure keeps nothing, as draft 02 of
    * Client ID Metadata Documents forbids caching error responses and invalid documents (section 5.2).
    * It also drops the copy held before, so a busy server never serves a client whose document fails.
-   * Only the current flight writes, so a fetch that lands after its time leaves a newer document.
    */
   async function load(
     clientId: string,
@@ -281,8 +280,11 @@ export function createClients({ sealer, fetch, allowedHosts, audiences }: Client
   ): Promise<JSONWebKeySet | Unauthenticated | typeof BUSY> {
     const kept = keySets.get(uri);
     const age = kept === undefined ? Infinity : Date.now() - kept.fetched;
-    const known = kid === undefined || kept?.set.keys.some((key) => key.kid === kid);
-    if (kept !== undefined && age < CACHE_MS && (known || age < KEY_SET_REFETCH_MS)) {
+    if (
+      kept !== undefined &&
+      age < CACHE_MS &&
+      (holds(kept.set, kid) || age < KEY_SET_REFETCH_MS)
+    ) {
       return kept.set;
     }
     return keySetFlights(
@@ -294,7 +296,14 @@ export function createClients({ sealer, fetch, allowedHosts, audiences }: Client
         }
         return outcome;
       },
-      () => BUSY,
+      () => {
+        const recent = keySets.get(uri);
+        return recent !== undefined &&
+          recent.fetched + STALE_MS > Date.now() &&
+          holds(recent.set, kid)
+          ? recent.set
+          : BUSY;
+      },
     );
   }
 
@@ -418,7 +427,8 @@ export function redirectMatches(registered: string, requested: string): boolean 
 /**
  * Starts a fetch for a key, or shares the one under way, with at most `cap` under way at once. A
  * caller gets `late()` when every slot is taken, or when the shared fetch is not done in its time.
- * `start` is told whether its flight is still the key's current one, once it has awaited something.
+ * `start` is told whether its flight is still the key's current one, once it has awaited something:
+ * a flight stays current, even past its time, until a newer flight for the key starts.
  */
 type Flights<T> = <L>(
   key: string,
@@ -427,21 +437,23 @@ type Flights<T> = <L>(
 ) => Promise<T | L>;
 
 function createFlights<T>(cap: number): Flights<T> {
+  // At most `cap` flights are within their time, and they started last, so dropping the oldest when
+  // the map is full drops only a flight past its time.
   const flights = new Map<string, { outcome: Promise<T>; until: number }>();
   return async (key, start, late) => {
     const now = Date.now();
-    for (const [id, flight] of flights) if (flight.until <= now) flights.delete(id);
     let flight = flights.get(key);
-    if (flight === undefined) {
-      if (flights.size >= cap) return late();
-      // A flight past its time may have been dropped and replaced by a newer one, which stays.
+    if (flight === undefined || flight.until <= now) {
+      let running = 0;
+      for (const other of flights.values()) if (other.until > now) running++;
+      if (running >= cap) return late();
       const current = () => flights.get(key) === started;
       const started = { outcome: start(current), until: now + FLIGHT_MS };
       const land = () => {
         if (current()) flights.delete(key);
       };
       started.outcome.then(land, land);
-      flights.set(key, started);
+      remember(flights, key, started, CACHE_SIZE);
       flight = started;
     }
     return settled(flight.outcome, flight.until - now, late);
@@ -502,6 +514,11 @@ function authenticationOf(document: z.infer<typeof Document>): ClientAuthenticat
   return set === undefined
     ? "its metadata document gives no signing key in jwks"
     : { method, keys: { set }, alg };
+}
+
+/** Whether `set` has a key under `kid`. An assertion without a kid may be checked against any key. */
+function holds(set: JSONWebKeySet, kid: unknown): boolean {
+  return kid === undefined || set.keys.some((key) => key.kid === kid);
 }
 
 /** A JWK Set's keys for signatures, which are those without `use` or with `sig`, if it has one. */

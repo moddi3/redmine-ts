@@ -264,7 +264,7 @@ await rm.issues.update({
 `file` takes a `Blob`, `Uint8Array`, `ArrayBuffer`, or `ReadableStream`. An entry also takes `filename` and, optionally, `content_type` and `description`. Redmine attaches files in two steps, and the call runs both. It uploads each file to `uploads.json`, one at a time in list order, and then sends the record with a reference to each file. A reference from `attachments.upload` can sit in the same list and goes to Redmine as it is.
 
 - Each file is one more request under the same `access`, `as`, retry, and `timeoutMs` rules, so a call with three files can take four timeouts.
-- The client never retries a `ReadableStream`, because a stream can be read only once. It refuses a stream that is locked to a reader, that appears twice in the list, or that an earlier upload already sent.
+- The client never retries a `ReadableStream`, because a stream can be read only once. It refuses a stream that is locked to a reader, that appears twice in the list, or that another upload already sent or is sending, with `invalid_input` before it sends anything.
 - Before the first request, the call checks `access` and the declared `version` for both steps, every file entry, and the record's own input. A call that fails these checks stores nothing.
 
 When a call fails after its checks, `error.uploads` holds your entries in order, with each file that Redmine acknowledged replaced by its reference. Pass it back as `uploads` to retry without sending those files again:

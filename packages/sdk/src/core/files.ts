@@ -94,6 +94,8 @@ export function createAttachmentFiles(
  * it, and a WeakSet keeps no stream alive.
  */
 const sentStreams = new WeakSet<ReadableStream>();
+/** Streams an inline upload took, so a call made meanwhile refuses them. */
+const claimedStreams = new WeakSet<ReadableStream>();
 
 /** The engine calls this as it hands a request body to fetch, so a call refused before that leaves the stream unused. */
 export function markSent(body: RequestInit["body"]): void {
@@ -171,9 +173,9 @@ export function createUploadingCall(engine: Engine, upload: AnyOp): UploadingCal
       if (entry.file instanceof ReadableStream) {
         const stream = entry.file;
         const twin = streams.get(stream);
-        if (sentStreams.has(stream)) {
+        if (sentStreams.has(stream) || claimedStreams.has(stream)) {
           throw invalidInput(
-            `${where}.file is a ReadableStream that an earlier upload already sent. A stream is read once, so pass the file again as a new stream, a Blob or bytes`,
+            `${where}.file is a ReadableStream that another upload already sent or is sending. A stream is read once, so pass the file again as a new stream, a Blob or bytes`,
             op.id,
           );
         }
@@ -200,6 +202,7 @@ export function createUploadingCall(engine: Engine, upload: AnyOp): UploadingCal
     const entries = list.map((entry: unknown, at) => checked(entry, `${key}[${at}]`));
     const placeholders = entries.map((e) => (e.file === undefined ? e : refOf("0.0", e)));
     planRequest(engine.config.base, op, { ...input, [key]: placeholders }, {});
+    for (const stream of streams.keys()) claimedStreams.add(stream);
 
     const resolved = [...entries];
     try {
@@ -215,6 +218,10 @@ export function createUploadingCall(engine: Engine, upload: AnyOp): UploadingCal
         cause: error.cause,
         uploads: resolved,
       });
+    } finally {
+      for (const stream of streams.keys()) {
+        if (!sentStreams.has(stream)) claimedStreams.delete(stream);
+      }
     }
   };
 }

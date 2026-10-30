@@ -62,12 +62,12 @@ function joined(random: () => number, old: string[], next: string[], edited: Cas
   return { old: split(from), next: split(to), from, to, edited };
 }
 
-const WORDS = ["alpha", "beta", "gamma", "delta", "😀", "x", "", " "];
+const WORDS = ["alpha", "beta", "gamma", "delta", "😀", "…", "x", "", " "];
 
 function texts(random: () => number): Case {
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
   const paragraphs = Array.from({ length: 1 + Math.floor(random() * 3) }, () =>
-    Array.from({ length: 70 + Math.floor(random() * 150) }, () => pick(WORDS.slice(0, 5))).join(
+    Array.from({ length: 70 + Math.floor(random() * 150) }, () => pick(WORDS.slice(0, 6))).join(
       " ",
     ),
   );
@@ -217,21 +217,40 @@ function read(
 
 const MIN_CUT = 2;
 
-/** Whether `shown` is `text` with … in place of each part left out. */
-function fits(shown: string, text: string): boolean {
+/**
+ * Each number of … in `shown` that can stand for parts of `text` left out, reading `shown` as `text`
+ * with … in place of each part. A … that `text` has can also stay as it is, so a line can read more
+ * than one way. Empty when `shown` is not `text` cut so.
+ */
+function cuts(shown: string, text: string): Set<number> {
   const pieces = shown.split("…");
-  if (!text.startsWith(pieces[0]!)) return false;
-  let at = pieces[0]!.length;
-  for (const piece of pieces.slice(1, -1)) {
-    const found = text.indexOf(piece, at + MIN_CUT);
-    if (piece === "" || found < 0) return false;
-    at = found + piece.length;
+  const reach = (ends: Map<number, Set<number>>, end: number, count: number) =>
+    ends.set(end, (ends.get(end) ?? new Set()).add(count));
+  let ends = new Map<number, Set<number>>();
+  if (text.startsWith(pieces[0]!)) reach(ends, pieces[0]!.length, 0);
+  for (const [n, piece] of pieces.slice(1).entries()) {
+    const last = n === pieces.length - 2;
+    const next = new Map<number, Set<number>>();
+    for (const [at, counts] of ends) {
+      for (const count of counts) {
+        if (text[at] === "…" && text.startsWith(piece, at + 1)) {
+          reach(next, at + 1 + piece.length, count);
+        }
+        if (piece === "" && last) {
+          if (text.length - at >= MIN_CUT) reach(next, text.length, count + 1);
+          continue;
+        }
+        // An empty piece between a cut and a … of the text ends where that … starts.
+        const sought = piece === "" ? "…" : piece;
+        for (let found = text.indexOf(sought, at + MIN_CUT); found >= 0;) {
+          reach(next, found + piece.length, count + 1);
+          found = text.indexOf(sought, found + 1);
+        }
+      }
+    }
+    ends = next;
   }
-  const last = pieces.at(-1)!;
-  if (pieces.length === 1) return at === text.length;
-  return last === ""
-    ? text.length - at >= MIN_CUT
-    : text.endsWith(last) && text.length - last.length - at >= MIN_CUT;
+  return ends.get(text.length) ?? new Set();
 }
 
 /** The README's pairs in a block. */
@@ -275,10 +294,9 @@ function check({ old, next, from, to, edited }: Case): string[] {
   const marker = MARKER.exec(diff);
   const body = marker === null ? diff : diff.slice(0, marker.index);
   if (body.length > CHANGE_CAP) fail("past the cap");
-  const left = whole.length - (body.length - (body.split("…").length - 1));
-  if ((marker === null ? 0 : Number(marker[1])) !== left) fail(`marker should count ${left}`);
   const hunks = read(body, old, next, false, fail);
   const complete = hunks.flat().length === wholeRows.length;
+  let added = new Set([0]);
   for (const row of hunks.flat()) {
     if (row.text.length <= row.budget) {
       if (row.shown !== row.text) fail(`${row.sign} line ${row.line} is cut`);
@@ -286,7 +304,13 @@ function check({ old, next, from, to, edited }: Case): string[] {
     }
     tally.cut++;
     if (row.shown.length > row.budget) fail(`${row.sign} line ${row.line} is past its room`);
-    if (!fits(row.shown, row.text)) fail(`${row.sign} line ${row.line} is not its text with …`);
+    const counts = cuts(row.shown, row.text);
+    if (counts.size === 0) fail(`${row.sign} line ${row.line} is not its text with …`);
+    added = new Set([...added].flatMap((sum) => [...counts].map((count) => sum + count)));
+  }
+  const left = marker === null ? 0 : Number(marker[1]);
+  if (!added.has(left - whole.length + body.length)) {
+    fail(`marker counts ${left}, which no reading of the cut lines gives`);
   }
   for (const hunk of hunks) {
     const blocks = hunk.reduce<Row[][]>((out, row, n) => {

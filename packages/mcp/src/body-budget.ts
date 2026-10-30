@@ -78,15 +78,10 @@ export function createBodyBudget({
   }
   const largest = Math.min(maxBody, limit + free);
   const holders = new Set<Holder>();
-  let used = 0;
-
-  function release(holder: Holder): void {
-    used -= holder.held;
-    holder.held = 0;
-    holders.delete(holder);
-  }
 
   function acquire(holder: Holder, bytes: number, now: number): boolean {
+    let used = 0;
+    for (const other of holders) used += other.held;
     if (used + bytes > limit) {
       const stalled = [...holders]
         .filter((other) => other !== holder && now - other.progressAt > STALL_MS)
@@ -95,12 +90,12 @@ export function createBodyBudget({
       if (used - freeable + bytes > limit) return false;
       for (const other of stalled) {
         if (used + bytes <= limit) break;
-        release(other);
+        used -= other.held;
+        holders.delete(other);
         other.ended ??= "stalled";
         other.wake?.();
       }
     }
-    used += bytes;
     holder.held += bytes;
     holders.add(holder);
     return true;
@@ -173,7 +168,7 @@ export function createBodyBudget({
         return refused("unreadable");
       } finally {
         clearTimeout(timer);
-        release(holder);
+        holders.delete(holder);
       }
       const body = bytes.subarray(0, received);
       try {
