@@ -95,9 +95,7 @@ export function longForm(
   query: Readonly<Record<string, string>>,
 ): [string, string][] | undefined {
   const project = where.project_id?.wire;
-  if (project === undefined || (/^[\w-]+$/.test(project) && !PROJECT_WORDS.has(project))) {
-    return undefined;
-  }
+  if (project === undefined || isOneProject(project)) return undefined;
   const filters: Record<string, Compiled> = { ...where };
   // The short form of an issue query starts from open issues, the long form from no filter.
   if (own(op.filters, "status_id") && filters.status_id === undefined) {
@@ -116,6 +114,47 @@ export function longForm(
     for (const value of values) entries.push([`v[${key}][]`, value]);
   }
   return entries;
+}
+
+function isOneProject(wire: string): boolean {
+  return /^[\w-]+$/.test(wire) && !PROJECT_WORDS.has(wire);
+}
+
+/**
+ * Redmine drops a filter it does not read without an error, so the request would come back wider than asked.
+ * A saved query runs its own filters and reads only one project_id from the request, and a scoped filter
+ * exists only in a query of one project.
+ */
+export function checkScope(
+  op: AnyOp,
+  where: Readonly<Record<string, Compiled>>,
+  queryId: boolean,
+): void {
+  const project = where.project_id?.wire;
+  const oneProject =
+    op.pathParams.includes("project_id") || (project !== undefined && isOneProject(project));
+  if (queryId) {
+    const other = Object.keys(where).find((key) => key !== "project_id");
+    if (other !== undefined) {
+      throw invalidInput(
+        `query_id on ${op.id} runs the saved query's own filters, and Redmine ignores where.${other}; drop where or drop query_id`,
+        op.id,
+      );
+    }
+    if (project !== undefined && !oneProject) {
+      throw invalidInput(
+        `query_id on ${op.id} works only next to one project_id, because Redmine runs a saved query without reading the long form's filters, project_id included; send one request per project`,
+        op.id,
+      );
+    }
+  }
+  const scoped = Object.keys(where).find((key) => own(op.filters, key)?.scoped);
+  if (scoped !== undefined && !oneProject) {
+    throw invalidInput(
+      `filter "${scoped}" on ${op.id} works only next to one project_id, because Redmine offers it only inside one project and drops it from any other query; pass one project_id, or send one request per project`,
+      op.id,
+    );
+  }
 }
 
 function checkProjects(op: AnyOp, values: readonly string[]): void {
@@ -139,12 +178,6 @@ function longCondition(
   { code, wire }: Compiled,
 ): { operator: string; values: string[] } {
   const spec = own(op.filters, key);
-  if (spec?.scoped) {
-    throw invalidInput(
-      `filter "${key}" on ${op.id} works only next to one project_id, because Redmine offers it only inside one project and drops it from any other query; send one request per project`,
-      op.id,
-    );
-  }
   if (spec !== undefined) return addShortFilter(spec.ops, wire);
   if (code === null || (code === "=" && /^[<>!*~^$]/.test(wire))) {
     throw invalidInput(
@@ -177,7 +210,11 @@ function split(text: string): string[] {
 }
 
 function compileCond(cond: unknown, spec: FilterSpec, at: string): Compiled {
-  if (!isRecord(cond)) return { code: "=", wire: joinValues(cond, at, spec.join, spec.words) };
+  if (!isRecord(cond)) {
+    return (
+      compileWord(cond, spec, at, false) ?? { code: "=", wire: joinValues(cond, at, spec.join) }
+    );
+  }
   const keys = Object.keys(cond).filter((k) => cond[k] !== undefined);
   const [name] = keys;
   if (keys.length !== 1 || name === undefined) {
@@ -188,7 +225,12 @@ function compileCond(cond: unknown, spec: FilterSpec, at: string): Compiled {
   const value = cond[name];
   switch (name) {
     case "not":
-      return { code: "!", wire: `!${joinValues(value, at, spec.join)}` };
+      return (
+        compileWord(value, spec, at, true) ?? {
+          code: "!",
+          wire: `!${joinValues(value, at, spec.join)}`,
+        }
+      );
     case "between": {
       if (!Array.isArray(value) || value.length !== 2) {
         throw invalidInput(`${at}: between takes a [from, to] pair`);
@@ -208,6 +250,38 @@ function compileCond(cond: unknown, spec: FilterSpec, at: string): Compiled {
   throw invalidInput(`${at}: unknown operator "${name}"`);
 }
 
+/** The operator that matches what a word's operator leaves out. */
+const OPPOSITE: Readonly<Record<string, string>> = { o: "c", c: "o" };
+
+/**
+ * A word such as status_id's "closed" is an operator, and an operator takes no values: Redmine reads `o|3` as
+ * every open issue and `!closed` as a status id. So a word stands alone, and under not it turns into its opposite.
+ */
+function compileWord(
+  value: unknown,
+  { words }: FilterSpec,
+  at: string,
+  negated: boolean,
+): Compiled | undefined {
+  const values: readonly unknown[] = Array.isArray(value) ? value : [value];
+  const named = values.filter(
+    (v): v is string => typeof v === "string" && own(words, v) !== undefined,
+  );
+  if (named.length === 0) return undefined;
+  if (values.length > 1) {
+    const listed = Object.keys(words ?? {}).map((word) => `"${word}"`);
+    throw invalidInput(
+      `${at}: ${listed.join(", ")} are operators and stand alone, not in a list with other values`,
+    );
+  }
+  const [word] = named;
+  const code = own(words, word!)!;
+  if (!negated) return { code, wire: code };
+  const opposite = OPPOSITE[code];
+  if (opposite === undefined) throw invalidInput(`${at}: {not: "${word}"} matches no issue`);
+  return { code: opposite, wire: opposite };
+}
+
 function scalar(value: unknown, at: string): string {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return String(value);
@@ -219,16 +293,10 @@ function joinValues(
   value: unknown,
   at: string,
   separator: "|" | NonNullable<FilterSpec["join"]> = "|",
-  words?: FilterSpec["words"],
 ): string {
   const values: readonly unknown[] = Array.isArray(value) ? value : [value];
   if (values.length === 0) throw invalidInput(`${at}: an empty list matches nothing useful`);
-  return values
-    .map((v) => {
-      const text = scalar(v, at);
-      return own(words, text) ?? text;
-    })
-    .join(separator);
+  return values.map((v) => scalar(v, at)).join(separator);
 }
 
 function describeType(value: unknown): string {
