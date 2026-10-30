@@ -6,6 +6,7 @@ import { RedmineError, VERSIONS } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { portable } from "../portable.ts";
 import type { Annotations, Client, Schema, Tier, ToolContext, ToolSpec } from "../tools.ts";
+import { allowWarning } from "../user-text.ts";
 
 export interface WorkflowTool<I extends z.ZodObject, O extends z.ZodObject> {
   readonly name: string;
@@ -31,7 +32,7 @@ export function defineTool<I extends z.ZodObject, O extends z.ZodObject>(
   return {
     ...rest,
     inputSchema: jsonSchema(input, "input"),
-    outputSchema: jsonSchema(output, "output"),
+    outputSchema: allowWarning(jsonSchema(output, "output")),
     since: VERSIONS[0],
     until: null,
     // The server validated the arguments against inputSchema; parsing adds the defaults.

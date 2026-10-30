@@ -40,7 +40,7 @@ import type {
   ToolResult,
   ToolSpec,
 } from "./tools.ts";
-import { hasUserText, UNTRUSTED } from "./user-text.ts";
+import { UNTRUSTED, withWarning } from "./user-text.ts";
 import { ToolError } from "./workflow/define.ts";
 import { workflowTools } from "./workflow/index.ts";
 import { createLookups } from "./workflow/lookups.ts";
@@ -207,7 +207,7 @@ async function call(
     throw error;
   }
   const { extra = [] } = result;
-  const structured = redact(result.structured) as ToolResult["structured"];
+  const structured = withWarning(redact(result.structured) as ToolResult["structured"]);
   // Clients validate structuredContent against outputSchema, so a mismatch is reported here, by name.
   const mismatch = await check(tool.outputSchema, structured);
   if (mismatch !== undefined) {
@@ -222,7 +222,7 @@ async function call(
   };
   return {
     content: [
-      ...(hasUserText(structured) ? [{ type: "text" as const, text: UNTRUSTED }] : []),
+      ...(structured.warning === undefined ? [] : [{ type: "text" as const, text: UNTRUSTED }]),
       json,
       ...extra,
     ],

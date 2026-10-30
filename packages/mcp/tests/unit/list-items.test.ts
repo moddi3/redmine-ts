@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { UNTRUSTED } from "../../src/user-text.ts";
 import { lastJson, texts } from "../connect.ts";
 import { callError, callOk, json, sent, serve } from "./harness.ts";
 import type { Route } from "./harness.ts";
@@ -306,6 +307,9 @@ describe("hours", () => {
       method: "GET",
       path: "time_entries/9.json",
     });
-    expect(result.structuredContent).toEqual({ response: { time_entry: ENTRY } });
+    expect(result.structuredContent).toEqual({
+      warning: UNTRUSTED,
+      response: { time_entry: ENTRY },
+    });
   });
 });

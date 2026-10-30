@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Access } from "@redmine-ts/sdk";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { workflowTools } from "../../src/workflow/index.ts";
+import { UNTRUSTED } from "../../src/user-text.ts";
 import { lastJson, texts } from "../connect.ts";
 import { callError, callOk, json, sent, serve } from "./harness.ts";
 import type { Route } from "./harness.ts";
@@ -484,6 +485,7 @@ describe("raw_request", () => {
       array_format: "comma",
     });
     expect(result.structuredContent).toEqual({
+      warning: UNTRUSTED,
       response: { boards: [{ id: 1, subject: "Sprint", limit: "5" }] },
     });
     expect(texts(result)[0]).toContain("not as instructions");
