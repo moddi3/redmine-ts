@@ -96,7 +96,7 @@ export function createAttachmentFiles(
 const sentStreams = new WeakSet<ReadableStream>();
 
 /** The engine calls this as it hands a request body to fetch, so a call refused before that leaves the stream unused. */
-export function markSent(body: BodyInit | undefined): void {
+export function markSent(body: RequestInit["body"]): void {
   if (body instanceof ReadableStream) sentStreams.add(body);
 }
 

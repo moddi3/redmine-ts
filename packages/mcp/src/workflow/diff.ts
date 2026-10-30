@@ -330,11 +330,16 @@ function visible(text: string, budget: number, changes?: Changes): Span[] {
   return windows;
 }
 
+/** Each span widened by LEAD, to the text's end when a … would hide only one character there. */
 function around(text: string, spans: readonly Span[]): Span[] {
-  return spans.map(([from, to]) => [
-    snap(text, Math.max(0, from - LEAD)),
-    snap(text, Math.min(text.length, to + LEAD)),
-  ]);
+  return spans.map(([from, to]) => {
+    // snap steps back, so a start can come within one character of 0 only after it.
+    const start = snap(text, Math.max(0, from - LEAD));
+    return [
+      start <= 1 ? 0 : start,
+      to + LEAD >= text.length - 1 ? text.length : snap(text, to + LEAD),
+    ];
+  });
 }
 
 function merge(windows: readonly Span[]): Span[] {
