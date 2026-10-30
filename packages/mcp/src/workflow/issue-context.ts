@@ -121,14 +121,17 @@ const Attachments = z.array(
   }),
 );
 
-const LATER_PAGE = "Left out on a journals_before or journals_after page.";
+const LATER_PAGE =
+  "Left out on a journals_before or journals_after page, and with journals 0 and full.";
 
 const IssueContextSchema = z.object({
   issue: z.union([
     IssueSchema,
     z
       .object({ id: z.int(), updated_on: z.string().optional() })
-      .describe("On a journals_before or journals_after page: the issue's id and updated_on only."),
+      .describe(
+        "On a journals_before or journals_after page, and with journals 0 and full: the issue's id and updated_on only.",
+      ),
   ]),
   allowed_statuses: Statuses.optional().describe(LATER_PAGE),
   relations: Relations.optional().describe(LATER_PAGE),
@@ -202,12 +205,13 @@ export const issueContextTool: ToolSpec = defineTool({
   name: "issue_context",
   title: "Get issue context",
   description: [
-    "Everything needed to work on one issue in one call: the issue with its full description, the statuses it can move to next, relations read from this issue, subtasks with their status, attachment metadata, watchers, and the newest journals as readable diffs with ids resolved to names.",
+    "Everything needed to work on one issue in one call, with ids in journals resolved to names.",
     "Call it first when asked to work on, triage or summarize an issue, instead of issues_get.",
-    `Descriptions and notes longer than ${TEXT_CAP} characters are clipped with a marker that names the call returning them whole.`,
-    "Returns {issue, allowed_statuses, relations, children, attachments, watchers, journals, journals_total, journals_omitted, journals_before}.",
-    "Journals stop at the result budget; call again with journals_before for the older ones, or with journals_after for the ones newer than a journal you read. Those pages return the issue as {id, updated_on} with the journals only.",
-    "Next: issues_transition to change the status by name, issues_update for other fields or a note, attachments_download to read a file.",
+    "Returns {issue, allowed_statuses: the statuses it can move to next, relations: read from this issue, children: subtasks with their status, attachments: metadata, watchers, journals, journals_total, journals_omitted, journals_before}.",
+    "Journals come oldest first. Each one's note is N in the issue page's #note-N; Redmine's own number is higher after a journal hidden from this key, such as another user's private note.",
+    `Descriptions and notes over ${TEXT_CAP} characters end in a clip marker naming the call for all of it.`,
+    "Journals stop at the result budget. Pages with journals_before or journals_after, and the call a journal's clip marker names, return the issue as {id, updated_on} only.",
+    "Next: issues_transition to change the status by name, issues_update for other fields or a note, attachments_download for a file.",
   ].join(" "),
   input: z.strictObject({
     issue_id: z.int().positive().describe("The issue id, 123 for #123."),
@@ -237,7 +241,7 @@ export const issueContextTool: ToolSpec = defineTool({
       .array(z.int().positive())
       .default([])
       .describe(
-        "Ids of journals to return unclipped, even if older than the newest `journals`. An older one still counts in journals_omitted and comes again on its own page.",
+        "Ids of journals to return unclipped, even if older than the newest `journals`. An older one still counts in journals_omitted and comes again on its own page. With journals 0, as a clip marker names, returns the issue as {id, updated_on} only.",
       ),
   }),
   output: IssueContextSchema,
@@ -272,7 +276,8 @@ async function issueContext(
       { kind: "unknown_journal", issue_id: issue.id, journal_ids: unknown },
     );
   }
-  if (input.journals_before === undefined && input.journals_after === undefined) {
+  const fullOnly = input.journals === 0 && input.full.length > 0;
+  if (input.journals_before === undefined && input.journals_after === undefined && !fullOnly) {
     return firstPage(rm, lookups, issue, input, budget);
   }
   const page = await journalPage(rm, lookups, issue, input);

@@ -289,7 +289,7 @@ describe("issue_context", () => {
     );
   });
 
-  it("clips a journal with a marker that names the call returning it whole, in one issues.get", async () => {
+  it("clips a journal with a marker whose call returns it whole with the issue as {id, updated_on}, in one issues.get", async () => {
     const { client, seen } = await serve(ROUTES);
     const clipped = (await callOk(client, "issue_context", { issue_id: 7, journals: 2 }))
       .structuredContent as { journals: Record<string, unknown>[] };
@@ -307,21 +307,26 @@ describe("issue_context", () => {
     });
 
     seen.length = 0;
-    const whole = (await callOk(client, "issue_context", { issue_id: 7, journals: 0, full: [24] }))
-      .structuredContent as { journals: Record<string, unknown>[] };
-    expect(whole.journals).toEqual([
-      expect.objectContaining({
-        id: 24,
-        notes,
-        changes: expect.arrayContaining([
-          { field: "Description", diff: `@@ line 1 @@\n- ${LONG}\n+ short` },
-        ]),
-      }),
+    const whole = await callOk(client, "issue_context", { issue_id: 7, journals: 0, full: [24] });
+    expect(whole.structuredContent).toEqual({
+      warning: UNTRUSTED,
+      issue: { id: 7, updated_on: "2026-10-02T10:00:00Z" },
+      journals: [
+        expect.objectContaining({
+          id: 24,
+          notes,
+          changes: expect.arrayContaining([
+            { field: "Description", diff: `@@ line 1 @@\n- ${LONG}\n+ short` },
+          ]),
+        }),
+      ],
+      journals_total: 25,
+      journals_omitted: 25,
+      journals_before: null,
+    });
+    expect(sent(seen).filter((request) => request.startsWith("GET /issues"))).toEqual([
+      expect.stringMatching(/^GET \/issues\/7\.json\?/),
     ]);
-    expect(whole).toMatchObject({ journals_total: 25, journals_omitted: 25 });
-    expect(sent(seen).filter((request) => request.startsWith("GET /issues/7.json"))).toHaveLength(
-      1,
-    );
   });
 
   it("adds a journal in full that is older than the newest journals, and clips the others", async () => {
@@ -337,6 +342,7 @@ describe("issue_context", () => {
     });
     const context = (await callOk(client, "issue_context", { issue_id: 7, journals: 1, full: [1] }))
       .structuredContent as { journals: { id: number; notes: string }[] };
+    expect(context).toHaveProperty("allowed_statuses");
     expect(context.journals.map(({ id, notes }) => [id, notes])).toEqual([
       [1, LONG],
       [
