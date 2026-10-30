@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { lastJson, texts } from "../connect.ts";
-import { describeServers } from "./servers.ts";
+import { describeServers, expectAdminToolsHidden } from "./servers.ts";
 import type { ContractServer } from "./servers.ts";
 
 const cli = fileURLToPath(new URL("../../dist/cli.mjs", import.meta.url));
@@ -82,6 +82,21 @@ describeServers("Streamable HTTP", (server) => {
       expect(tools).toHaveLength(server.version === "6.1" ? 92 : 93);
       const upload = tools.find((tool) => tool.name === "attachments_upload");
       expect(upload?.inputSchema.properties).not.toHaveProperty("path");
+    },
+  );
+
+  it.each(["legacy", "modern"] as const)(
+    "lists a %s-era client whose key is not an admin's no tool that needs an admin key",
+    async (era) => {
+      const [asAdmin, asUser] = await Promise.all([
+        connect(full.url, server.adminKey, era),
+        connect(full.url, server.userKey, era),
+      ]);
+      await expectAdminToolsHidden(server, asAdmin, asUser);
+      const hidden = await asUser.callTool({ name: "users_list", arguments: {} });
+      expect(texts(hidden)[0]).toContain(
+        "Redmine answered 403 for users_list: it needs an admin key",
+      );
     },
   );
 

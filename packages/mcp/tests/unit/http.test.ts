@@ -7,18 +7,41 @@ import { texts } from "../connect.ts";
 
 type Handler = (request: Request) => Promise<Response>;
 
+const ADMIN_ONLY = [
+  "custom_fields_list",
+  "groups_add_user",
+  "groups_create",
+  "groups_delete",
+  "groups_list",
+  "groups_remove_user",
+  "groups_remove_users",
+  "groups_update",
+  "projects_archive",
+  "projects_unarchive",
+  "users_create",
+  "users_delete",
+  "users_list",
+  "users_update",
+];
+
 /**
- * A Redmine that knows two keys, records the key each request carried, and names a status after it.
- * Like Redmine 6.1 and 7.0, it answers 401 to my/page.js for any key, because the path is outside its API.
+ * A Redmine that knows two keys, alice's an admin's and bob's not, records the key each request
+ * carried, apart from key checks, and names a status after it. Like Redmine 6.1 and 7.0, it answers 401
+ * to my/page.js for any key, because the path is outside its API.
  */
 function fakeRedmine() {
   const keys: (string | null)[] = [];
+  const checks: (string | null)[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     const key = request.headers.get("x-redmine-api-key");
     const path = new URL(request.url).pathname;
-    keys.push(key);
+    (path === "/users/current.json" ? checks : keys).push(key);
     if (key !== "alice-key" && key !== "bob-key") return new Response(null, { status: 401 });
+    if (path === "/users/current.json") {
+      return Response.json({ user: { id: 1, login: key, admin: key === "alice-key" } });
+    }
+    if (path === "/users.json" && key === "bob-key") return new Response(null, { status: 403 });
     if (path === "/my/page.js") return new Response(null, { status: 401 });
     if (path === "/issue_statuses.json") {
       return Response.json({
@@ -27,7 +50,7 @@ function fakeRedmine() {
     }
     return Response.json({}, { status: 404 });
   };
-  return { fetch, keys };
+  return { fetch, keys, checks };
 }
 
 function handler(options: Partial<RedmineMcpHandlerOptions> = {}) {
@@ -39,7 +62,7 @@ function handler(options: Partial<RedmineMcpHandlerOptions> = {}) {
     onError: (error) => errors.push(error),
     ...options,
   });
-  return { handle, keys: redmine.keys, errors };
+  return { handle, keys: redmine.keys, checks: redmine.checks, errors };
 }
 
 /** Calls the handler in place of the network, adding the Host and Content-Length a real fetch sends. */
@@ -437,6 +460,31 @@ describe("createRedmineMcpHandler", () => {
       const forced = await client.callTool({ name: "issues_delete", arguments: { issue_id: 1 } });
       expect(texts(forced)[0]).toContain('"read-only"');
       expect(keys).toEqual([]);
+    },
+  );
+
+  it.each(["legacy", "modern"] as const)(
+    "lists a %s-era client whose key is not an admin's no tool that needs one, checking the key once per listing",
+    async (era) => {
+      const { handle, checks } = handler();
+      const alice = await connect(handle, "alice-key", era);
+      const bob = await connect(handle, "bob-key", era);
+      const names = async (client: Client) =>
+        (await client.listTools()).tools.map((tool) => tool.name);
+      const everything = await names(alice);
+      const bobs = await names(bob);
+      expect(everything).toHaveLength(93);
+      expect(everything.filter((name) => !bobs.includes(name)).toSorted()).toEqual(ADMIN_ONLY);
+      expect(alice.getInstructions()).toContain(
+        'Tools whose description says "Needs an admin key"',
+      );
+      expect(bob.getInstructions()).not.toContain("admin key");
+      expect(checks).toEqual(["alice-key", "bob-key", "alice-key", "bob-key"]);
+      const hidden = await bob.callTool({ name: "users_list", arguments: {} });
+      expect(texts(hidden)[0]).toContain(
+        "Redmine answered 403 for users_list: it needs an admin key",
+      );
+      expect(checks).toHaveLength(4);
     },
   );
 

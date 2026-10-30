@@ -8,7 +8,7 @@
 import type { Access, RedmineVersion } from "@redmine-ts/sdk";
 import { z } from "zod";
 import type { BearerGrant, BearerVerifier } from "../http.ts";
-import { checkApiKey, KEY_CHECK_TIMEOUT_MS } from "../redmine-key.ts";
+import { checkCredential, KEY_CHECK_TIMEOUT_MS } from "../redmine-key.ts";
 import type { KeyVerdict } from "../redmine-key.ts";
 import { JWT_BEARER, peek, SIGNING_ALGS } from "./assertion.ts";
 import { allowsRedirect, BUSY, BUSY_RETRY_SECONDS, createClients } from "./clients.ts";
@@ -213,6 +213,7 @@ interface SignIn {
   client: string;
   /** Set when the client must prove a key at the token endpoint; a public client proves PKCE alone. */
   auth?: KeyBound;
+  admin?: boolean;
 }
 
 interface CodePayload extends SignIn {
@@ -227,6 +228,7 @@ interface CodePayload extends SignIn {
 interface AccessPayload {
   family: string;
   credential: BearerGrant["credential"];
+  admin?: boolean;
   scopes: Scope[];
   client: string;
   audience: string;
@@ -545,10 +547,10 @@ export function createAuthorizationServer(
     } finally {
       keyChecks.delete(lease);
     }
-    if (check !== "ok") {
+    if (check.kind !== "ok") {
       if (families !== undefined) await countFailure(families, failures);
       const attempts = consent.attempts + 1;
-      const unanswered = check === "unreachable";
+      const unanswered = check.kind === "unreachable";
       if (attempts >= KEY_ATTEMPTS) {
         return errorPage(
           unanswered ? 503 : 400,
@@ -572,6 +574,7 @@ export function createAuthorizationServer(
       redirect: consent.redirect,
       challenge: consent.challenge,
       scopes: consent.scopes,
+      admin: check.admin,
     };
     return back(
       consent.redirect,
@@ -588,7 +591,7 @@ export function createAuthorizationServer(
   }
 
   function checkKeyAtRedmine(apiKey: string): Promise<KeyVerdict> {
-    return checkApiKey({ baseUrl: redmineUrl, fetch: send }, apiKey, { onError });
+    return checkCredential({ baseUrl: redmineUrl, fetch: send, auth: { apiKey } }, { onError });
   }
 
   /** Redmine sends the person back here, signed in or not. */
@@ -633,6 +636,8 @@ export function createAuthorizationServer(
       redirect: state.redirect,
       challenge: state.challenge,
       scopes: state.scopes,
+      // Redmine lets an OAuth token act as an admin only with the admin scope, which is never requested.
+      admin: false,
     };
     return back(state.redirect, {
       code: await sealer.seal("code", ours, CODE_TTL),
@@ -808,8 +813,8 @@ export function createAuthorizationServer(
     if ("apiKey" in grant) {
       if (app !== undefined) return METHOD_CHANGED;
       const check = await checkKeyAtRedmine(grant.apiKey);
-      if (check === "ok") return keyTokens(grant.apiKey);
-      return check === "refused"
+      if (check.kind === "ok") return keyTokens(grant.apiKey);
+      return check.kind === "refused"
         ? invalidGrant("Redmine no longer accepts the API key")
         : UNREACHABLE;
     }
@@ -866,7 +871,7 @@ export function createAuthorizationServer(
   async function issue(
     upstream: Upstream,
     scopes: Scope[],
-    { family, until, client, auth }: SignIn,
+    { family, until, client, auth, admin }: SignIn,
   ): Promise<TokenSet> {
     const left = until === undefined ? REFRESH_TTL : until - now();
     const skew = Math.min(EXPIRY_SKEW, Math.floor(upstream.expiresIn / 2));
@@ -874,6 +879,7 @@ export function createAuthorizationServer(
     const accessPayload: AccessPayload = {
       family,
       credential: upstream.credential,
+      admin,
       scopes,
       client,
       audience: issuer,
@@ -886,6 +892,7 @@ export function createAuthorizationServer(
       scopes,
       client,
       auth,
+      admin,
     };
     return {
       access_token: await sealer.seal("access", accessPayload, lifetime),
@@ -1002,6 +1009,7 @@ export function createAuthorizationServer(
         }
         return {
           credential: payload.credential,
+          admin: payload.admin,
           scopes: payload.scopes,
           resource: payload.audience,
           expiresAt: payload.exp!,

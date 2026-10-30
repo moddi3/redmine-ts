@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Access } from "@redmine-ts/sdk";
-import { describe, it } from "vite-plus/test";
+import type { Client } from "@modelcontextprotocol/client";
+import { describe, expect, it } from "vite-plus/test";
 import { connect } from "../connect.ts";
 
 export interface ContractServer {
@@ -61,4 +62,21 @@ export function connectTo(
     { baseUrl: server.baseUrl, auth: { apiKey }, version: server.version, access },
     { filesDir, maxResultBytes },
   );
+}
+
+export async function expectAdminToolsHidden(
+  server: ContractServer,
+  asAdmin: Client,
+  asUser: Client,
+): Promise<void> {
+  const everything = (await asAdmin.listTools()).tools;
+  const needing = everything
+    .filter((tool) => tool.description?.includes("Needs an admin key"))
+    .map((tool) => tool.name);
+  expect(needing).toHaveLength(server.version === "6.1" ? 13 : 14);
+  expect((await asUser.listTools()).tools.map((tool) => tool.name)).toEqual(
+    everything.map((tool) => tool.name).filter((name) => !needing.includes(name)),
+  );
+  expect(asAdmin.getInstructions()).toContain('Tools whose description says "Needs an admin key"');
+  expect(asUser.getInstructions()).not.toContain("admin key");
 }
