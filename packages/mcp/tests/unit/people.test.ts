@@ -455,6 +455,68 @@ describe("people_find", () => {
     expect(sent(seen).filter((request) => request.startsWith("GET /users/"))).toHaveLength(3);
   });
 
+  it("returns a partial match when only a group watcher matched better", async () => {
+    const ivanP = { id: 40, name: "Ivan P.", login: "ip" };
+    const team = { id: 22, name: "Ivan Petrov team" };
+    const { client } = await serve({
+      "GET /issues/7.json": issueWith({ watchers: [team] }),
+      "GET /projects/1/memberships.json": memberships([member(1, ivanP)]),
+      ...users([ivanP]),
+      ...groups([team]),
+    });
+    const result = await callOk(client, "people_find", { name: "Ivan Petrov", issue_id: 7 });
+    expect(result.structuredContent).toEqual({
+      matches: [{ id: 40, name: "Ivan P.", login: "ip", match: "partial", found_as: ["member"] }],
+      more: 0,
+    });
+  });
+
+  it(`looks up past group watchers until it finds ${MAX_MATCHES} users, and counts only the rest`, async () => {
+    const teams = Array.from({ length: 3 }, (_, n) => ({ id: 80 + n, name: `Alex team ${n}` }));
+    const alexes = Array.from({ length: 12 }, (_, n) => ({
+      id: 30 + n,
+      name: `Alex Number${String(n).padStart(2, "0")}`,
+      login: `alex${n}`,
+    }));
+    const { client, seen } = await serve({
+      "GET /issues/7.json": issueWith({ watchers: teams }),
+      "GET /projects/1/memberships.json": memberships(alexes.map((alex, n) => member(n + 1, alex))),
+      ...users(alexes),
+      ...groups(teams),
+    });
+    const result = await callOk(client, "people_find", { name: "alex", issue_id: 7 });
+    const { matches, more } = result.structuredContent as {
+      matches: { login: string }[];
+      more: number;
+    };
+    expect(matches.map(({ login }) => login)).toEqual(
+      alexes.slice(0, MAX_MATCHES).map(({ login }) => login),
+    );
+    expect(more).toBe(2);
+    expect(seen.length).toBeLessThanOrEqual(MAX_CALLS);
+  });
+
+  it(`stops looking up at ${MAX_CALLS} calls, and says what it left out`, async () => {
+    const ivanP = { id: 40, name: "Ivan P.", login: "ip" };
+    const teams = Array.from({ length: 13 }, (_, n) => ({
+      id: 80 + n,
+      name: `Ivan Petrov team ${n + 1}`,
+    }));
+    const { client, seen } = await serve({
+      "GET /issues/7.json": issueWith({ watchers: teams }),
+      "GET /projects/1/memberships.json": memberships([member(1, ivanP)]),
+      ...users([ivanP]),
+      ...groups(teams),
+    });
+    const result = await callOk(client, "people_find", { name: "Ivan Petrov", issue_id: 7 });
+    expect(result.structuredContent).toEqual({
+      matches: [],
+      more: 4,
+      unavailable: [expect.stringMatching(/^more: 4 were not looked up, because /)],
+    });
+    expect(seen.length).toBeLessThanOrEqual(MAX_CALLS);
+  });
+
   it("reads at most 5 pages of members, and says when it stopped", async () => {
     const many = Array.from({ length: 600 }, (_, n) =>
       member(n + 1, { id: 1000 + n, name: n === 550 ? "Zed Last" : `Member ${n}` }),
