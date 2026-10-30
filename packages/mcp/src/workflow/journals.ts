@@ -76,6 +76,10 @@ function referencedIds(journals: readonly Journal[]): Map<Kind, Set<string>> {
   return ids;
 }
 
+export function noteNumber(journals: readonly Journal[], journal: Journal): number {
+  return journals.indexOf(journal) + 1;
+}
+
 /** `customFields` names the issue's custom fields by id. */
 export function changesOf(
   journal: Journal,

@@ -413,8 +413,7 @@ describe("issues_transition", () => {
       notes: "Fixed in build 12.",
     });
     expect(result.structuredContent).toEqual({ ok: true, status: { id: 3, name: "Resolved" } });
-    expect(seen.at(-1)).toMatchObject({
-      method: "PUT",
+    expect(seen.find((request) => request.method === "PUT")).toMatchObject({
       body: { issue: { status_id: 3, notes: "Fixed in build 12." } },
     });
   });

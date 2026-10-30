@@ -10,7 +10,8 @@ import { portable } from "./portable.ts";
 import { fitJournals, fitPage } from "./result-budget.ts";
 import type { Annotations, Client, Schema, Tier, ToolSpec } from "./tools.ts";
 import { allowWarning } from "./user-text.ts";
-import { invalidInput } from "./workflow/define.ts";
+import { AddedJournal, RETURNS_JOURNAL, writeAndFindJournal } from "./workflow/added-journal.ts";
+import { invalidInput, jsonSchema } from "./workflow/define.ts";
 
 const DRAFT = "https://json-schema.org/draft/2020-12/schema";
 
@@ -305,6 +306,27 @@ function toolFor(entry: CatalogEntry): ToolSpec {
       };
     }
     case "empty":
+      if (entry.id === "updateIssue") {
+        return {
+          ...common,
+          inputSchema: entry.inputSchema,
+          outputSchema: {
+            $schema: DRAFT,
+            ...OK,
+            properties: {
+              ...OK.properties,
+              journal: withoutDraft(jsonSchema(AddedJournal, "output")),
+            },
+          },
+          run: async (rm, input, context) => {
+            const { issue_id, notes } = input as { issue_id: number; notes?: string };
+            const journal = await writeAndFindJournal(rm, context, issue_id, notes, async () =>
+              call(rm, input),
+            );
+            return { structured: { ok: true, ...(journal === undefined ? {} : { journal }) } };
+          },
+        };
+      }
       return {
         ...common,
         inputSchema: entry.inputSchema,
@@ -536,6 +558,7 @@ function describeTool(entry: CatalogEntry, adminOnly: string | undefined): strin
     clip(entry.description, 300),
     effect,
     returns,
+    entry.id === "updateIssue" ? RETURNS_JOURNAL : "",
     output.kind === "list" ? "A large page may end before limit; follow next_offset." : "",
     ids.length > 0 ? `Ids, not names: ${ids.join(", ")}.` : "",
     entry.id === "createMembership"

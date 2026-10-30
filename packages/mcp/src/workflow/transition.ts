@@ -7,6 +7,7 @@ import { catalog } from "@redmine-ts/sdk/catalog";
 import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
 import type { Client, ToolSpec } from "../tools.ts";
+import { AddedJournal, RETURNS_JOURNAL, writeAndFindJournal } from "./added-journal.ts";
 import { bestEffort, defineTool, ToolError } from "./define.ts";
 import type { Lookups } from "./lookups.ts";
 
@@ -26,6 +27,7 @@ export function transitionTool(access: Access): ToolSpec {
       "Sends no update when the issue already has the status and there are no notes.",
       "Prefer it to issues_update with status_id.",
       "Returns {ok, status: {id, name}}.",
+      RETURNS_JOURNAL,
       entry.docsUrl ? `Docs: ${entry.docsUrl}` : "",
     ]
       .filter((part) => part !== "")
@@ -40,27 +42,37 @@ export function transitionTool(access: Access): ToolSpec {
     output: z.object({
       ok: z.literal(true),
       status: z.object({ id: z.int(), name: z.string().nullable() }),
+      journal: AddedJournal.optional(),
     }),
     ...BY_METHOD.PUT,
-    run: async (rm, { issue_id, status, notes }, { lookups }) => {
+    run: async (rm, { issue_id, status, notes }, context) => {
+      const { lookups } = context;
       const target =
         typeof status === "number"
           ? { id: status, name: null }
           : await statusNamed(rm, access, issue_id, status);
-      try {
-        await rm.issues.transition({
-          issue_id,
-          status_id: target.id,
-          ...(notes === undefined ? {} : { notes }),
-        });
-      } catch (error) {
-        if (RedmineError.is(error, "transition_not_allowed")) {
-          throw await notAllowed(lookups, issue_id, error);
+      const journal = await writeAndFindJournal(rm, context, issue_id, notes, async () => {
+        try {
+          await rm.issues.transition({
+            issue_id,
+            status_id: target.id,
+            ...(notes === undefined ? {} : { notes }),
+          });
+        } catch (error) {
+          if (RedmineError.is(error, "transition_not_allowed")) {
+            throw await notAllowed(lookups, issue_id, error);
+          }
+          throw error;
         }
-        throw error;
-      }
+      });
       const name = target.name ?? (await nameOf(lookups, target.id));
-      return { structured: { ok: true as const, status: { id: target.id, name } } };
+      return {
+        structured: {
+          ok: true as const,
+          status: { id: target.id, name },
+          ...(journal === undefined ? {} : { journal }),
+        },
+      };
     },
   });
 }

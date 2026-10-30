@@ -50,6 +50,7 @@ export interface LocalFiles {
  * response until the call ends, so progress would arrive with the result.
  */
 export interface ToolContext {
+  readonly access: Access;
   /** Statuses, trackers and the other global lists, cached for a few minutes. */
   readonly lookups: Lookups;
   /** Where `path` inputs read from and saved attachments go, when the server has a files directory. */
