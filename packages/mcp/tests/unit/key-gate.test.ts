@@ -182,6 +182,7 @@ describe("an X-Redmine-API-Key that Redmine refuses", () => {
     async (era) => {
       const { handle, calls } = handler();
       const client = await connect(handle, "bogus", era);
+      expect(calls).toEqual(["/users/current.json"]);
       await expect(
         client.callTool({
           name: "issue_statuses_list",
@@ -189,7 +190,7 @@ describe("an X-Redmine-API-Key that Redmine refuses", () => {
           _meta: { pad: "x".repeat(64 * 1024) },
         }),
       ).rejects.toThrow();
-      expect(calls).toEqual(["/users/current.json"]);
+      expect(calls).toEqual(["/users/current.json", "/users/current.json"]);
     },
   );
 
@@ -208,12 +209,16 @@ describe("an X-Redmine-API-Key that Redmine refuses", () => {
     expect(calls).toEqual(["/users/current.json"]);
   });
 
-  it("is served as before for a small body that arrives, with no call to Redmine", async () => {
+  it("is served as before for a small body that arrives: a tool call without a key check, a list with every tool", async () => {
     const { handle, calls } = handler();
-    const response = await handle(post("bogus", [toolsList(60 * 1024)]));
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("attachments_upload");
-    expect(calls).toEqual([]);
+    const called = await handle(post("bogus", [toolCall(60 * 1024)]));
+    expect(called.status).toBe(200);
+    expect(await called.text()).toContain("X-Redmine-API-Key header");
+    expect(calls).toEqual(["/issue_statuses.json"]);
+    const listed = await handle(post("bogus", [toolsList(60 * 1024)]));
+    expect(listed.status).toBe(200);
+    expect(await listed.text()).toContain("users_list");
+    expect(calls).toEqual(["/issue_statuses.json", "/users/current.json"]);
   });
 
   it("is never asked about once the SDK has answered: 413 by length, 415 by type", async () => {
@@ -233,7 +238,7 @@ describe("an X-Redmine-API-Key that Redmine refuses", () => {
 });
 
 describe("an X-Redmine-API-Key when Redmine does not answer", () => {
-  it("gets 503 with id null for a body past 64 KiB, logged once, while small requests are served", async () => {
+  it("gets 503 with id null for a body past 64 KiB, while small requests are served with every tool", async () => {
     const { handle, errors } = handler({ down: true });
     const large = await handle(post("good-key", [toolsList(100 * 1024)]));
     expect(large.status).toBe(503);
@@ -244,9 +249,11 @@ describe("an X-Redmine-API-Key when Redmine does not answer", () => {
     });
     expect(errors).toHaveLength(1);
     const client = await connect(handle, "good-key");
-    expect((await client.listTools()).tools.length).toBeGreaterThan(0);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("users_list");
     expect((await handle(post("good-key", [toolsList()]))).status).toBe(200);
-    expect(errors).toHaveLength(1);
+    expect(errors.map((error) => error.message)).toEqual(
+      Array(4).fill("Network error on getCurrentUser: fetch failed"),
+    );
   });
 
   it("gets 503 for a small body still arriving after a second", async () => {
@@ -269,7 +276,7 @@ describe("an X-Redmine-API-Key when Redmine does not answer", () => {
 });
 
 describe("an X-Redmine-API-Key that Redmine accepts", () => {
-  it("uploads a 5 MiB file through attachments_upload after one key check", async () => {
+  it("uploads a 5 MiB file through attachments_upload after a key check of its own", async () => {
     const { handle, calls, uploads } = handler();
     const client = await connect(handle, "good-key");
     const file = new Uint8Array(5 * 1024 * 1024).map((_, index) => index % 251);
@@ -280,7 +287,7 @@ describe("an X-Redmine-API-Key that Redmine accepts", () => {
     expect(result.isError).toBeFalsy();
     expect(uploads).toHaveLength(1);
     expect(Buffer.from(uploads[0]!).equals(file)).toBe(true);
-    expect(calls.filter((path) => path === "/users/current.json")).toHaveLength(1);
+    expect(calls).toEqual(["/users/current.json", "/users/current.json", "/uploads.json"]);
   });
 
   it("refuses a file one byte over 5 MiB with the tool's own error, not the request limit", async () => {

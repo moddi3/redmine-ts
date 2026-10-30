@@ -26,7 +26,7 @@ import { createAuthorizationServer } from "./oauth/server.ts";
 import type { AuthorizationServer, RedmineOAuthOptions } from "./oauth/server.ts";
 import { comparablePath, CORS_MAX_AGE, publicDocument, publicPaths } from "./oauth/web.ts";
 import type { PublicPaths } from "./oauth/web.ts";
-import { checkApiKey } from "./redmine-key.ts";
+import { checkCredential } from "./redmine-key.ts";
 import type { KeyVerdict } from "./redmine-key.ts";
 import { checkResultBytes, DEFAULT_RESULT_BYTES } from "./result-budget.ts";
 import { createRedmineMcpServer } from "./server.ts";
@@ -56,6 +56,11 @@ export interface BearerGrant {
    * and the highest decides the access mode, capped by the handler's own.
    */
   scopes: readonly string[];
+  /**
+   * Whether the token's Redmine user was an admin when they signed in. false leaves the tools that need
+   * an admin key out of tools/list. Left out, every tool is listed.
+   */
+  admin?: boolean;
   /** The resource the token was issued for. Anything but the handler's publicUrl is refused. */
   resource: string;
   /** Seconds since the epoch. */
@@ -141,13 +146,22 @@ export interface RedmineMcpHandlerOptions extends Omit<RedmineConfig, "auth"> {
  * depends on what its server sees, so its server reports to `observe`.
  */
 type RequestAuth =
-  | { readonly kind: "key"; readonly auth: { apiKey: string }; readonly access: Access }
+  | {
+      readonly kind: "key";
+      readonly auth: { apiKey: string };
+      readonly access: Access;
+      readonly admin?: boolean;
+      readonly check: () => Promise<KeyVerdict>;
+    }
   | {
       readonly kind: "bearer";
       readonly auth: BearerGrant["credential"];
       readonly access: Access;
+      readonly admin?: boolean;
       readonly observe: (observation: Observation) => void;
     };
+
+const ANSWERS_BY_ADMIN_RIGHTS = new Set(["initialize", "server/discover", "tools/list"]);
 
 const ORIGIN_SCHEME = /^https?:\/\//i;
 
@@ -233,7 +247,11 @@ export function createRedmineMcpHandler(
       const redmine = authInfo?.extra?.redmine as RequestAuth;
       return createRedmineMcpServer(
         { ...config, auth: redmine.auth, access: redmine.access },
-        { maxResultBytes, ...(redmine.kind === "bearer" ? { observe: redmine.observe } : {}) },
+        {
+          maxResultBytes,
+          admin: redmine.admin,
+          ...(redmine.kind === "bearer" ? { observe: redmine.observe } : {}),
+        },
       );
     },
     { onerror: onError, maxRequestBodySize: MAX_BODY_BYTES },
@@ -256,7 +274,12 @@ export function createRedmineMcpHandler(
       return mcp.fetch(request, { authInfo });
     }
     const body = await bodies.read(request);
-    if (body.kind === "json") return mcp.fetch(request, { authInfo, parsedBody: body.value });
+    if (body.kind === "json") {
+      return mcp.fetch(request, {
+        authInfo: await withAdmin(authInfo, body.value),
+        parsedBody: body.value,
+      });
+    }
     if (body.kind === "other") {
       const { url, method, headers, signal } = request;
       return mcp.fetch(new Request(url, { method, headers, signal, body: body.bytes }), {
@@ -281,12 +304,15 @@ export function createRedmineMcpHandler(
     const apiKey = request.headers.get(API_KEY_HEADER)?.trim();
     let response: Response;
     if (apiKey) {
-      const redmine: RequestAuth = { kind: "key", auth: { apiKey }, access };
-      response = await admitKey(
-        request,
-        () => checkApiKey(config, apiKey, { signal: request.signal, onError }),
-        (admitted) =>
-          serve(admitted, { token: apiKey, clientId: "", scopes: [], extra: { redmine } }),
+      let asked: Promise<KeyVerdict> | undefined;
+      const check = () =>
+        (asked ??= checkCredential(
+          { ...config, auth: { apiKey } },
+          { signal: request.signal, onError },
+        ));
+      const redmine: RequestAuth = { kind: "key", auth: { apiKey }, access, check };
+      response = await admitKey(request, check, (admitted) =>
+        serve(admitted, { token: apiKey, clientId: "", scopes: [], extra: { redmine } }),
       );
     } else if (bearer === undefined) {
       response = await missingKey(request);
@@ -403,7 +429,12 @@ function bearerGate(
       });
       const granted = accessFor(grant.scopes);
       if (granted !== undefined) {
-        return { authInfo, auth: grant.credential, access: strictest(access, granted) };
+        return {
+          authInfo,
+          auth: grant.credential,
+          access: strictest(access, granted),
+          admin: grant.admin,
+        };
       }
       const insufficient = new OAuthError(
         OAuthErrorCode.InsufficientScope,
@@ -442,6 +473,7 @@ function bearerGate(
         kind: "bearer",
         auth: bearer.auth,
         access: bearer.access,
+        admin: bearer.admin,
         observe: (observation) => void seen.push(observation),
       };
       let response: Response;
@@ -479,6 +511,19 @@ interface Bearer {
   readonly authInfo: AuthInfo;
   readonly auth: BearerGrant["credential"];
   readonly access: Access;
+  readonly admin: boolean | undefined;
+}
+
+async function withAdmin(authInfo: AuthInfo, body: unknown): Promise<AuthInfo> {
+  const redmine = authInfo.extra?.redmine as RequestAuth;
+  if (redmine.kind !== "key") return authInfo;
+  const lists = [body]
+    .flat()
+    .some((message) => isJSONRPCRequest(message) && ANSWERS_BY_ADMIN_RIGHTS.has(message.method));
+  if (!lists) return authInfo;
+  const verdict = await redmine.check();
+  if (verdict.kind !== "ok") return authInfo;
+  return { ...authInfo, extra: { redmine: { ...redmine, admin: verdict.admin } } };
 }
 
 type Verdict =
@@ -606,7 +651,7 @@ const BODY_REFUSALS: Record<BodyRefusal, Refusal> = {
 const KEY_REFUSALS = {
   refused: [401, `Redmine does not accept the API key in the ${API_KEY_HEADER} header.`],
   unreachable: [503, "Redmine did not answer when asked about the API key. Try again in a moment."],
-} as const satisfies Record<Exclude<KeyVerdict, "ok">, readonly [number, string]>;
+} as const satisfies Record<Exclude<KeyVerdict["kind"], "ok">, readonly [number, string]>;
 
 /**
  * The whole body is read before a server is built, so a body errored on a refusal answers 400 before
@@ -632,7 +677,8 @@ async function admitKey(
       ? asked
       : (asked ??= check().then((answer) => {
           verdict = answer;
-          if (answer !== "ok") body.error(new Error(`Redmine answered ${answer} for the API key`));
+          if (answer.kind !== "ok")
+            body.error(new Error(`Redmine answered ${answer.kind} for the API key`));
           return answer;
         }));
   const stream = new ReadableStream<Uint8Array>(
@@ -646,7 +692,7 @@ async function admitKey(
         const chunk = await reader.read();
         if (!chunk.done) received += chunk.value.byteLength;
         if (asked !== undefined || received > UNAUTHENTICATED_BODY_BYTES) {
-          if ((await ask()) !== "ok") return;
+          if ((await ask())?.kind !== "ok") return;
         }
         if (chunk.done) {
           clearTimeout(timer);
@@ -667,8 +713,8 @@ async function admitKey(
   );
   answered = true;
   clearTimeout(timer);
-  if (verdict === undefined || verdict === "ok") return response;
-  const [status, message] = KEY_REFUSALS[verdict];
+  if (verdict === undefined || verdict.kind === "ok") return response;
+  const [status, message] = KEY_REFUSALS[verdict.kind];
   return jsonRpcError(status, message, null);
 }
 

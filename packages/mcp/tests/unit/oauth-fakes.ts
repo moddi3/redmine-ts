@@ -28,7 +28,7 @@ interface Grant {
  * over a network. Its authorize page
  * approves at once for `user`, as a signed-in person who clicks Authorize would. A refresh token dies
  * on use, unless `doorkeeper`, which keeps it valid until the new access token is first used, as
- * Doorkeeper's previous_refresh_token does.
+ * Doorkeeper's previous_refresh_token does. The user `admin`, also behind admin-api-key, is an admin.
  */
 export function fakeRedmine({ user = "jsmith", expiresIn = 7200, doorkeeper = false } = {}) {
   const codes = new Map<string, Grant>();
@@ -37,7 +37,10 @@ export function fakeRedmine({ user = "jsmith", expiresIn = 7200, doorkeeper = fa
   const authorizeRequests: URLSearchParams[] = [];
   const tokenRequests: URLSearchParams[] = [];
   const apiCalls: { path: string; authorization: string | null; key: string | null }[] = [];
-  const keys = new Map([["jsmith-api-key", "jsmith"]]);
+  const keys = new Map([
+    ["jsmith-api-key", "jsmith"],
+    ["admin-api-key", "admin"],
+  ]);
   const random = () => randomBytes(16).toString("hex");
   const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
 
@@ -128,7 +131,9 @@ export function fakeRedmine({ user = "jsmith", expiresIn = 7200, doorkeeper = fa
     const who = authorization?.startsWith("Bearer ") ? grant?.user : keys.get(key ?? "");
     if (who === undefined) return new Response(null, { status: 401 });
     if (path === "/users/current.json") {
-      return Response.json({ user: { id: 2, login: who, firstname: "John", lastname: "Smith" } });
+      return Response.json({
+        user: { id: 2, login: who, admin: who === "admin", firstname: "John", lastname: "Smith" },
+      });
     }
     if (path === "/issue_statuses.json") {
       return Response.json({

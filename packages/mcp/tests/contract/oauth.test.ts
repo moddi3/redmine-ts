@@ -11,9 +11,9 @@ import {
 import type { OAuthClientProvider } from "@modelcontextprotocol/client";
 import { createRedmine } from "@redmine-ts/sdk";
 import { expect, it, onTestFinished } from "vite-plus/test";
-import { createRedmineMcpHandler } from "../../src/index.ts";
+import { createRedmineMcpHandler, memoryGrantStore } from "../../src/index.ts";
 import { publicFetch } from "../../src/node.ts";
-import { describeServers } from "./servers.ts";
+import { describeServers, expectAdminToolsHidden } from "./servers.ts";
 import type { ContractServer } from "./servers.ts";
 
 /** What `node scripts/redmine-env.ts up` seeds: the OAuth application and jsmith's password. */
@@ -28,7 +28,7 @@ const CLIENT_REDIRECT = "http://127.0.0.1:43210/callback";
 const cli = fileURLToPath(new URL("../../dist/cli.mjs", import.meta.url));
 
 type Serve = (request: Request) => Promise<Response>;
-type Account = { username: string; password: string };
+type Account = { username: string; password: string } | { username: string; apiKey: string };
 
 /** Browsers reach Redmine at 127.0.0.1 while the server keeps the configured localhost URL. */
 const browserUrl = (server: ContractServer) => server.baseUrl.replace("localhost", "127.0.0.1");
@@ -84,7 +84,11 @@ function browser(publicOrigin: string, serve: Serve, account: Account) {
           (action, fields) => action.endsWith("/oauth/authorize") && !("_method" in fields),
         );
         if (ours !== undefined) {
-          response = await submit(new URL(ours.action, url), { ...ours.fields, decision: "allow" });
+          response = await submit(new URL(ours.action, url), {
+            ...ours.fields,
+            decision: "allow",
+            ...("apiKey" in account ? { api_key: account.apiKey } : {}),
+          });
         } else if (login !== undefined) {
           response = await submit(new URL(login.action, url), { ...login.fields, ...account });
         } else if (consent !== undefined) {
@@ -209,13 +213,17 @@ async function signInAndUse(
   const redmine =
     new URL(browserUrl(server)).origin + new URL(server.baseUrl).pathname.replace(/\/$/, "");
   expect(person.visited).toEqual(
-    expect.arrayContaining([
-      `GET ${publicUrl}/oauth/authorize`,
-      `POST ${publicUrl}/oauth/authorize`,
-      `GET ${redmine}/oauth/authorize`,
-      `POST ${redmine}/login`,
-      `GET ${publicUrl}/oauth/redmine/callback`,
-    ]),
+    expect.arrayContaining(
+      "apiKey" in account
+        ? [`GET ${publicUrl}/oauth/authorize`, `POST ${publicUrl}/oauth/authorize`]
+        : [
+            `GET ${publicUrl}/oauth/authorize`,
+            `POST ${publicUrl}/oauth/authorize`,
+            `GET ${redmine}/oauth/authorize`,
+            `POST ${redmine}/login`,
+            `GET ${publicUrl}/oauth/redmine/callback`,
+          ],
+    ),
   );
   expect(landed.searchParams.get("iss")).toBe(publicUrl);
   await pending.finishAuth(landed.searchParams);
@@ -257,7 +265,7 @@ async function signInAndUse(
     });
   expect(await (await callTool("users_current")).text()).toContain(`"login":"${account.username}"`);
   expect(await (await refresh(first)).json()).toMatchObject({ error: "invalid_grant" });
-  return { person, callTool, refresh: () => refresh(renewed.refresh_token) };
+  return { person, client, callTool, refresh: () => refresh(renewed.refresh_token) };
 }
 
 describeServers("OAuth through Redmine", (server) => {
@@ -281,6 +289,53 @@ describeServers("OAuth through Redmine", (server) => {
 
   it(`signs jsmith in through Redmine's own OAuth with the endpoint at ${mount}`, async () => {
     await signInAndUse(server, publicUrl, handler());
+  });
+
+  it("lists no tool that needs an admin key to a Redmine sign-in, which acts as a non-admin even for an admin", async () => {
+    const username = `oauth-admin-${randomBytes(4).toString("hex")}`;
+    const account = { username, password: "contract-pass-1" };
+    const user = await admin.users.create({
+      login: username,
+      firstname: "OAuth",
+      lastname: "Admin",
+      mail: `${username}@example.net`,
+      password: account.password,
+      admin: true,
+    });
+    onTestFinished(() => admin.users.delete({ user_id: user.id }));
+    const asUser = (await signInAndUse(server, publicUrl, handler())).client;
+    const { client: asAdmin, callTool } = await signInAndUse(server, publicUrl, handler(), account);
+    const names = async (client: Client) =>
+      (await client.listTools()).tools.map((tool) => tool.name);
+    expect(await names(asAdmin)).toEqual(await names(asUser));
+    expect(await names(asAdmin)).not.toContain("users_list");
+    expect(asAdmin.getInstructions()).not.toContain("admin key");
+    expect(await (await callTool("users_list")).text()).toContain(
+      "Redmine answered 403 for users_list: it needs an admin key",
+    );
+  });
+
+  it("lists an API key sign-in the tools that need an admin key only for an admin's key", async () => {
+    const keyHandler = () =>
+      createRedmineMcpHandler({
+        baseUrl: server.baseUrl,
+        version: server.version,
+        publicUrl,
+        oauth: {
+          secret: randomBytes(32).toString("base64"),
+          apiKeyLogin: true,
+          store: memoryGrantStore(),
+          redminePublicUrl: browserUrl(server),
+          fetchClientMetadata: publicFetch,
+        },
+      });
+    const signIn = async (username: string, apiKey: string) =>
+      (await signInAndUse(server, publicUrl, keyHandler(), { username, apiKey })).client;
+    await expectAdminToolsHidden(
+      server,
+      await signIn("admin", server.adminKey),
+      await signIn("jsmith", server.userKey),
+    );
   });
 
   it("keeps a raw_request 403 for my/page.json and 401 for my/page.js tool errors on a live sign-in", async () => {

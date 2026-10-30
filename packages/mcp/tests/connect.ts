@@ -8,12 +8,13 @@ export interface ServerSettings {
   filesDir?: string;
   dangerouslyRevealApiKeys?: boolean;
   maxResultBytes?: number;
+  admin?: boolean;
 }
 
 /** A real MCP client talking to the server over the SDK's in-memory transport pair. */
 export async function connect(
   config: RedmineConfig,
-  { filesDir, dangerouslyRevealApiKeys, maxResultBytes }: ServerSettings = {},
+  { filesDir, dangerouslyRevealApiKeys, maxResultBytes, admin }: ServerSettings = {},
 ): Promise<Client> {
   const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
   const files = filesDir === undefined ? undefined : localFiles(filesDir);
@@ -21,6 +22,7 @@ export async function connect(
     files,
     dangerouslyRevealApiKeys,
     maxResultBytes,
+    admin,
   });
   await server.connect(serverEnd);
   const client = new Client({ name: "redmine-mcp-tests", version: "0.0.0" });

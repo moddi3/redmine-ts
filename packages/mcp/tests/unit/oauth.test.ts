@@ -20,6 +20,7 @@ import {
   signJwt,
 } from "./oauth-fakes.ts";
 import type { ClientKey, FakeRedmine, SigningAlg } from "./oauth-fakes.ts";
+import { createSealer } from "../../src/oauth/seal.ts";
 
 type Handler = (request: Request) => Promise<Response>;
 
@@ -48,8 +49,8 @@ interface Setup {
 function setup(
   options: Partial<RedmineMcpHandlerOptions> = {},
   oauth: Partial<NonNullable<RedmineMcpHandlerOptions["oauth"]>> = {},
+  redmine = fakeRedmine(),
 ): Setup {
-  const redmine = fakeRedmine();
   const errors: Error[] = [];
   const documents = new Map<string, unknown>([
     [CLAUDE, { client_id: CLAUDE, client_name: "Claude", redirect_uris: [CLAUDE_REDIRECT] }],
@@ -432,7 +433,9 @@ describe("built-in authorization server", () => {
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
     });
-    expect((await list.text()).match(/"name":"/g)?.length).toBe(44);
+    const listing = await list.text();
+    expect(listing).not.toContain("Needs an admin key");
+    expect(listing.match(/"name":"/g)?.length).toBe(44 - 3);
     const bearer = { Authorization: `Bearer ${read.access_token}` };
     const posted = await callTool(setupped.handle, bearer, "raw_request", {
       method: "POST",
@@ -2743,5 +2746,103 @@ describe("the grant store", () => {
       expect((await refresh(setupped.handle, renewed.body.refresh_token)).status).toBe(at31);
       vi.setSystemTime(start);
     }
+  });
+});
+
+async function listed(handle: Handler, accessToken: string) {
+  const client = new Client({ name: "admin-tests", version: "0" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(PUBLIC_URL), {
+      fetch: direct(handle),
+      requestInit: { headers: { authorization: `Bearer ${accessToken}` } },
+    }),
+  );
+  const { tools } = await client.listTools();
+  return { count: tools.length, instructions: client.getInstructions() ?? "" };
+}
+
+const ADMIN_SENTENCE = 'Tools whose description says "Needs an admin key"';
+
+describe("admin rights in the grant", () => {
+  it.each(["jsmith", "admin"])(
+    "lists %s, signed in through Redmine, no tool that needs an admin key, before and after a refresh",
+    async (user) => {
+      const setupped = setup({}, {}, fakeRedmine({ user }));
+      const issued = await tokens(setupped);
+      const first = await listed(setupped.handle, issued.access_token);
+      expect(first.count).toBe(79);
+      expect(first.instructions).not.toContain(ADMIN_SENTENCE);
+      const renewed = (await (
+        await form(setupped.handle, TOKEN, {
+          grant_type: "refresh_token",
+          refresh_token: issued.refresh_token,
+          client_id: CLAUDE,
+        })
+      ).json()) as Issued;
+      expect((await listed(setupped.handle, renewed.access_token)).count).toBe(79);
+      expect(setupped.redmine.apiCalls).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["jsmith-api-key", 79],
+    ["admin-api-key", 93],
+  ])(
+    "lists %s, signed in with the key, %i tools, from the check at consent",
+    async (key, count) => {
+      const setupped = setup({}, { redmineApp: undefined, apiKeyLogin: true } as never);
+      const { verifier, challenge } = pkce();
+      const person = browser(setupped.handle, ORIGIN, setupped.redmine);
+      const page = await person.send(
+        authorizeUrl({
+          response_type: "code",
+          client_id: CLAUDE,
+          redirect_uri: CLAUDE_REDIRECT,
+          code_challenge: challenge,
+          code_challenge_method: "S256",
+        }),
+      );
+      const submitted = await person.send(new URL(AUTHORIZE), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          consent: consentValue(await page.text()),
+          api_key: key,
+          decision: "allow",
+        }),
+      });
+      const code = new URL(submitted.headers.get("location")!).searchParams.get("code")!;
+      const issued = (await (
+        await form(setupped.handle, TOKEN, {
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: CLAUDE_REDIRECT,
+          client_id: CLAUDE,
+          code_verifier: verifier,
+        })
+      ).json()) as Issued;
+      expect((await listed(setupped.handle, issued.access_token)).count).toBe(count);
+      expect(setupped.redmine.apiCalls.map(({ path }) => path)).toEqual(["/users/current.json"]);
+    },
+  );
+
+  it("lists every tool for a token sealed before admin rights were recorded", async () => {
+    const shared = secret();
+    const { handle } = setup({}, { secret: shared }, fakeRedmine({ user: "jsmith" }));
+    const sealer = createSealer([shared], PUBLIC_URL);
+    const older = await sealer.seal(
+      "access",
+      {
+        family: "f",
+        credential: { bearer: "redmine-token" },
+        scopes: ["redmine:read", "redmine:write", "redmine:delete"],
+        client: "c",
+        audience: PUBLIC_URL,
+      },
+      3600,
+    );
+    const { count, instructions } = await listed(handle, older);
+    expect(count).toBe(93);
+    expect(instructions).toContain(ADMIN_SENTENCE);
   });
 });

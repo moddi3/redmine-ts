@@ -6,6 +6,7 @@ import { parseCli, USAGE } from "./config.ts";
 import { createRedmineMcpHandler } from "./http.ts";
 import { toNodeListener } from "./node-http.ts";
 import { publicPaths } from "./oauth/web.ts";
+import { checkCredential } from "./redmine-key.ts";
 import { createRedmineMcpServer } from "./server.ts";
 import { localFiles } from "./workflow/files-dir.ts";
 
@@ -62,8 +63,17 @@ switch (command.kind) {
   case "serve": {
     const { config, filesDir, dangerouslyRevealApiKeys, maxResultBytes } = command;
     const files = filesDir === undefined ? undefined : localFiles(filesDir);
+    const admin = checkCredential(config, {
+      onError: (error) => console.error(`redmine-mcp: ${error.message}`),
+    }).then((verdict) => (verdict.kind === "ok" ? verdict.admin : undefined));
     serveStdio(
-      () => createRedmineMcpServer(config, { files, dangerouslyRevealApiKeys, maxResultBytes }),
+      async () =>
+        createRedmineMcpServer(config, {
+          files,
+          dangerouslyRevealApiKeys,
+          maxResultBytes,
+          admin: await admin,
+        }),
       {
         onerror: (error) => console.error(`redmine-mcp: ${error.message}`),
       },

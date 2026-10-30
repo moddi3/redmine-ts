@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { checkApiKey } from "../../src/redmine-key.ts";
+import { checkCredential } from "../../src/redmine-key.ts";
 
 function redmine(answer: (signal: AbortSignal | null) => Promise<Response>) {
   const seen: { url: string; key: string | null }[] = [];
@@ -18,25 +18,41 @@ const hanging = (signal: AbortSignal | null) =>
     signal?.addEventListener("abort", () => reject(signal.reason));
   });
 
-describe("checkApiKey", () => {
+describe("checkCredential", () => {
   afterEach(() => void vi.useRealTimers());
 
-  it("answers ok when Redmine returns the key's user, asking once at users/current.json", async () => {
-    const { fetch, seen } = redmine(async () =>
-      Response.json({ user: { id: 1, login: "alice", admin: false } }),
-    );
-    const verdict = await checkApiKey({ baseUrl: "http://redmine.test/redmine", fetch }, "key-1");
-    expect(verdict).toBe("ok");
-    expect(seen).toEqual([{ url: "http://redmine.test/redmine/users/current.json", key: "key-1" }]);
-  });
+  it.each([
+    [false, { kind: "ok", admin: false }],
+    [true, { kind: "ok", admin: true }],
+    [undefined, { kind: "ok" }],
+  ])(
+    "answers ok with admin %s when Redmine returns the key's user, asking once at users/current.json",
+    async (admin, expected) => {
+      const { fetch, seen } = redmine(async () =>
+        Response.json({ user: { id: 1, login: "alice", admin } }),
+      );
+      const verdict = await checkCredential({
+        baseUrl: "http://redmine.test/redmine",
+        fetch,
+        auth: { apiKey: "key-1" },
+      });
+      expect(verdict).toEqual(expected);
+      expect(seen).toEqual([
+        { url: "http://redmine.test/redmine/users/current.json", key: "key-1" },
+      ]);
+    },
+  );
 
   it("answers refused on 401, without telling onError", async () => {
     const errors: Error[] = [];
     const { fetch } = redmine(status(401));
-    const verdict = await checkApiKey({ baseUrl: "http://redmine.test", fetch }, "bogus", {
-      onError: (error) => errors.push(error),
-    });
-    expect(verdict).toBe("refused");
+    const verdict = await checkCredential(
+      { baseUrl: "http://redmine.test", fetch, auth: { apiKey: "bogus" } },
+      {
+        onError: (error) => errors.push(error),
+      },
+    );
+    expect(verdict).toEqual({ kind: "refused" });
     expect(errors).toEqual([]);
   });
 
@@ -53,10 +69,13 @@ describe("checkApiKey", () => {
   ])("answers unreachable on %s, asking once and telling onError once", async (_, answer) => {
     const errors: Error[] = [];
     const { fetch, seen } = redmine(answer);
-    const verdict = await checkApiKey({ baseUrl: "http://redmine.test", fetch }, "key-1", {
-      onError: (error) => errors.push(error),
-    });
-    expect(verdict).toBe("unreachable");
+    const verdict = await checkCredential(
+      { baseUrl: "http://redmine.test", fetch, auth: { apiKey: "key-1" } },
+      {
+        onError: (error) => errors.push(error),
+      },
+    );
+    expect(verdict).toEqual({ kind: "unreachable" });
     expect(seen).toHaveLength(1);
     expect(errors).toHaveLength(1);
   });
@@ -64,11 +83,14 @@ describe("checkApiKey", () => {
   it("answers unreachable without telling onError when the caller gave up", async () => {
     const errors: Error[] = [];
     const { fetch } = redmine(hanging);
-    const verdict = await checkApiKey({ baseUrl: "http://redmine.test", fetch }, "key-1", {
-      signal: AbortSignal.abort(),
-      onError: (error) => errors.push(error),
-    });
-    expect(verdict).toBe("unreachable");
+    const verdict = await checkCredential(
+      { baseUrl: "http://redmine.test", fetch, auth: { apiKey: "key-1" } },
+      {
+        signal: AbortSignal.abort(),
+        onError: (error) => errors.push(error),
+      },
+    );
+    expect(verdict).toEqual({ kind: "unreachable" });
     expect(errors).toEqual([]);
   });
 
@@ -80,14 +102,17 @@ describe("checkApiKey", () => {
     vi.useFakeTimers();
     const errors: Error[] = [];
     const { fetch } = redmine(hanging);
-    let verdict: string | undefined;
-    void checkApiKey({ baseUrl: "http://redmine.test", fetch, timeoutMs }, "key-1", {
-      onError: (error) => errors.push(error),
-    }).then((answer) => (verdict = answer));
+    let verdict: { kind: string } | undefined;
+    void checkCredential(
+      { baseUrl: "http://redmine.test", fetch, timeoutMs, auth: { apiKey: "key-1" } },
+      {
+        onError: (error) => errors.push(error),
+      },
+    ).then((answer) => (verdict = answer));
     await vi.advanceTimersByTimeAsync(after - 1);
     expect(verdict).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
-    expect(verdict).toBe("unreachable");
+    expect(verdict).toEqual({ kind: "unreachable" });
     expect(errors).toHaveLength(1);
   });
 });

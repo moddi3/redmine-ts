@@ -75,6 +75,37 @@ describe("tools that need an admin key", () => {
     expect(seen).toEqual([]);
   });
 
+  it.each([
+    [true, 93],
+    [undefined, 93],
+    [false, 79],
+  ])(
+    "are listed with admin %s in %i tools, and the instructions mention them only then",
+    async (admin, count) => {
+      const { client } = await serve({}, {}, { admin });
+      const tools = (await client.listTools()).tools;
+      expect(tools).toHaveLength(count);
+      const hidden = admin === false;
+      expect(tools.some((tool) => tool.description?.includes("Needs an admin key"))).toBe(!hidden);
+      expect(client.getInstructions()).toContain(
+        "people_find returns the id and login of people by name in a project or an issue, for any key.",
+      );
+      expect(client.getInstructions()?.includes('"Needs an admin key"')).toBe(!hidden);
+    },
+  );
+
+  it("answer a call with admin false, with Redmine's 403 and what works without an admin key", async () => {
+    const { client } = await serve(
+      { "GET /users.json": () => json({}, 403) },
+      {},
+      { admin: false },
+    );
+    const users = await callError(client, "users_list", {});
+    expect(texts(users)[0]).toBe(
+      `Redmine answered 403 for users_list: it needs an admin key, or the REST API is disabled. ${USERS_LIST}`,
+    );
+  });
+
   it("say so in a 403, with the REST API that may be off, and other tools keep it general", async () => {
     const { client } = await serve({
       "GET /users.json": () => json({}, 403),
