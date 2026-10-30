@@ -419,7 +419,7 @@ const users = await rm.users
   .all();
 ```
 
-Every method takes call options as its second argument: `signal`, `timeoutMs`, `retry`, and `as`. `onEvent` receives `request`, `response`, `retry`, and `error` events.
+Every method takes call options as its second argument: `signal`, `timeoutMs`, `retry`, `as`, and `onResponse`. `onResponse` gets the status of each response the call receives, retries included, so the last one is the response the call resolved with. `onEvent` receives `request`, `response`, `retry`, and `error` events.
 
 ## Call an endpoint the spec does not cover
 

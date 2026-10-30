@@ -5,8 +5,10 @@ import { RedmineError } from "@redmine-ts/sdk";
 import type { Access } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
+import { fitCount } from "../result-budget.ts";
 import { isApiPath } from "../tools.ts";
 import type { Annotations, ToolSpec } from "../tools.ts";
+import { hasUserText, UNTRUSTED } from "../user-text.ts";
 import { defineTool, ToolError } from "./define.ts";
 
 const BY_ACCESS: Readonly<Record<Access, { sends: string; annotations: Annotations }>> = {
@@ -41,6 +43,7 @@ export function rawRequestTool(access: Access): ToolSpec {
       "path is relative to REDMINE_URL with no leading slash, such as issues/7.json; query holds URL parameters; body is any JSON value, sent as is, and not allowed on GET.",
       sends,
       "Returns {response}: the parsed JSON, or null when Redmine sends no body.",
+      "A response over the result budget comes back as {status, truncated: true, bytes, response_text, message} instead, with Redmine's HTTP status, such as 201 for a create, and as much of its JSON as fits; narrow the request with limit and offset, or fewer include values.",
     ].join(" "),
     input: z.strictObject({
       method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
@@ -58,19 +61,37 @@ export function rawRequestTool(access: Access): ToolSpec {
         ),
     }),
     output: z.object({
-      response: Json.describe("The parsed JSON response, or null for an empty body."),
+      response: Json.optional().describe(
+        "The parsed JSON response, or null for an empty body. Absent when truncated.",
+      ),
+      status: z
+        .int()
+        .optional()
+        .describe("The HTTP status Redmine answered with, such as 200 or 201. Set when truncated."),
+      truncated: z.literal(true).optional().describe("Set when the response is over the budget."),
+      bytes: z.int().optional().describe("UTF-8 bytes of the whole response's compact JSON."),
+      response_text: z
+        .string()
+        .optional()
+        .describe("The start of the response's compact JSON, cut between characters."),
+      message: z.string().optional(),
     }),
     tier: "read",
     annotations,
-    run: async (rm, { method, path, query, body, array_format }) => {
+    budgeted: true,
+    run: async (rm, { method, path, query, body, array_format }, { budget }) => {
+      let status = 0;
       const response = await rm
-        .request({
-          method,
-          path,
-          ...(query === undefined ? {} : { query }),
-          ...(body === undefined ? {} : { body }),
-          ...(array_format === undefined ? {} : { arrayFormat: array_format }),
-        })
+        .request(
+          {
+            method,
+            path,
+            ...(query === undefined ? {} : { query }),
+            ...(body === undefined ? {} : { body }),
+            ...(array_format === undefined ? {} : { arrayFormat: array_format }),
+          },
+          { onResponse: (answer) => (status = answer.status) },
+        )
         .catch((error: unknown) => {
           if (RedmineError.is(error, "unauthorized") && !isApiPath(path)) {
             throw new ToolError(
@@ -81,7 +102,23 @@ export function rawRequestTool(access: Access): ToolSpec {
           throw error;
         });
       // rm.request resolves to parsed JSON, or undefined when Redmine sends no body.
-      return { structured: { response: (response ?? null) as z.output<typeof Json> } };
+      const whole = { response: (response ?? null) as z.output<typeof Json> };
+      if (budget.size(whole) <= budget.bytes) return { structured: whole };
+      const text = budget.redactedJson(whole.response);
+      const bytes = new TextEncoder().encode(text).length;
+      const warned = hasUserText(whole.response) ? { warning: UNTRUSTED } : {};
+      // JSON escapes a lone surrogate in 6 bytes, more than the 4 of its whole pair, so the longest
+      // start that fits never ends inside a pair.
+      return {
+        structured: fitCount(budget, text.length, (length) => ({
+          ...warned,
+          status,
+          truncated: true as const,
+          bytes,
+          response_text: text.slice(0, length),
+          message: `The response is ${bytes} bytes of JSON, over the result budget of ${budget.bytes}, so response_text holds its start. Narrow the request: limit and offset for a list, fewer include values, or a filter.`,
+        })),
+      };
     },
   });
 }

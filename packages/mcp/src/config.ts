@@ -15,7 +15,7 @@ import { isStrongSecret, MIN_SECRET_LENGTH, SECRET_RULE } from "./oauth/seal.ts"
 import type { RedmineOAuthOptions } from "./oauth/server.ts";
 import { memoryGrantStore } from "./oauth/store.ts";
 import { publicFetch } from "./public-fetch.ts";
-import { DEFAULT_RESULT_BYTES, MIN_RESULT_BYTES } from "./result-budget.ts";
+import { DEFAULT_RESULT_BYTES, MAX_RESULT_BYTES, MIN_RESULT_BYTES } from "./result-budget.ts";
 import { ACCESS_ORDER, strictest } from "./tools.ts";
 
 export type CliCommand =
@@ -59,8 +59,9 @@ Environment:
                        and attachments_save writes to; without it no tool touches
                        local files. Not read over HTTP
   REDMINE_MCP_MAX_RESULT_BYTES
-                       Optional: bytes of JSON at which list tools and issue_context
-                       stop filling a result and page the rest, default ${DEFAULT_RESULT_BYTES}
+                       Optional: bytes of JSON at which list tools, issue_context,
+                       issues_get journals and raw_request stop filling a result,
+                       default ${DEFAULT_RESULT_BYTES}, from ${MIN_RESULT_BYTES} to ${MAX_RESULT_BYTES}
 
 Environment for OAuth over HTTP:
   REDMINE_MCP_PUBLIC_URL
@@ -155,8 +156,11 @@ const Env = z.object({
       .string()
       .regex(/^\d+$/, { error: `must be a whole number of bytes, such as ${DEFAULT_RESULT_BYTES}` })
       .transform(Number)
-      .refine((bytes) => bytes >= MIN_RESULT_BYTES && Number.isSafeInteger(bytes), {
+      .refine((bytes) => bytes >= MIN_RESULT_BYTES, {
         error: `must be at least ${MIN_RESULT_BYTES} bytes`,
+      })
+      .refine((bytes) => bytes <= MAX_RESULT_BYTES, {
+        error: `must be at most ${MAX_RESULT_BYTES} bytes, because Claude Code keeps at most 500000 characters inline`,
       })
       .optional(),
   ),

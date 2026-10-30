@@ -220,40 +220,47 @@ describeServers("workflow tools", (server) => {
     expect(notes(raw.response.issue.journals)).toEqual(written);
   });
 
-  it("pages the journals of a long history with journals_before, each page under 32,000 bytes", async () => {
-    const issue = await sdk.issues.create({
-      project_id: server.projectIdentifier,
-      subject: `MCP long history ${marker}`,
-    });
-    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
-    for (let n = 1; n <= 30; n += 1) {
-      await sdk.issues.update({
-        issue_id: issue.id,
-        notes: `Заметка ${n}: ${"проверка истории ".repeat(90)}`,
+  let longHistory: Promise<{ issue_id: number; ids: number[] }> | undefined;
+  const history = () =>
+    (longHistory ??= (async () => {
+      const issue = await sdk.issues.create({
+        project_id: server.projectIdentifier,
+        subject: `MCP long history ${marker}`,
       });
-    }
-    const { journals } = await sdk.issues.get({
-      issue_id: issue.id,
-      include: ["journals"],
-    });
-    const ids = journals.map((journal) => journal.id);
+      cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+      for (let n = 1; n <= 30; n += 1) {
+        await sdk.issues.update({
+          issue_id: issue.id,
+          notes: `Заметка ${n}: ${"проверка истории ".repeat(90)}`,
+        });
+      }
+      const { journals } = await sdk.issues.get({ issue_id: issue.id, include: ["journals"] });
+      return { issue_id: issue.id, ids: journals.map((journal) => journal.id) };
+    })());
+  const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
+
+  interface Page {
+    issue: Record<string, unknown>;
+    journals: { id: number }[];
+    journals_total: number;
+    journals_omitted: number;
+    journals_before: number | null;
+  }
+
+  it("pages the journals of a long history with journals_before, each page under 32,000 bytes and the issue only on the first", async () => {
+    const { issue_id, ids } = await history();
     expect(ids).toHaveLength(30);
 
-    const pages: { journals: { id: number }[]; journals_omitted: number }[] = [];
+    const pages: Page[] = [];
     let before: number | null | undefined;
     do {
       const result = await ok("issue_context", {
-        issue_id: issue.id,
+        issue_id,
         journals: 100,
         ...(before === undefined ? {} : { journals_before: before }),
       });
-      const page = result.structuredContent as {
-        journals: { id: number }[];
-        journals_total: number;
-        journals_omitted: number;
-        journals_before: number | null;
-      };
-      expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThanOrEqual(32_000);
+      const page = result.structuredContent as unknown as Page;
+      expect(bytes(page)).toBeLessThanOrEqual(32_000);
       expect(page.journals.length).toBeGreaterThan(0);
       const oldest = ids.indexOf(page.journals[0]!.id);
       expect(page).toMatchObject({
@@ -261,6 +268,12 @@ describeServers("workflow tools", (server) => {
         journals_omitted: oldest,
         journals_before: oldest > 0 ? ids[oldest] : null,
       });
+      if (pages.length === 0) {
+        expect(page).toHaveProperty("allowed_statuses");
+      } else {
+        expect(Object.keys(page.issue)).toEqual(["id", "updated_on"]);
+        expect(page).not.toHaveProperty("allowed_statuses");
+      }
       pages.push(page);
       before = page.journals_before;
       // Each page holds a journal, so 30 pages reach the oldest.
@@ -269,6 +282,60 @@ describeServers("workflow tools", (server) => {
     expect(pages.length).toBeGreaterThan(1);
     const read = pages.toReversed().flatMap((page) => page.journals.map((journal) => journal.id));
     expect(read).toEqual(ids);
+
+    const withOldest = (await value("issue_context", {
+      issue_id,
+      journals: 100,
+      full: [ids[0]],
+    })) as Page;
+    const [oldest, next] = withOldest.journals.map((journal) => journal.id);
+    expect(oldest).toBe(ids[0]);
+    expect(withOldest).toMatchObject({
+      journals_omitted: ids.indexOf(next!),
+      journals_before: next,
+    });
+
+    const newer = (await value("issue_context", { issue_id, journals_after: ids[26] })) as Page;
+    expect(newer.journals.map((journal) => journal.id)).toEqual(ids.slice(27));
+    expect(newer).toMatchObject({ journals_omitted: 0, journals_before: null });
+    expect(Object.keys(newer.issue)).toEqual(["id", "updated_on"]);
+  });
+
+  it("leaves the oldest journals out of issues_get past the budget, and issue_context returns them from its journals_before", async () => {
+    const { issue_id, ids } = await history();
+    const record = (await value("issues_get", { issue_id, include: ["journals"] })) as Page;
+    expect(bytes(record)).toBeLessThanOrEqual(32_000);
+    const kept = record.journals.map((journal) => journal.id);
+    expect(kept).toEqual(ids.slice(30 - kept.length));
+    expect(record).toMatchObject({ journals_omitted: 30 - kept.length, journals_before: kept[0] });
+
+    const read = [...kept];
+    let before = record.journals_before;
+    while (before !== null && read.length < 30) {
+      const page = (await value("issue_context", {
+        issue_id,
+        journals: 100,
+        journals_before: before,
+      })) as Page;
+      read.unshift(...page.journals.map((journal) => journal.id));
+      before = page.journals_before;
+    }
+    expect(read).toEqual(ids);
+  });
+
+  it("returns the start of a raw_request response past the budget", async () => {
+    const { issue_id } = await history();
+    const path = `issues/${issue_id}.json`;
+    const result = await value("raw_request", {
+      method: "GET",
+      path,
+      query: { include: "journals" },
+    });
+    const whole = await sdk.request({ method: "GET", path, query: { include: "journals" } });
+    expect(result).toMatchObject({ truncated: true, bytes: bytes(whole) });
+    expect(bytes(result)).toBeLessThanOrEqual(32_000);
+    expect(result.response_text.length).toBeGreaterThan(10_000);
+    expect(JSON.stringify(whole).startsWith(result.response_text)).toBe(true);
   });
 
   it("clips a long note with a marker that names the issue_context call returning it whole", async () => {
@@ -295,7 +362,7 @@ describeServers("workflow tools", (server) => {
       full: [Number(call![3])],
     });
     expect(whole.journals).toEqual([expect.objectContaining({ id: first.id, notes: long })]);
-    expect(whole).toMatchObject({ journals_total: 2, journals_omitted: 1 });
+    expect(whole).toMatchObject({ journals_total: 2, journals_omitted: 2 });
   });
 
   it("numbers journals as #note-N, lower than Redmine's after a private note that the key cannot see", async () => {

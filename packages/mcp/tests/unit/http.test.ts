@@ -439,9 +439,11 @@ describe("createRedmineMcpHandler", () => {
       "anthropic/maxResultSizeChars": 61_000,
     });
     expect(client.getInstructions()).toContain("would pass 60,000 bytes");
-    expect(() => handler({ maxResultBytes: 999 })).toThrow(
-      "maxResultBytes must be an integer of at least 1000",
-    );
+    for (const maxResultBytes of [999, 499_001]) {
+      expect(() => handler({ maxResultBytes })).toThrow(
+        "maxResultBytes must be an integer from 1000 to 499000",
+      );
+    }
   });
 
   it.each(["legacy", "modern"] as const)(
