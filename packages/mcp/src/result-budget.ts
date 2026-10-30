@@ -5,6 +5,7 @@
 // the budget counts one copy.
 
 import type { Redact } from "./api-keys.ts";
+import { withWarning } from "./user-text.ts";
 
 export const DEFAULT_RESULT_BYTES = 32_000;
 
@@ -28,7 +29,11 @@ export interface ResultBudget {
 
 export function resultBudget(bytes: number, redact: Redact): ResultBudget {
   const encoder = new TextEncoder();
-  return { bytes, size: (value) => encoder.encode(JSON.stringify(redact(value))).length };
+  return {
+    bytes,
+    size: (value) =>
+      encoder.encode(JSON.stringify(withWarning(redact(value) as Record<string, unknown>))).length,
+  };
 }
 
 /** Throws when `bytes` cannot be a budget, as a bad option should when the server is created. */

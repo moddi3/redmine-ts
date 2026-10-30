@@ -90,6 +90,7 @@ export function uploadTool(dir: string | undefined): ToolSpec {
           }),
     }),
     output: UploadRef,
+    reusedAsInput: true,
     ...BY_METHOD.POST,
     run: async (rm, input, { files }) => {
       const { filename, content_type, description } = input;

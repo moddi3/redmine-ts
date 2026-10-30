@@ -9,6 +9,7 @@ import { roundHours } from "./hours.ts";
 import { portable } from "./portable.ts";
 import { fitPage } from "./result-budget.ts";
 import type { Annotations, Client, Schema, Tier, ToolSpec } from "./tools.ts";
+import { allowWarning } from "./user-text.ts";
 import { invalidInput } from "./workflow/define.ts";
 
 const DRAFT = "https://json-schema.org/draft/2020-12/schema";
@@ -219,7 +220,7 @@ export const catalogTools: readonly ToolSpec[] = catalog
     return {
       ...tool,
       inputSchema: portable(tool.inputSchema),
-      outputSchema: portable(tool.outputSchema),
+      outputSchema: allowWarning(portable(tool.outputSchema)),
       ...(where === undefined
         ? {}
         : { listedInputSchema: portable(withFilterTable(tool.inputSchema, where)) }),

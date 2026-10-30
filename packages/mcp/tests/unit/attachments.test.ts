@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { localFiles } from "../../src/node.ts";
+import { UNTRUSTED } from "../../src/user-text.ts";
 import { lastJson, texts } from "../connect.ts";
 import { callError, callOk, json, sent, serve } from "./harness.ts";
 import type { Route, Seen } from "./harness.ts";
@@ -85,6 +86,7 @@ describe("attachments_upload", () => {
       content_type: "text/plain",
       description: "CI output",
     });
+    expect(texts(result)).toHaveLength(1);
     const [upload] = uploads(seen);
     expect(upload?.contentType).toBe("application/octet-stream");
     expect(new TextDecoder().decode(upload?.bytes)).toBe("build ok\n🙂");
@@ -300,6 +302,7 @@ describe("attachments_download", () => {
     const { client } = await serve(ROUTES);
     const result = await callOk(client, "attachments_download", { id: 30 });
     expect(result.structuredContent).toEqual({
+      warning: UNTRUSTED,
       attachment: {
         id: 30,
         filename: "build.log",

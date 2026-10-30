@@ -89,6 +89,7 @@ export interface ToolSpec {
   readonly adminOnly?: string;
   /** Set when the tool stops filling its result at the result budget, as list tools do. */
   readonly budgeted?: boolean;
+  readonly reusedAsInput?: boolean;
   /** Redmine failures reject with a RedmineError. */
   readonly run: (
     rm: Client,
