@@ -53,11 +53,7 @@ export function createEngine(config: ResolvedConfig): Engine {
   );
 
   function emit(event: SdkEvent): void {
-    try {
-      config.onEvent?.(event);
-    } catch {
-      // An observer must never break a request.
-    }
+    notifyObserver(() => config.onEvent?.(event));
   }
 
   function refusal(op: AnyOp): RedmineError | undefined {
@@ -134,6 +130,7 @@ export function createEngine(config: ResolvedConfig): Engine {
         ms: Date.now() - started,
         attempt: attemptNo,
       });
+      notifyObserver(() => options.onResponse?.({ status: response.status }));
       const ok = response.status >= 200 && response.status < 300;
       if (stream && ok) return { response, value: undefined };
       const outcome = interpret(op, {
@@ -322,6 +319,12 @@ export function createEngine(config: ResolvedConfig): Engine {
     send,
     refusal,
   };
+}
+
+function notifyObserver(observe: () => void): void {
+  try {
+    observe();
+  } catch {}
 }
 
 function classify(

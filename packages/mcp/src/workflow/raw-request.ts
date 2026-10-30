@@ -42,7 +42,7 @@ export function rawRequestTool(access: Access): ToolSpec {
       "path is relative to REDMINE_URL with no leading slash, such as issues/7.json; query holds URL parameters; body is any JSON value, sent as is, and not allowed on GET.",
       sends,
       "Returns {response}: the parsed JSON, or null when Redmine sends no body.",
-      "A response over the result budget comes back as {truncated: true, bytes, response_text, message} instead, with as much of its JSON as fits; narrow the request with limit and offset, or fewer include values.",
+      "A response over the result budget comes back as {status, truncated: true, bytes, response_text, message} instead, with Redmine's HTTP status, such as 201 for a create, and as much of its JSON as fits; narrow the request with limit and offset, or fewer include values.",
     ].join(" "),
     input: z.strictObject({
       method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
@@ -63,6 +63,10 @@ export function rawRequestTool(access: Access): ToolSpec {
       response: Json.optional().describe(
         "The parsed JSON response, or null for an empty body. Absent when truncated.",
       ),
+      status: z
+        .int()
+        .optional()
+        .describe("The HTTP status Redmine answered with, such as 200 or 201. Set when truncated."),
       truncated: z.literal(true).optional().describe("Set when the response is over the budget."),
       bytes: z.int().optional().describe("UTF-8 bytes of the whole response's compact JSON."),
       response_text: z
@@ -75,14 +79,18 @@ export function rawRequestTool(access: Access): ToolSpec {
     annotations,
     budgeted: true,
     run: async (rm, { method, path, query, body, array_format }, { budget }) => {
+      let status = 0;
       const response = await rm
-        .request({
-          method,
-          path,
-          ...(query === undefined ? {} : { query }),
-          ...(body === undefined ? {} : { body }),
-          ...(array_format === undefined ? {} : { arrayFormat: array_format }),
-        })
+        .request(
+          {
+            method,
+            path,
+            ...(query === undefined ? {} : { query }),
+            ...(body === undefined ? {} : { body }),
+            ...(array_format === undefined ? {} : { arrayFormat: array_format }),
+          },
+          { onResponse: (answer) => (status = answer.status) },
+        )
         .catch((error: unknown) => {
           if (RedmineError.is(error, "unauthorized") && !isApiPath(path)) {
             throw new ToolError(
@@ -101,6 +109,7 @@ export function rawRequestTool(access: Access): ToolSpec {
       // start that fits never ends inside a pair.
       return {
         structured: fitCount(budget, text.length, (length) => ({
+          status,
           truncated: true as const,
           bytes,
           response_text: text.slice(0, length),

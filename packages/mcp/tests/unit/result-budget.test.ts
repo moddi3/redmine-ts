@@ -345,6 +345,63 @@ describe("raw_request under the result budget", () => {
     }
   });
 
+  it.each([200, 201, 202, 206])(
+    "carries the status %i of a response over the budget",
+    async (status) => {
+      const { client } = await serve(
+        { "POST /plugin/things.json": () => json({ user }, status) },
+        {},
+        { maxResultBytes: 1_000 },
+      );
+      const result = await callOk(client, "raw_request", {
+        method: "POST",
+        path: "plugin/things.json",
+      });
+      expect(result.structuredContent).toMatchObject({ status, truncated: true });
+    },
+  );
+
+  it("gives each of two calls in flight at once the status of its own response", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const arrived = new Promise<void>((resolve) => (reached = resolve));
+    const encoded = new TextEncoder().encode(JSON.stringify({ user }));
+    const { client } = await serve(
+      {
+        "GET /slow.json": () => {
+          reached();
+          const body = new ReadableStream<Uint8Array>({
+            async start(controller) {
+              await held;
+              controller.enqueue(encoded);
+              controller.close();
+            },
+          });
+          return new Response(body, {
+            status: 202,
+            headers: { "content-type": "application/json" },
+          });
+        },
+        "GET /fast.json": () => json({ user }, 201),
+      },
+      {},
+      { maxResultBytes: 1_000 },
+    );
+    const slow = client.callTool({
+      name: "raw_request",
+      arguments: { method: "GET", path: "slow.json" },
+    });
+    await arrived;
+    const fast = await client.callTool({
+      name: "raw_request",
+      arguments: { method: "GET", path: "fast.json" },
+    });
+    release();
+    expect(fast.structuredContent).toMatchObject({ status: 201, truncated: true });
+    expect((await slow).structuredContent).toMatchObject({ status: 202, truncated: true });
+  });
+
   it("returns a response that fits as {response}", async () => {
     const { client } = await serve(routes, {}, { maxResultBytes: 10_000 });
     const result = (await callOk(client, "raw_request", request)).structuredContent;

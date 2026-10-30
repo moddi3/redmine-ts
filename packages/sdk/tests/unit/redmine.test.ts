@@ -349,6 +349,32 @@ describe("rm.request", () => {
     expect(exceptGuard(requests)[0]?.headers.get("x-redmine-switch-user")).toBe("jsmith");
   });
 
+  test("onResponse gets the status of each response of this call, retries included", async () => {
+    const { rm } = client(sequence(empty(503), json({ id: 7 }, 201)));
+    const statuses: number[] = [];
+    const result = await rm.request(
+      { method: "GET", path: "x.json" },
+      { onResponse: ({ status }: { status: number }) => statuses.push(status) },
+    );
+
+    expect(result).toEqual({ id: 7 });
+    expect(statuses).toEqual([503, 201]);
+  });
+
+  test("an onResponse that throws does not fail the call", async () => {
+    const { rm } = client(() => json({ id: 7 }, 202));
+    const result = await rm.request(
+      { method: "GET", path: "x.json" },
+      {
+        onResponse: () => {
+          throw new Error("observer");
+        },
+      },
+    );
+
+    expect(result).toEqual({ id: 7 });
+  });
+
   test("a non-JSON reply is protocol/non_json", async () => {
     const { rm } = client(() => html("<html></html>"));
 

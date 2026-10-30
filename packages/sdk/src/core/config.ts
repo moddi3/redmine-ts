@@ -165,6 +165,11 @@ export interface CallOptions {
   /** X-Redmine-Switch-User. Only an admin key switches (a non-admin key silently stays itself); a bad login fails with kind "switch_user_rejected". */
   as?: string;
   retry?: Partial<RetryPolicy> | false;
+  /**
+   * Gets the status of each response this call receives, retries included, so the last one is the
+   * response the call resolved with, such as 201 for a create through `rm.request`.
+   */
+  onResponse?: (response: { readonly status: number }) => void;
 }
 
 /** Validated config. Everything downstream trusts it. */
