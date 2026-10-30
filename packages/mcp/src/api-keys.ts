@@ -31,14 +31,12 @@ export function redactor(auth: Auth | undefined, reveal: boolean): Redact {
     if (typeof value === "string") {
       return credential === undefined ? value : value.replaceAll(credential, HIDDEN);
     }
-    if (value instanceof RedmineError) {
-      const json = value.toJSON();
-      return redact(json.kind === "http" ? { ...json, body: redactBody(json.body) } : json);
-    }
+    if (value instanceof RedmineError) return redact(value.toJSON());
     if (Array.isArray(value)) return value.map(redact);
     if (typeof value !== "object" || value === null) return value;
+    const fields = httpError(value) ? { ...value, body: redactBody(value.body) } : value;
     return Object.fromEntries(
-      Object.entries(value).map(([key, field]) => [
+      Object.entries(fields).map(([key, field]) => [
         key,
         key === "api_key" && !reveal ? HIDDEN : redact(field),
       ]),
@@ -53,4 +51,11 @@ export function redactor(auth: Auth | undefined, reveal: boolean): Redact {
     }
   };
   return redact;
+}
+
+/** An HTTP error as its JSON, whatever serialized it, with the body Redmine sent. */
+function httpError(value: object): value is { kind: "http"; body: string } {
+  return (
+    "kind" in value && value.kind === "http" && "body" in value && typeof value.body === "string"
+  );
 }

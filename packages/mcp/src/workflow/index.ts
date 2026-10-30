@@ -11,6 +11,8 @@ import { referenceDataTool } from "./reference-data.ts";
 import { transitionTool } from "./transition.ts";
 
 const built = new Map<string, readonly ToolSpec[]>();
+/** Every access mode for a few files directories. A miss only compiles the validators again. */
+const BUILT_KINDS = 8;
 
 export function workflowTools(access: Access, dir: string | undefined): readonly ToolSpec[] {
   const key = `${access} ${dir}`;
@@ -26,6 +28,7 @@ export function workflowTools(access: Access, dir: string | undefined): readonly
       ...(dir === undefined ? [] : [saveTool]),
       rawRequestTool(access),
     ];
+    if (built.size >= BUILT_KINDS) built.delete(built.keys().next().value!);
     built.set(key, tools);
   }
   return tools;

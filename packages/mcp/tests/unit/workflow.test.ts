@@ -214,6 +214,14 @@ describe("workflow tools in tools/list", () => {
     expect(workflowTools("full", undefined)[0]).toBe(workflowTools("read-only", dir)[0]);
   });
 
+  it("keeps the 8 newest kinds of tool set, so many files directories do not pile up", () => {
+    const first = workflowTools("no-delete", "/first");
+    for (let at = 0; at < 7; at++) workflowTools("no-delete", `/other-${at}`);
+    expect(workflowTools("no-delete", "/first")).toBe(first);
+    workflowTools("no-delete", "/other-7");
+    expect(workflowTools("no-delete", "/first")).not.toBe(first);
+  });
+
   it("offers path to attachments_upload only with a files directory", async () => {
     const input = async (filesDir?: string) => {
       const { client } = await serve({}, {}, filesDir === undefined ? {} : { filesDir });
