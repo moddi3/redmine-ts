@@ -558,6 +558,33 @@ describe("streams, which are read once", () => {
     expect(requests).toHaveLength(0);
   });
 
+  test("a stream in two calls at once uploads in the first and is refused in the second", async () => {
+    const { rm, requests } = client(server());
+    const file = stream();
+    const input = { project_id: 1, subject: "s", uploads: [{ file, filename: "s.bin" }] };
+    const [first, second] = await Promise.allSettled([
+      rm.issues.create(input),
+      rm.issues.create(input),
+    ]);
+
+    expect(first.status).toBe("fulfilled");
+    const error = (second as PromiseRejectedResult).reason as RedmineError;
+    expect(error.data.kind).toBe("invalid_input");
+    expect(error.message).toContain("uploads[0].file");
+    expect(paths(requests)).toEqual(["POST uploads.json?filename=s.bin", "POST issues.json"]);
+  });
+
+  test("a stream that an inline upload never sent uploads in a later call", async () => {
+    const { rm, requests } = client(server());
+    const file = stream();
+    const input = { project_id: 1, subject: "s", uploads: [{ file, filename: "s.bin" }] };
+    const aborted = await failure(rm.issues.create(input, { signal: AbortSignal.abort() }));
+    await rm.issues.create(input);
+
+    expect(aborted.data.kind).toBe("aborted");
+    expect(paths(requests)).toEqual(["POST uploads.json?filename=s.bin", "POST issues.json"]);
+  });
+
   test("a stream locked to a reader is refused before anything is sent", async () => {
     const { rm, requests } = client(server());
     const file = stream();
