@@ -10,14 +10,15 @@ import type { Client, ToolSpec } from "../tools.ts";
 import { defineTool, invalidInput } from "./define.ts";
 import { MAX_MEMBERS, projectMembers } from "./lookups.ts";
 
-/** Matches returned with their login, so also the users_get calls of one people_find. */
+/** Matches returned with their login. */
 export const MAX_MATCHES = 10;
 
 /** The SDK reads members 100 to a page. */
 const MEMBER_PAGES = MAX_MEMBERS / 100;
 
-/** Redmine calls of one people_find: the issue, the pages of members, and users_get and at most one groups_get for each match. */
-export const MAX_CALLS: number = 1 + MEMBER_PAGES + 2 * MAX_MATCHES;
+const LOOKUP_CALLS = 2 * MAX_MATCHES;
+
+export const MAX_CALLS: number = 1 + MEMBER_PAGES + LOOKUP_CALLS;
 
 /** Redmine's User::STATUS_LOCKED. */
 const LOCKED = 3;
@@ -65,7 +66,7 @@ const PeopleSchema = z.object({
   more: z
     .int()
     .describe(
-      `Matches left out after the first ${MAX_MATCHES}. Pass more of the name to see them.`,
+      `People whose names match but who were not looked up, because ${MAX_MATCHES} matches came first or, as unavailable then says, the calls ran out. Some may be groups. Pass more of the name to narrow them.`,
     ),
   unavailable: z
     .array(z.string())
@@ -84,8 +85,8 @@ export const peopleFindTool: ToolSpec = defineTool({
     "With project_id it searches the project's members. With issue_id it searches the members of the issue's project and the issue's author, assignee, watchers and journal users.",
     'It matches names as Redmine shows them. Words match in any order, ignoring case and accents, and a word may be the start of one: "petrov ivan" and "Iv Pet" both find Ivan Petrov. Groups the key may see are left out.',
     'A "partial" match, such as "Ivan P." for "Ivan Petrov", may be someone else, and comes only when nothing matched better.',
-    `Returns the best ${MAX_MATCHES} matches with their logins and counts the rest in more.`,
-    `Makes at most ${MAX_CALLS} calls: the issue, ${MEMBER_PAGES} pages of members, and for each match users_get, then groups_get for a watcher or assignee that users_get does not find. By default the SDK retries each call up to twice.`,
+    `Returns the best ${MAX_MATCHES} matches with their logins.`,
+    `Makes at most ${MAX_CALLS} calls: the issue, ${MEMBER_PAGES} pages of members, and ${LOOKUP_CALLS} lookups of matches, best first: users_get, then groups_get for a watcher or assignee that users_get does not find. By default the SDK retries each call up to twice.`,
     "Returns {matches, more, unavailable}.",
   ].join(" "),
   input: z.strictObject({
@@ -185,16 +186,13 @@ async function findPeople(
   // An issue may be assigned to a group or watched by one, and a mention names a user.
   for (const id of groups) people.delete(id);
 
-  const ranked = [...people.values()].flatMap((person) => {
-    const rank = nameMatch(query, nameWords(person.name));
-    return rank === undefined ? [] : [{ person, rank }];
-  });
-  // A partial match may well be someone else, so it counts only when nothing matched better.
-  const best = Math.min(...ranked.map(({ rank }) => rank));
   const memberOnly = (person: Person): number =>
     person.found_as.size === 1 && person.found_as.has("member") ? 1 : 0;
-  const found = ranked
-    .filter(({ rank }) => rank < PARTIAL || best === PARTIAL)
+  const ranked = [...people.values()]
+    .flatMap((person) => {
+      const rank = nameMatch(query, nameWords(person.name));
+      return rank === undefined ? [] : [{ person, rank }];
+    })
     .sort(
       (a, b) =>
         a.rank - b.rank ||
@@ -202,11 +200,10 @@ async function findPeople(
         a.person.name.localeCompare(b.person.name) ||
         a.person.id - b.person.id,
     );
-  const shown = found.slice(0, MAX_MATCHES);
-  const users = await Promise.all(shown.map(({ person }) => lookUp(rm, person)));
+  const { shown, left } = await lookUpBest(rm, ranked);
+
   const hidden: number[] = [];
-  const matches = shown.flatMap(({ person, rank }, at): People["matches"] => {
-    const user = users[at]!;
+  const matches = shown.map(({ person, rank, user }): People["matches"][number] => {
     const match = {
       id: person.id,
       name: person.name,
@@ -214,55 +211,108 @@ async function findPeople(
       match: KINDS[rank]!,
       found_as: FOUND_AS.filter((as) => person.found_as.has(as)),
     };
-    if (user === "group") return [];
     if (user === "hidden") {
       hidden.push(person.id);
-      return [match];
+      return match;
     }
     if (user instanceof RedmineError) {
       unavailable.push(`login of ${person.id}: ${user.message}`);
-      return [match];
+      return match;
     }
     // Redmine's Anonymous user, which takes the place of a deleted one, has an empty login.
     if (user.login === "") {
       unavailable.push(
         `login of ${person.id}: none, because this is the Anonymous user, which Redmine shows in place of a deleted user. No mention reaches it.`,
       );
-      return [match];
+      return match;
     }
-    return [
-      { ...match, login: user.login, ...(user.status === LOCKED ? { locked: true as const } : {}) },
-    ];
+    return {
+      ...match,
+      login: user.login,
+      ...(user.status === LOCKED ? { locked: true as const } : {}),
+    };
   });
   if (hidden.length > 0) {
     unavailable.push(
       `login of ${hidden.join(", ")}: users_get answered 404. To a key that is not an admin's, Redmine hides locked users, the Anonymous user that takes the place of deleted users, and, depending on the key's roles, users and groups outside the projects it can see. A mention from this key would not reach them either.`,
     );
   }
+  if (left > 0 && shown.length < MAX_MATCHES) {
+    unavailable.push(
+      `more: ${left} were not looked up, because people_find makes at most ${MAX_CALLS} calls and each watcher or assignee that users_get does not find takes two. Some of them may be groups. With project_id it searches the project's members alone, without the issue's watchers and assignee.`,
+    );
+  }
   return {
     matches,
-    more: found.length - shown.length,
+    more: left,
     ...(unavailable.length === 0 ? {} : { unavailable }),
   };
 }
 
+interface Candidate {
+  person: Person;
+  rank: number;
+}
+
 /**
- * users_get for a person. It answers 404 for a group, so for someone found only as a watcher or the
- * assignee, groups_get tells whether it is one. An issue's author and journal users are always users,
- * and a membership names a group as one.
+ * Looks candidates up best first, in waves within LOOKUP_CALLS, and returns at most MAX_MATCHES users
+ * among them, with how many of the rest could still match. A partial candidate counts only when no
+ * user ranked better, as it may well be someone else.
  */
-async function lookUp(
+async function lookUpBest(
   rm: Client,
-  person: Person,
-): Promise<User | "group" | "hidden" | RedmineError> {
+  ranked: readonly Candidate[],
+): Promise<{ shown: (Candidate & { user: Exclude<Found, "group"> })[]; left: number }> {
+  const shown: (Candidate & { user: Exclude<Found, "group"> })[] = [];
+  const userAbovePartial = (): boolean => shown.some(({ rank }) => rank < PARTIAL);
+  let next = 0;
+  let calls = 0;
+  while (shown.length < MAX_MATCHES && next < ranked.length) {
+    const partial = ranked[next]!.rank === PARTIAL;
+    if (partial && userAbovePartial()) break;
+    const wave: Candidate[] = [];
+    let cost = calls;
+    for (const candidate of ranked.slice(next, next + MAX_MATCHES - shown.length)) {
+      cost += mayBeGroup(candidate.person) ? 2 : 1;
+      if ((candidate.rank === PARTIAL && !partial) || cost > LOOKUP_CALLS) break;
+      wave.push(candidate);
+    }
+    if (wave.length === 0) break;
+    next += wave.length;
+    const found = await Promise.all(wave.map(({ person }) => lookUp(rm, person, () => calls++)));
+    wave.forEach((candidate, at) => {
+      const user = found[at]!;
+      if (user !== "group") shown.push({ ...candidate, user });
+    });
+  }
+  const left = ranked
+    .slice(next)
+    .filter(({ rank }) => rank < PARTIAL || !userAbovePartial()).length;
+  return { shown, left };
+}
+
+/**
+ * An issue's author and journal users are always users, and a membership names a group as one, so
+ * only a watcher or the assignee may be a group.
+ */
+function mayBeGroup(person: Person): boolean {
+  return [...person.found_as].every((as) => as === "assignee" || as === "watcher");
+}
+
+type Found = User | "group" | "hidden" | RedmineError;
+
+/** users_get for a person, which answers 404 for a group, then groups_get if they may be one. */
+async function lookUp(rm: Client, person: Person, call: () => void): Promise<Found> {
   try {
+    call();
     return await rm.users.get({ user_id: person.id });
   } catch (error) {
     if (!(error instanceof RedmineError)) throw error;
     if (!RedmineError.is(error, "not_found")) return error;
   }
-  if (![...person.found_as].every((as) => as === "assignee" || as === "watcher")) return "hidden";
+  if (!mayBeGroup(person)) return "hidden";
   try {
+    call();
     await rm.groups.get({ group_id: person.id });
     return "group";
   } catch (error) {

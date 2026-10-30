@@ -619,6 +619,7 @@ describe("people_find", () => {
       unavailable: [
         "members: only the first 500 were searched; memberships_list pages through all of them",
         expect.stringMatching(/^login of 71, 73, 75, 77, 79: users_get answered 404\. /),
+        expect.stringMatching(/^more: 2 were not looked up, because /),
       ],
     });
     expect(MAX_CALLS).toBe(26);
