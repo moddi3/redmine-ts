@@ -363,6 +363,8 @@ describeServers("workflow tools", (server) => {
     });
     expect(whole.journals).toEqual([expect.objectContaining({ id: first.id, notes: long })]);
     expect(whole).toMatchObject({ journals_total: 2, journals_omitted: 2 });
+    expect(whole.issue).toEqual({ id: issue.id, updated_on: expect.any(String) });
+    expect(whole).not.toHaveProperty("allowed_statuses");
   });
 
   it("numbers journals as #note-N, lower than Redmine's after a private note that the key cannot see", async () => {
