@@ -3,7 +3,7 @@
 
 import type { RetryPolicy } from "./config.ts";
 import { RedmineError, type RedmineErrorData } from "./errors.ts";
-import { type Compiled, compileWhere, longForm, type Page } from "./listing.ts";
+import { checkScope, type Compiled, compileWhere, longForm, type Page } from "./listing.ts";
 import type { AnyOp, QueryStyle } from "./op.ts";
 import { normalizeResponse } from "./quirks.ts";
 import { invalidInput, isRecord } from "./util.ts";
@@ -42,18 +42,13 @@ export function planRequest(
     if (!isRecord(input.where)) throw invalidInput("`where` must be an object", op.id);
     filters = compileWhere(op, input.where);
   }
+  checkScope(op, filters, params.has("query_id"));
   const query = extra.query ?? {};
   const long = longForm(op, filters, query);
   if (long === undefined) {
     for (const [key, { wire }] of Object.entries(filters)) params.set(key, wire);
     for (const [key, value] of Object.entries(query)) params.set(key, value);
   } else {
-    if (params.has("query_id")) {
-      throw invalidInput(
-        `query_id on ${op.id} works only next to one project_id, because Redmine runs a saved query without reading the long form's filters, project_id included; send one request per project`,
-        op.id,
-      );
-    }
     for (const [key, value] of long) params.append(key, value);
   }
 

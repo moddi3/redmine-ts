@@ -10,7 +10,14 @@ describe("compileWhere", () => {
   test.each([
     ["a bare value", { assigned_to_id: 5 }, { assigned_to_id: "5" }],
     ["a word", { status_id: "open" }, { status_id: "o" }],
-    ["words and ids mixed", { status_id: ["open", 5] }, { status_id: "o|5" }],
+    ["a word in a list of one", { status_id: ["closed"] }, { status_id: "c" }],
+    [
+      "a word under not, as the opposite word",
+      { status_id: { not: "closed" } },
+      { status_id: "o" },
+    ],
+    ["open under not", { status_id: { not: ["open"] } }, { status_id: "c" }],
+    ["any", { status_id: "any" }, { status_id: "*" }],
     ["an array", { assigned_to_id: [1, 2] }, { assigned_to_id: "1|2" }],
     ["not", { assigned_to_id: { not: [1, 2] } }, { assigned_to_id: "!1|2" }],
     ["none", { assigned_to_id: { none: true } }, { assigned_to_id: "!*" }],
@@ -70,6 +77,10 @@ describe("compileWhere", () => {
     ["between with the wrong shape", { updated_on: { between: ["a"] } }, "between"],
     ["a nested object value", { subject: { not: { a: 1 } } }, "subject"],
     ["none: false", { assigned_to_id: { none: false } }, "none"],
+    ["a word next to an id", { status_id: ["open", 5] }, "stand alone"],
+    ["two words", { status_id: ["open", "closed"] }, "stand alone"],
+    ["a word next to an id under not", { status_id: { not: ["open", 3] } }, "stand alone"],
+    ["any under not", { status_id: { not: "any" } }, "matches no issue"],
   ])("rejects %s with invalid_input naming it", (_name, where, mention) => {
     const run = (): unknown =>
       compileWhere("cf_1" in where ? ops.getProjects : ops.getIssues, where);
@@ -249,6 +260,41 @@ describe("project_id beyond one id or identifier", () => {
     expect(error.message).toMatch(/category_id/);
     expect(requests).toHaveLength(0);
   });
+
+  test.each([
+    ["no project", { category_id: 4 }],
+    ['"mine"', { project_id: "mine", category_id: 4 }],
+  ])("refuses a filter Redmine offers only inside one project next to %s", async (_name, where) => {
+    const { list, requests } = testEngine(issueServer(5));
+    const error = await failure(list(ops.getIssues, { where }).all());
+
+    expect(error.kind).toBe("invalid_input");
+    expect(error.message).toMatch(/category_id/);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("sends that filter next to one project", async () => {
+    expect(await sentQuery(ops.getIssues, { project_id: "web-app", category_id: 4 })).toEqual({
+      project_id: ["web-app"],
+      category_id: ["4"],
+      ...page,
+    });
+  });
+
+  test.each([
+    ["without a project", { status_id: "closed" }],
+    ["next to one project", { project_id: 5, status_id: "closed" }],
+  ])(
+    "refuses a saved query with another filter %s, since Redmine runs the query's own filters",
+    async (_name, where) => {
+      const { list, requests } = testEngine(issueServer(5));
+      const error = await failure(list(ops.getIssues, { query_id: 3, where }).all());
+
+      expect(error.kind).toBe("invalid_input");
+      expect(error.message).toMatch(/query_id.*status_id/);
+      expect(requests).toHaveLength(0);
+    },
+  );
 
   test("refuses a saved query, since Redmine runs it without reading the long form's filters", async () => {
     const { list, requests } = testEngine(issueServer(5));

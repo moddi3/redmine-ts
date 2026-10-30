@@ -152,20 +152,6 @@ const USER_ID_SOURCES: Readonly<Record<string, string>> = {
   createMembership: "users_list with an admin key",
 };
 
-const FORMS: Readonly<Record<string, string>> = {
-  not: "{not: value or array}",
-  gte: "{gte: value}",
-  lte: "{lte: value}",
-  between: "{between: [from, to]}",
-  contains: '{contains: "text"}',
-  not_contains: '{not_contains: "text"}',
-  starts_with: '{starts_with: "text"}',
-  ends_with: '{ends_with: "text"}',
-  any: "{any: true} for any value set",
-  none: "{none: true} for no value",
-  raw: '{raw: "..."} in Redmine\'s own syntax, such as a relative date',
-};
-
 const OK: JsonSchema = {
   type: "object",
   properties: { ok: { const: true } },
@@ -371,12 +357,11 @@ function only(item: Item, keys: readonly string[]): Item {
 }
 
 function pagedInput(schema: JsonSchema, short: readonly string[] | undefined): JsonSchema {
-  const described = describeFilters(schema);
-  const kept = Object.entries(described.properties ?? {}).filter(
+  const kept = Object.entries(schema.properties ?? {}).filter(
     ([key]) => key !== "pageSize" && key !== "paging",
   );
   return {
-    ...described,
+    ...schema,
     properties: { ...Object.fromEntries(kept), ...(short === undefined ? PAGING : SHORT_PAGING) },
   };
 }
@@ -412,51 +397,6 @@ function withoutDraft(schema: JsonSchema): JsonSchema {
 }
 
 /**
- * The catalog copies each filter's description from the spec, which documents Redmine's wire syntax
- * (`!3`, `>=2024-01-01`). Inputs take the SDK's object grammar instead, so the description is rebuilt
- * from the forms the filter's schema accepts. A call that a filter refuses gets this description back.
- */
-function describeFilters(schema: JsonSchema): JsonSchema {
-  const where = schema.properties?.where;
-  if (where === undefined) return schema;
-  const rewrite = (
-    filters: Readonly<Record<string, JsonSchema>> | undefined,
-  ): Record<string, JsonSchema> | undefined =>
-    filters &&
-    Object.fromEntries(
-      Object.entries(filters).map(([key, filter]) => [
-        key,
-        { ...filter, description: describeFilter(filter) },
-      ]),
-    );
-  const patternProperties = rewrite(where.patternProperties);
-  return {
-    ...schema,
-    properties: {
-      ...schema.properties,
-      where: {
-        ...where,
-        description:
-          "Filters keyed by Redmine filter name. Each filter's description lists the forms it accepts. Unknown filters and operators are refused before anything is sent.",
-        properties: rewrite(where.properties) ?? {},
-        ...(patternProperties ? { patternProperties } : {}),
-      },
-    },
-  };
-}
-
-function describeFilter(filter: JsonSchema): string {
-  const { summary, words, values } = specOf(filter);
-  const forms = operatorsOf(filter).map((name) => FORMS[name]);
-  return [
-    summary,
-    `Accepts a value, an array meaning any of them, or one of ${forms.join(", ")}.`,
-    ...(words.length > 0 ? [`Also ${words.map((word) => `"${word}"`).join(", ")}.`] : []),
-    ...values,
-  ].join(" ");
-}
-
-/**
  * The `where` that tools/list shows: one loose condition for every filter, and a table of the filters
  * in its description, one line per filter under the operators it takes. A schema per filter repeats
  * each form, which made `issues_list` 48K characters, and Codex strips every description from an input
@@ -470,33 +410,22 @@ function withFilterTable(schema: JsonSchema, where: JsonSchema): JsonSchema {
       ([pattern, filter]) => [pattern.slice(1, -1).replace("\\d+", "<id>"), filter] as const,
     ),
   ];
-  const rows = filters.map(([name, filter]) => {
-    const spec = specOf(filter);
-    const kind = kindOf(name, spec);
-    const operators = operatorsOf(filter).filter((operator) => operator !== "raw");
-    return { kind, operators: operators.join(", "), line: filterLine(name, kind, spec) };
-  });
+  const rows = filters.map(([name, filter]) => ({
+    operators: operatorsOf(filter).join(", "),
+    line: filterLine(name, filter.description ?? ""),
+  }));
   const sections = Map.groupBy(rows, (row) => row.operators);
-  const used = new Set([...sections.keys()].flatMap((operators) => operators.split(", ")));
-  const forms = Object.keys(FORMS).filter((name) => used.has(name));
-  const legend = [
-    "Filters keyed by Redmine filter name. A value or an array means equals any of them.",
-    `An object with one operator picks another comparison: ${forms.map((name) => FORMS[name]).join(", ")}.`,
-    `Every filter also takes ${FORMS.raw}.`,
-    ...(rows.some((row) => row.kind === "date") ? ["Dates are YYYY-MM-DD."] : []),
-    "Unknown filters and operators are refused before anything is sent.",
-    "Each line below is name | value | what it filters, under the operators the filter takes.",
-  ];
   const table = [...sections].flatMap(([operators, section]) => [
     `Takes ${operators}:`,
     ...section.map((row) => row.line),
   ]);
+  const legend = `${where.description} Each line below is name | value | what it filters, under the operators the filter takes.`;
   return {
     ...schema,
     properties: {
       ...schema.properties,
       where: {
-        description: [legend.join(" "), ...table].join("\n"),
+        description: [legend, ...table].join("\n"),
         type: "object",
         additionalProperties: CONDITION,
       },
@@ -505,74 +434,25 @@ function withFilterTable(schema: JsonSchema, where: JsonSchema): JsonSchema {
 }
 
 /** `name | value | what it filters`, without the last cells when they are empty. */
-function filterLine(name: string, kind: string | undefined, spec: Spec): string {
-  const { summary, words, values } = spec;
-  const value = [
-    ...(kind === undefined ? [] : [kind]),
-    ...words.map((word) => `\`${word}\``),
-    // "Values: `1` (active), `5` (closed)" becomes "`1` for active, `5` for closed".
-    ...values.map((line) =>
-      line.replace(/^[\w ]+: /, "").replaceAll(/(`[^`]+`) \(([^)]+)\)/g, "$1 for $2"),
-    ),
-  ];
-  const about = summary
+function filterLine(name: string, description: string): string {
+  const [summary = "", ...lines] = description.split("\n");
+  const value = lines.find((line) => line.startsWith("Value: "))?.slice("Value: ".length, -1) ?? "";
+  const [first = "", ...rest] = summary
     .replace(/^Filter by /, "")
     .replace(/ Undocumented$/, "")
-    .replace(/\.$/, "");
-  // "Filter by tracker." says no more than tracker_id does.
+    .replace(/\.$/, "")
+    .split(". ");
   const spoken = name.replaceAll(/[_.]/g, " ");
-  const repeats = [spoken, spoken.replace(/ id$/, "")].includes(about.toLowerCase());
-  return [name, value.join(", "), repeats ? "" : about].join(" | ").replace(/( \| )+$/, "");
-}
-
-/**
- * What a filter's value is, read from the wire operators the spec documents for it: date operators
- * such as `t` (today), comparisons, or text matches. A filter whose spec lists its values has no kind,
- * and one with special values such as `me` takes ids besides them, updated_by included.
- */
-function kindOf(name: string, { codes, values }: Spec): string | undefined {
-  const id = /(^|_)id$/.test(name);
-  if (values.some((line) => line.startsWith("Values:"))) return undefined;
-  if (values.some((line) => line.startsWith("Special values:"))) return "id";
-  if (codes.has("t")) return "date";
-  if (codes.has(">=")) return id ? "id" : "number";
-  if (codes.has("~") && !id) return "text";
-  return id ? "id" : undefined;
+  const repeats = [spoken, spoken.replace(/ id$/, "")].includes(first.toLowerCase());
+  const about = (repeats ? rest : [first, ...rest]).join(". ");
+  return [name, value, about].join(" | ").replace(/( \| )+$/, "");
 }
 
 /** The operator objects a filter's schema accepts, in the SDK's order. */
 function operatorsOf(filter: JsonSchema): string[] {
-  const accepted = new Set((filter.anyOf ?? []).flatMap((form) => form.required ?? []));
-  return Object.keys(FORMS).filter((name) => accepted.has(name));
-}
-
-/** What a filter's description from the spec says, read once for its line in the table. */
-interface Spec {
-  readonly summary: string;
-  /** The wire operators of its `Operators:` line, such as `!`, `>=` and `t`. */
-  readonly codes: ReadonlySet<string>;
-  /** Words the SDK compiles to operators, such as status_id's "open". */
-  readonly words: readonly string[];
-  /** Its `Values:` and `Special values:` lines. */
-  readonly values: readonly string[];
-}
-
-/**
- * A filter's description from the spec: a summary line, then lines such as `Operators:` and `Values:`
- * that name the wire operators in backticks.
- */
-function specOf(filter: JsonSchema): Spec {
-  const [summary = "", ...lines] = (filter.description ?? "").split("\n");
-  const codes = new Set(
-    [...(lines.find((line) => line.startsWith("Operators:")) ?? "").matchAll(/`([^`]+)`/g)].map(
-      (match) => match[1]!,
-    ),
-  );
-  // The SDK compiles these words to Redmine's status operators `o`, `c` and `*`.
-  const words =
-    codes.has("o") && codes.has("c") ? ["open", "closed", ...(codes.has("*") ? ["any"] : [])] : [];
-  const values = lines.filter((line) => /^(Special values|Values):/.test(line));
-  return { summary, codes, words, values };
+  return (filter.anyOf ?? [])
+    .flatMap((form) => form.required ?? [])
+    .filter((name) => name !== "raw");
 }
 
 function describeTool(entry: CatalogEntry, adminOnly: string | undefined): string {

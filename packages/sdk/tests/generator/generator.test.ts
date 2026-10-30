@@ -5,6 +5,7 @@ import { generate } from "../../generator/generate.ts";
 import { overlay } from "../../generator/overlay.ts";
 import { loadSpecs, type SpecFile } from "../../generator/spec.ts";
 import { uploadKey } from "../../src/core/op.ts";
+import { CATALOG } from "../../src/generated/catalog.ts";
 import { ops } from "../../src/generated/ops.ts";
 import type { CustomField, IdName, Issue, IssueSummary } from "../../src/generated/schemas.ts";
 
@@ -207,6 +208,37 @@ describe("operation descriptors", () => {
       "cf",
     ]);
     expect(Object.keys(ops.getIssues.query)).not.toContain("offset");
+  });
+
+  test("a filter whose spec gives no value, or an id filter with an unexplained contains, fails generation", async () => {
+    const { "author.group": _, ...filterValues } = overlay.filterValues;
+    await expect(generate(specs, { ...overlay, filterValues })).rejects.toThrow(
+      "filter author.group: the spec gives no value",
+    );
+    await expect(
+      generate(specs, { ...overlay, filterValues: { ...overlay.filterValues, tracker_id: "id" } }),
+    ).rejects.toThrow("filter tracker_id: overlay.filterValues names it");
+    const { parent_id: __, ...subtrees } = overlay.subtrees;
+    await expect(generate(specs, { ...overlay, subtrees })).rejects.toThrow(
+      "filter parent_id: contains takes an id here",
+    );
+  });
+
+  test("filter descriptions use the where grammar, and only raw keeps the spec's syntax", () => {
+    const issues = CATALOG.find((entry) => entry.id === "getIssues")!.inputSchema.properties!
+      .where!;
+    const status = issues.properties!.status_id!;
+    expect(status.description).toBe(
+      'Filter by issue status.\nValue: id, `open`, `closed`, `any` alone.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+    );
+    const raw = status.anyOf!.find((form) => form.required?.includes("raw"))!;
+    expect(raw.description).toContain("Examples: `o`, `1|2`, `c`, `!3`");
+    for (const filter of Object.values(issues.properties!)) {
+      expect(filter.description).not.toMatch(/Operators:|Examples:|Format:/);
+    }
+    expect(generated.files["src/generated/inputs.ts"]).toContain(
+      "   * Value: id, `open`, `closed`, `any` alone.\n",
+    );
   });
 
   test("comma lists are exactly the filters the overlay names, on every operation of the query", () => {

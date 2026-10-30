@@ -3,6 +3,13 @@
 
 import { CUSTOM_FIELD } from "../src/core/listing.ts";
 import { uploadKey, type FilterSpec } from "../src/core/op.ts";
+import {
+  CUSTOM_FIELD_PROSE,
+  OPERATORS,
+  operatorsOf,
+  whereLegend,
+  type FilterProse,
+} from "./filters.ts";
 import type { Merged } from "./merge.ts";
 import type { OpModel } from "./operations.ts";
 import { refName, type Schema } from "./spec.ts";
@@ -34,20 +41,6 @@ interface JsObject {
 type Mode = "input" | "output";
 
 const DRAFT = new Ref("DRAFT");
-
-/** How each `Cond` operator object is written, and the wire code a filter must document to accept it. */
-const OPERATORS: readonly { name: string; code: string; value: string }[] = [
-  { name: "not", code: "!", value: "many" },
-  { name: "gte", code: ">=", value: "scalar" },
-  { name: "lte", code: "<=", value: "scalar" },
-  { name: "between", code: "><", value: "pair" },
-  { name: "contains", code: "~", value: "text" },
-  { name: "not_contains", code: "!~", value: "text" },
-  { name: "starts_with", code: "^", value: "text" },
-  { name: "ends_with", code: "$", value: "text" },
-  { name: "any", code: "*", value: "yes" },
-  { name: "none", code: "!*", value: "yes" },
-];
 
 export function catalogFile(ops: OpModel[], merged: Merged): string {
   const components = merged.latest.components.schemas;
@@ -128,33 +121,33 @@ export function catalogFile(ops: OpModel[], merged: Merged): string {
       additionalProperties: false,
     });
   const raw = operatorObject("raw", values.text!);
-  const operators = OPERATORS.map((o) => ({ ...o, ref: operatorObject(o.name, values[o.value]!) }));
+  const refs = new Map(OPERATORS.map((o) => [o.name, operatorObject(o.name, values[o.value]!)]));
+  const idContains = define("opContainsId", {
+    type: "object",
+    properties: { contains: scalar },
+    required: ["contains"],
+    additionalProperties: false,
+  });
 
   /** The `Cond` forms compileWhere accepts for a filter: equality always, `raw` always, operators as documented. */
-  const condition = (spec: FilterSpec, description: string | undefined): Js => ({
-    ...(description?.trim() ? { description: description.trim() } : {}),
+  const condition = (spec: FilterSpec, prose: FilterProse): Js => ({
+    description: prose.description,
     anyOf: [
       scalar,
       scalars,
-      raw,
-      ...operators.filter((o) => spec.ops.includes(o.code)).map((o) => o.ref),
+      prose.wireSyntax === undefined ? raw : withKeys(raw, { description: prose.wireSyntax }),
+      ...operatorsOf(spec).map((o) =>
+        o.name === "contains" && prose.kind === "id" ? idContains : refs.get(o.name)!,
+      ),
     ],
   });
 
   const where = (op: OpModel): Js => ({
-    description:
-      "Filters, keyed by Redmine's filter parameter names. A value or an array of values means equals; an object with one operator picks another.",
+    description: whereLegend(op.where, op.descriptor.customFieldFilters),
     type: "object",
-    properties: Object.fromEntries(op.where.map((f) => [f.name, condition(f.spec, f.description)])),
+    properties: Object.fromEntries(op.where.map((f) => [f.name, condition(f.spec, f.prose)])),
     ...(op.descriptor.customFieldFilters
-      ? {
-          patternProperties: {
-            "^cf_\\d+$": condition(
-              CUSTOM_FIELD,
-              "Custom field filter by id, e.g. `cf_12`. Operators depend on the field format.",
-            ),
-          },
-        }
+      ? { patternProperties: { "^cf_\\d+$": condition(CUSTOM_FIELD, CUSTOM_FIELD_PROSE) } }
       : {}),
     additionalProperties: false,
   });

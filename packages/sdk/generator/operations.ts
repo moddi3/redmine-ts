@@ -10,6 +10,7 @@ import {
   type Safety,
   type Stability,
 } from "../src/core/op.ts";
+import { filterProse, type FilterProse } from "./filters.ts";
 import type { Merged, MergedOp } from "./merge.ts";
 import type { Overlay } from "./overlay.ts";
 import { deref, refName, type OpenApi, type Param, type Schema } from "./spec.ts";
@@ -33,13 +34,20 @@ const TRANSPORT_QUERY = new Set(["offset", "limit", "nometa", "format"]);
 /** Keys ListInput contributes to every list input. The spec's own `sort` param is ListInput.sort. */
 const LIST_KEYS = ["where", "sort", "pageSize", "paging"];
 
-type Cap = "not" | "range" | "text" | "presence";
+type Cap = "not" | "range" | "text" | "contains" | "presence";
 
-const CAPS: Record<Cap, readonly string[]> = {
+const CAPS: Partial<Record<Cap, readonly string[]>> = {
   not: ["!"],
   range: [">=", "<=", "><"],
   text: ["~", "!~", "^", "$"],
   presence: ["*", "!*"],
+};
+
+/** On an id filter `~` takes the id, not text. */
+const ID_CAPS: Partial<Record<Cap, readonly string[]>> = {
+  ...CAPS,
+  text: ["!~", "^", "$"],
+  contains: ["~"],
 };
 
 export interface Filter {
@@ -47,7 +55,15 @@ export interface Filter {
   spec: FilterSpec;
   caps: Cap[];
   doc: string;
-  description: string | undefined;
+  prose: FilterProse;
+}
+
+export function filterDoc(prose: FilterProse, since: string | undefined): string {
+  const raw =
+    prose.wireSyntax === undefined
+      ? ""
+      : `\n\n\`raw\` takes Redmine's own syntax:\n${prose.wireSyntax}`;
+  return jsDoc(`${prose.description}${raw}`, sinceTag(since));
 }
 
 export interface Descriptor {
@@ -163,29 +179,34 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
           codes.includes(code),
         ),
       );
-      const caps = (Object.keys(CAPS) as Cap[]).filter((c) =>
-        CAPS[c].some((code) => codes.includes(code)),
-      );
       const join = overlay.commaLists.some((g) => g.ops.includes(id) && g.filters.includes(p.name));
       const scoped = overlay.projectScoped.some(
         (g) => g.ops.includes(id) && g.filters.includes(p.name),
       );
-      const note = overlay.filterNotes[id]?.[p.name];
-      const description =
-        note === undefined
-          ? p.description
-          : p.description?.replace(/^.*/, (summary) => `${summary} ${note}`);
+      const spec: FilterSpec = {
+        ops: codes,
+        ...(Object.keys(words).length > 0 ? { words } : {}),
+        ...(join ? { join: "," as const } : {}),
+        ...(scoped ? { scoped: true as const } : {}),
+      };
+      const prose = filterProse(
+        id,
+        p.name,
+        spec,
+        p.description ?? "",
+        overlay,
+        pathParams.some((q) => q.name === "project_id"),
+      );
+      const table = prose.kind === "id" ? ID_CAPS : CAPS;
+      const caps = (Object.keys(table) as Cap[]).filter((c) =>
+        table[c]!.some((code) => codes.includes(code)),
+      );
       where.push({
         name: p.name,
-        spec: {
-          ops: codes,
-          ...(Object.keys(words).length > 0 ? { words } : {}),
-          ...(join ? { join: "," as const } : {}),
-          ...(scoped ? { scoped: true as const } : {}),
-        },
+        spec,
         caps,
-        doc: jsDoc(description, sinceTag(p["x-since"])),
-        description,
+        doc: filterDoc(prose, p["x-since"]),
+        prose,
       });
     } else if (p.name === "include") {
       includes = (p.schema.items?.enum ?? []).map(String);
@@ -503,6 +524,15 @@ function checkOverlay(ops: OpModel[], doc: OpenApi, overlay: Overlay): void {
       if (!op.descriptor.filters[name])
         throw new Error(`overlay.filterNotes.${id}: no filter ${name}`);
     }
+  }
+  const filters = ops.flatMap((o) => o.where);
+  for (const name of Object.keys(overlay.filterValues)) {
+    if (!filters.some((f) => f.name === name))
+      throw new Error(`overlay.filterValues names unknown filter ${name}`);
+  }
+  for (const name of Object.keys(overlay.subtrees)) {
+    if (!filters.some((f) => f.name === name && f.caps.includes("contains")))
+      throw new Error(`overlay.subtrees.${name}: no id filter of that name documents ~`);
   }
   for (const [name, words] of Object.entries(overlay.filterWords)) {
     const specs = ops.flatMap((o) => o.where.filter((f) => f.name === name).map((f) => f.spec));

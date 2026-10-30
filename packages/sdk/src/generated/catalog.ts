@@ -93,6 +93,13 @@ const opNone: JsonSchema = {
   additionalProperties: false,
 };
 
+const opContainsId: JsonSchema = {
+  type: "object",
+  properties: { contains: scalar },
+  required: ["contains"],
+  additionalProperties: false,
+};
+
 const outIdName: JsonSchema = {
   type: "object",
   properties: { id: { type: "integer" }, name: { type: "string" } },
@@ -1046,106 +1053,297 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            "Filters, keyed by Redmine's filter parameter names. A value or an array of values means equals; an object with one operator picks another.",
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.',
           type: "object",
           properties: {
             issue_id: {
               description:
-                "Filter by issue ID.\nFormat: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nFor equality, separate multiple IDs with commas. A pipe separates range bounds, not IDs in an equality list.\nExamples: `1`, `1,2`, `>=100`, `><1|100`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            project_id: {
-              description:
-                "Filter by project. One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `!mine`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            subproject_id: {
-              description:
-                "Filter by subproject.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `*`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            tracker_id: {
-              description:
-                "Filter by tracker.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `1|2`, `!3`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            status_id: {
-              description:
-                "Filter by issue status.\nFormat: `[operator]value[|value2|...]`\nOperators: `o` (open), `=` (default), `!` (not equal), `c` (closed), `*` (any), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `o`, `1|2`, `c`, `!3`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny],
-            },
-            priority_id: {
-              description:
-                "Filter by priority.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `1|2`, `!3`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            assigned_to_id: {
-              description:
-                "Filter by assignee.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!*`, `!me`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            author_id: {
-              description:
-                "Filter by author.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!me`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            "author.group": {
-              description:
-                "Filter by author's group.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            "author.role": {
-              description:
-                "Filter by author's role.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            member_of_group: {
-              description:
-                "Filter by assignee's group membership.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1`, `*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            assigned_to_role: {
-              description:
-                "Filter by assignee's role.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1`, `*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            fixed_version_id: {
-              description:
-                "Filter by target version.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `1|2`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            "fixed_version.due_date": {
-              description:
-                "Filter by target version's due date.\nFormat: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            "fixed_version.status": {
-              description:
-                "Filter by target version's status.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nValues: `open`, `locked`, `closed`\nExamples: `open`, `open|locked`, `!closed`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            category_id: {
-              description:
-                "Filter by category.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `1|2`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            parent_id: {
-              description:
-                "Filter by parent issue.\nFormat: `[operator]value`\nOperators: `=` (exact parent ID), `~` (descendant of, subtree search), `*` (any, i.e. is a subtask), `!*` (none, i.e. is a root issue)\nExamples: `123`, `~123`, `*`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opContains, opAny, opNone],
-            },
-            child_id: {
-              description:
-                "Filter by child issue.\nFormat: `[operator]value`\nOperators: `=` (exact child ID), `~` (ancestor of, subtree search), `*` (any, i.e. has subtasks), `!*` (none, i.e. is a leaf issue)\nExamples: `123`, `~123`, `*`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opContains, opAny, opNone],
-            },
-            subject: {
-              description:
-                "Filter by subject.\nFormat: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `^prefix`",
+                'Filter by issue ID.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nFor equality, separate multiple IDs with commas. A pipe separates range bounds, not IDs in an equality list.\nExamples: `1`, `1,2`, `>=100`, `><1|100`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            project_id: {
+              description:
+                'Filter by project. One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.\nValue: id, `mine` for projects where current user is a member, `bookmarks` for bookmarked projects.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `!mine`",
+                },
+                opNot,
+              ],
+            },
+            subproject_id: {
+              description:
+                'Filter by subproject. Needs one project_id.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `*`, `!*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            tracker_id: {
+              description:
+                'Filter by tracker.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `1|2`, `!3`",
+                },
+                opNot,
+              ],
+            },
+            status_id: {
+              description:
+                'Filter by issue status.\nValue: id, `open`, `closed`, `any` alone.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `o` (open), `=` (default), `!` (not equal), `c` (closed), `*` (any), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `o`, `1|2`, `c`, `!3`",
+                },
+                opNot,
+                opAny,
+              ],
+            },
+            priority_id: {
+              description:
+                'Filter by priority.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `1|2`, `!3`",
+                },
+                opNot,
+              ],
+            },
+            assigned_to_id: {
+              description:
+                'Filter by assignee.\nValue: id, `me` for current user.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!*`, `!me`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            author_id: {
+              description:
+                'Filter by author.\nValue: id, `me` for current user.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!me`",
+                },
+                opNot,
+              ],
+            },
+            "author.group": {
+              description:
+                "Filter by author's group.\nValue: group id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`",
+                },
+                opNot,
+              ],
+            },
+            "author.role": {
+              description:
+                "Filter by author's role.\nValue: role id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`",
+                },
+                opNot,
+              ],
+            },
+            member_of_group: {
+              description:
+                "Filter by assignee's group membership.\nValue: group id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            assigned_to_role: {
+              description:
+                "Filter by assignee's role.\nValue: role id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            fixed_version_id: {
+              description:
+                'Filter by target version.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `1|2`, `!*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            "fixed_version.due_date": {
+              description:
+                "Filter by target version's due date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            "fixed_version.status": {
+              description:
+                "Filter by target version's status.\nValue: `open`, `locked`, `closed`.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nValues: `open`, `locked`, `closed`\nExamples: `open`, `open|locked`, `!closed`",
+                },
+                opNot,
+              ],
+            },
+            category_id: {
+              description:
+                'Filter by category. Needs one project_id.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)\nExamples: `1|2`, `!*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            parent_id: {
+              description:
+                'Filter by parent issue.\nValue: id, {contains: id} for a parent at any depth.\nAccepts a value, an array meaning any of them, or one of {contains: id}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (exact parent ID), `~` (descendant of, subtree search), `*` (any, i.e. is a subtask), `!*` (none, i.e. is a root issue)\nExamples: `123`, `~123`, `*`, `!*`",
+                },
+                opContainsId,
+                opAny,
+                opNone,
+              ],
+            },
+            child_id: {
+              description:
+                'Filter by child issue.\nValue: id, {contains: id} for a child at any depth.\nAccepts a value, an array meaning any of them, or one of {contains: id}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (exact child ID), `~` (ancestor of, subtree search), `*` (any, i.e. has subtasks), `!*` (none, i.e. is a leaf issue)\nExamples: `123`, `~123`, `*`, `!*`",
+                },
+                opContainsId,
+                opAny,
+                opNone,
+              ],
+            },
+            subject: {
+              description:
+                'Filter by subject.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `^prefix`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -1156,11 +1354,15 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             description: {
               description:
-                "Filter by description.\nFormat: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `!~excluded`",
+                'Filter by description.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `!~excluded`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -1171,11 +1373,15 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             notes: {
               description:
-                "Filter by journal notes.\nFormat: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`",
+                'Filter by journal notes.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -1186,56 +1392,173 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             created_on: {
               description:
-                "Filter by creation date.\nFormat: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            updated_on: {
-              description:
-                "Filter by last updated date.\nFormat: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            closed_on: {
-              description:
-                "Filter by closed date.\nFormat: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            start_date: {
-              description:
-                "Filter by start date.\nFormat: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            due_date: {
-              description:
-                "Filter by due date.\nFormat: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            estimated_hours: {
-              description:
-                "Filter by estimated hours.\nFormat: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `>=5`, `><1|10`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            spent_time: {
-              description:
-                "Filter by total spent time.\nFormat: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `>=5`, `><1|10`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            done_ratio: {
-              description:
-                "Filter by done ratio (percentage).\nFormat: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `>=50`, `><0|99`, `100`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            is_private: {
-              description:
-                "Filter by private flag.\nFormat: `[operator]value`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (private), `0` (not private)\nExamples: `1`, `0`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            attachment: {
-              description:
-                "Filter by attachment filename.\nFormat: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~report`, `*.pdf`",
+                'Filter by creation date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            updated_on: {
+              description:
+                'Filter by last updated date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            closed_on: {
+              description:
+                'Filter by closed date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            start_date: {
+              description:
+                'Filter by start date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            due_date: {
+              description:
+                'Filter by due date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            estimated_hours: {
+              description:
+                'Filter by estimated hours.\nValue: number.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `>=5`, `><1|10`, `!*`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            spent_time: {
+              description:
+                'Filter by total spent time.\nValue: number.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `>=5`, `><1|10`, `!*`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            done_ratio: {
+              description:
+                'Filter by done ratio (percentage).\nValue: number.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `>=50`, `><0|99`, `100`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            is_private: {
+              description:
+                'Filter by private flag.\nValue: `1` for private, `0` for not private.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (private), `0` (not private)\nExamples: `1`, `0`",
+                },
+                opNot,
+              ],
+            },
+            attachment: {
+              description:
+                'Filter by attachment filename.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~report`, `*.pdf`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -1246,11 +1569,15 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             attachment_description: {
               description:
-                "Filter by attachment description.\nFormat: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~screenshot`",
+                'Filter by attachment description.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~screenshot`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -1261,79 +1588,224 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             watcher_id: {
               description:
-                "Filter by watcher.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!me`",
-              anyOf: [scalar, scalars, opRaw, opNot],
+                'Filter by watcher.\nValue: id, `me` for current user.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!me`",
+                },
+                opNot,
+              ],
             },
             updated_by: {
               description:
-                "Filter by user who updated the issue.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `me` (current user)\nExamples: `1`, `me`",
-              anyOf: [scalar, scalars, opRaw, opNot],
+                'Filter by user who updated the issue.\nValue: id, `me` for current user.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `me` (current user)\nExamples: `1`, `me`",
+                },
+                opNot,
+              ],
             },
             last_updated_by: {
               description:
-                "Filter by user who last updated the issue.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `me` (current user)\nExamples: `1`, `me`",
-              anyOf: [scalar, scalars, opRaw, opNot],
+                'Filter by user who last updated the issue.\nValue: id, `me` for current user.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `me` (current user)\nExamples: `1`, `me`",
+                },
+                opNot,
+              ],
             },
             "project.status": {
               description:
-                "Filter by project status.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (active), `5` (closed)\nExamples: `1`, `!5`",
-              anyOf: [scalar, scalars, opRaw, opNot],
+                'Filter by project status.\nValue: `1` for active, `5` for closed.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (active), `5` (closed)\nExamples: `1`, `!5`",
+                },
+                opNot,
+              ],
             },
             relates: {
               description:
-                'Filter by "relates to" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `=p` (same project), `=!p` (different project), `!p` (not in project), `*o` (related to open issue), `!o` (related to closed issue), `*` (any), `!*` (none)\nExamples: `123`, `=p`, `*o`, `*`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "relates to" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `=p` (same project), `=!p` (different project), `!p` (not in project), `*o` (related to open issue), `!o` (related to closed issue), `*` (any), `!*` (none)\nExamples: `123`, `=p`, `*o`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             duplicates: {
               description:
-                'Filter by "duplicates" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "duplicates" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             duplicated: {
               description:
-                'Filter by "duplicated by" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "duplicated by" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             blocks: {
               description:
-                'Filter by "blocks" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*o`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "blocks" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*o`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             blocked: {
               description:
-                'Filter by "blocked by" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*o`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "blocked by" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*o`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             precedes: {
               description:
-                'Filter by "precedes" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "precedes" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             follows: {
               description:
-                'Filter by "follows" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "follows" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             copied_to: {
               description:
-                'Filter by "copied to" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "copied to" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             copied_from: {
               description:
-                'Filter by "copied from" relation.\nFormat: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`',
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by "copied from" relation.\nValue: issue id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`\nExamples: `123`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             any_searchable: {
               description:
-                "Full-text search across all searchable fields.\nFormat: `<operator>value`\nOperators: `~` (contains all words), `*~` (contains any word), `!~` (not contains)\nExamples: `~keyword`, `*~foo bar`",
-              anyOf: [scalar, scalars, opRaw, opContains, opNotContains],
+                'Full-text search across all searchable fields.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>value`\nOperators: `~` (contains all words), `*~` (contains any word), `!~` (not contains)\nExamples: `~keyword`, `*~foo bar`",
+                },
+                opContains,
+                opNotContains,
+              ],
             },
           },
           patternProperties: {
             "^cf_\\d+$": {
               description:
-                "Custom field filter by id, e.g. `cf_12`. Operators depend on the field format.",
+                'Custom field by id, such as `cf_12`. Its format decides the operators.\nValue: per the field\'s format.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
@@ -1614,26 +2086,48 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            "Filters, keyed by Redmine's filter parameter names. A value or an array of values means equals; an object with one operator picks another.",
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.',
           type: "object",
           properties: {
             status: {
               description:
-                "Filter by project status.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (active), `5` (closed)\nExamples: `1`, `1|5`, `!1`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            id: {
-              description:
-                "Filter by project ID.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2|3`, `mine`, `!mine`, `mine|bookmarks`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            name: {
-              description:
-                "Filter by project name.\nFormat: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `^prefix`",
+                'Filter by project status.\nValue: `1` for active, `5` for closed.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (active), `5` (closed)\nExamples: `1`, `1|5`, `!1`",
+                },
+                opNot,
+              ],
+            },
+            id: {
+              description:
+                'Filter by project ID.\nValue: id, `mine` for projects where current user is a member, `bookmarks` for bookmarked projects.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2|3`, `mine`, `!mine`, `mine|bookmarks`",
+                },
+                opNot,
+              ],
+            },
+            name: {
+              description:
+                'Filter by project name.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `^prefix`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -1644,11 +2138,15 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             description: {
               description:
-                "Filter by project description.\nFormat: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `!~excluded`",
+                'Filter by project description.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>value`\nOperators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `!~excluded`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -1659,23 +2157,69 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             parent_id: {
               description:
-                "Filter by parent project.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any, i.e. is a subproject), `!*` (none, i.e. is a root project)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `*`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
+                'Filter by parent project.\nValue: id, `mine` for projects where current user is a member, `bookmarks` for bookmarked projects.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any, i.e. is a subproject), `!*` (none, i.e. is a root project)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `*`, `!*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
             },
             is_public: {
               description:
-                "Filter by public/private status.\nFormat: `[operator]value`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (public), `0` (private)\nExamples: `1`, `!1`",
-              anyOf: [scalar, scalars, opRaw, opNot],
+                'Filter by public/private status.\nValue: `1` for public, `0` for private.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (public), `0` (private)\nExamples: `1`, `!1`",
+                },
+                opNot,
+              ],
             },
             created_on: {
               description:
-                "Filter by creation date.\nFormat: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `><2024-01-01|2024-12-31`, `t`, `>t-7`, `lm`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
+                'Filter by creation date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `><2024-01-01|2024-12-31`, `t`, `>t-7`, `lm`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
             },
             updated_on: {
               description:
-                "Filter by last updated date.\nFormat: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `><2024-01-01|2024-12-31`, `t`, `>t-7`, `lm`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
+                'Filter by last updated date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `><2024-01-01|2024-12-31`, `t`, `>t-7`, `lm`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
             },
           },
           additionalProperties: false,
@@ -2138,31 +2682,68 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            "Filters, keyed by Redmine's filter parameter names. A value or an array of values means equals; an object with one operator picks another.",
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.',
           type: "object",
           properties: {
             status: {
               description:
-                "Filter by user status.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nValues: `1` (active), `2` (registered), `3` (locked)\nExamples: `1`, `1|2`, `!3`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            auth_source_id: {
-              description:
-                "Filter by authentication source. Undocumented\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1`, `!1`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            twofa_scheme: {
-              description:
-                "Filter by two-factor authentication scheme. Undocumented\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nOnly available when two-factor authentication is enabled in Redmine settings.",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            login: {
-              description:
-                "Filter by login. Undocumented\nFormat: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `=` (exact match), `!~` (does not contain), `!` (not equal), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~admin`, `^john`",
+                'Filter by user status.\nValue: `1` for active, `2` for registered, `3` for locked.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nValues: `1` (active), `2` (registered), `3` (locked)\nExamples: `1`, `1|2`, `!3`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            auth_source_id: {
+              description:
+                'Filter by authentication source. Undocumented\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1`, `!1`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            twofa_scheme: {
+              description:
+                'Filter by two-factor authentication scheme. Undocumented\nValue: scheme name, such as `totp`.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nOnly available when two-factor authentication is enabled in Redmine settings.",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            login: {
+              description:
+                'Filter by login. Undocumented\nValue: text.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `=` (exact match), `!~` (does not contain), `!` (not equal), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~admin`, `^john`",
+                },
                 opNot,
                 opContains,
                 opNotContains,
@@ -2174,11 +2755,15 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             firstname: {
               description:
-                "Filter by first name. Undocumented\nFormat: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `=` (exact match), `!~` (does not contain), `!` (not equal), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~John`, `=John`",
+                'Filter by first name. Undocumented\nValue: text.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `=` (exact match), `!~` (does not contain), `!` (not equal), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~John`, `=John`",
+                },
                 opNot,
                 opContains,
                 opNotContains,
@@ -2190,11 +2775,15 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             lastname: {
               description:
-                "Filter by last name. Undocumented\nFormat: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `=` (exact match), `!~` (does not contain), `!` (not equal), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~Doe`, `=Doe`",
+                'Filter by last name. Undocumented\nValue: text.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `=` (exact match), `!~` (does not contain), `!` (not equal), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~Doe`, `=Doe`",
+                },
                 opNot,
                 opContains,
                 opNotContains,
@@ -2206,11 +2795,15 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             mail: {
               description:
-                "Filter by email address. Undocumented\nFormat: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `=` (exact match), `!~` (does not contain), `!` (not equal), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~example.com`, `$@example.com`",
+                'Filter by email address. Undocumented\nValue: text.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `=` (exact match), `!~` (does not contain), `!` (not equal), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~example.com`, `$@example.com`",
+                },
                 opNot,
                 opContains,
                 opNotContains,
@@ -2222,18 +2815,53 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             created_on: {
               description:
-                "Filter by creation date. Undocumented\nFormat: `[operator]value`\nOperators: `=` (on date), `>=`, `<=`, `><` (between, pipe-separated), `>t-` (more than N days ago), `<t-` (less than N days ago), `><t-` (between N and M days ago), `t-` (N days ago), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `>t-30`, `lm`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
+                'Filter by creation date. Undocumented\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (on date), `>=`, `<=`, `><` (between, pipe-separated), `>t-` (more than N days ago), `<t-` (less than N days ago), `><t-` (between N and M days ago), `t-` (N days ago), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `>t-30`, `lm`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
             },
             last_login_on: {
               description:
-                "Filter by last login date. Undocumented\nFormat: `[operator]value`\nOperators: `=` (on date), `>=`, `<=`, `><` (between, pipe-separated), `>t-` (more than N days ago), `<t-` (less than N days ago), `><t-` (between N and M days ago), `t-` (N days ago), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `>t-30`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
+                'Filter by last login date. Undocumented\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (on date), `>=`, `<=`, `><` (between, pipe-separated), `>t-` (more than N days ago), `<t-` (less than N days ago), `><t-` (between N and M days ago), `t-` (N days ago), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `>t-30`, `!*`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
             },
             admin: {
               description:
-                "Filter by admin privilege. Undocumented\nFormat: `[operator]value`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (admin), `0` (non-admin)\nExamples: `1`, `!1`",
-              anyOf: [scalar, scalars, opRaw, opNot],
+                'Filter by admin privilege. Undocumented\nValue: `1` for admin, `0` for non-admin.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (admin), `0` (non-admin)\nExamples: `1`, `!1`",
+                },
+                opNot,
+              ],
             },
           },
           additionalProperties: false,
@@ -2502,66 +3130,174 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            "Filters, keyed by Redmine's filter parameter names. A value or an array of values means equals; an object with one operator picks another.",
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.',
           type: "object",
           properties: {
             user_id: {
               description:
-                "Filter by user.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            project_id: {
-              description:
-                "Filter by project. One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `!mine`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            spent_on: {
-              description:
-                "Filter by date spent.\nFormat: `[operator]value`\nOperators: `=` (on date), `>=`, `<=`, `><` (between, pipe-separated), `>t-` (more than N days ago), `<t-` (less than N days ago), `><t-` (between N and M days ago), `t-` (N days ago), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `*` (any), `!*` (none)\nExamples: `=2024-01-01`, `>=2024-01-01`, `><2024-01-01|2024-12-31`, `>t-7`, `t`, `lw`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
-            },
-            subproject_id: {
-              description:
-                "Filter by subproject.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `*`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            issue_id: {
-              description:
-                "Filter by issue.\nFormat: `[operator]value`\nOperators: `=` (exact match), `~` (issue and its subtasks), `*` (any), `!*` (none)\nExamples: `=1`, `~1`, `*`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opContains, opAny, opNone],
-            },
-            "issue.tracker_id": {
-              description:
-                "Filter by issue's tracker.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`, `!3`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            "issue.status_id": {
-              description:
-                "Filter by issue's status.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`, `!3`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            "issue.fixed_version_id": {
-              description:
-                "Filter by issue's target version.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`, `!3`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            "issue.parent_id": {
-              description:
-                "Filter by issue's parent.\nFormat: `[operator]value`\nOperators: `=` (exact match), `~` (issue and its subtasks), `*` (any), `!*` (none)\nExamples: `=1`, `~1`, `*`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opContains, opAny, opNone],
-            },
-            "issue.category_id": {
-              description:
-                "Filter by issue's category.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            "issue.subject": {
-              description:
-                "Filter by issue's subject.\nFormat: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `!~` (does not contain), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `^prefix`, `$suffix`",
+                'Filter by user.\nValue: id, `me` for current user.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            project_id: {
+              description:
+                'Filter by project. One id or identifier also matches subprojects by default; two or more ids do not, and {not: id} excludes only that project. An identifier works only alone.\nValue: id, `mine` for projects where current user is a member, `bookmarks` for bookmarked projects.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nSpecial values: `mine` (projects where current user is a member), `bookmarks` (bookmarked projects)\nExamples: `1|2`, `mine`, `!mine`",
+                },
+                opNot,
+              ],
+            },
+            spent_on: {
+              description:
+                'Filter by date spent.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (on date), `>=`, `<=`, `><` (between, pipe-separated), `>t-` (more than N days ago), `<t-` (less than N days ago), `><t-` (between N and M days ago), `t-` (N days ago), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `*` (any), `!*` (none)\nExamples: `=2024-01-01`, `>=2024-01-01`, `><2024-01-01|2024-12-31`, `>t-7`, `t`, `lw`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
+            },
+            subproject_id: {
+              description:
+                'Filter by subproject. Needs one project_id.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `*`, `!*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            issue_id: {
+              description:
+                'Filter by issue.\nValue: id, {contains: id} for the issue and its subtasks.\nAccepts a value, an array meaning any of them, or one of {contains: id}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (exact match), `~` (issue and its subtasks), `*` (any), `!*` (none)\nExamples: `=1`, `~1`, `*`, `!*`",
+                },
+                opContainsId,
+                opAny,
+                opNone,
+              ],
+            },
+            "issue.tracker_id": {
+              description:
+                "Filter by issue's tracker.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`, `!3`",
+                },
+                opNot,
+              ],
+            },
+            "issue.status_id": {
+              description:
+                "Filter by issue's status.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`, `!3`",
+                },
+                opNot,
+              ],
+            },
+            "issue.fixed_version_id": {
+              description:
+                "Filter by issue's target version.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`, `!3`",
+                },
+                opNot,
+              ],
+            },
+            "issue.parent_id": {
+              description:
+                "Filter by issue's parent.\nValue: id, {contains: id} for a parent at any depth.\nAccepts a value, an array meaning any of them, or one of {contains: id}, {any: true} for any value set, {none: true} for no value, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (exact match), `~` (issue and its subtasks), `*` (any), `!*` (none)\nExamples: `=1`, `~1`, `*`, `!*`",
+                },
+                opContainsId,
+                opAny,
+                opNone,
+              ],
+            },
+            "issue.category_id": {
+              description:
+                "Filter by issue's category. Needs one project_id.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `!*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            "issue.subject": {
+              description:
+                'Filter by issue\'s subject.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `!~` (does not contain), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `^prefix`, `$suffix`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -2572,36 +3308,91 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             "user.group": {
               description:
-                "Filter by user's group.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            "user.role": {
-              description:
-                "Filter by user's role.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            author_id: {
-              description:
-                "Filter by author.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!*`",
-              anyOf: [scalar, scalars, opRaw, opNot, opAny, opNone],
-            },
-            activity_id: {
-              description:
-                "Filter by activity.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`, `!3`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            "project.status": {
-              description:
-                "Filter by project's status.\nFormat: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (active), `5` (closed)\nExamples: `1`, `!5`",
-              anyOf: [scalar, scalars, opRaw, opNot],
-            },
-            comments: {
-              description:
-                "Filter by comments.\nFormat: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `!~` (does not contain), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `^prefix`",
+                "Filter by user's group.\nValue: group id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
               anyOf: [
                 scalar,
                 scalars,
-                opRaw,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            "user.role": {
+              description:
+                "Filter by user's role.\nValue: role id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nExamples: `1|2`, `*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            author_id: {
+              description:
+                'Filter by author.\nValue: id, `me` for current user.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal), `*` (any), `!*` (none)\nSpecial values: `me` (current user)\nExamples: `1`, `me`, `!*`",
+                },
+                opNot,
+                opAny,
+                opNone,
+              ],
+            },
+            activity_id: {
+              description:
+                'Filter by activity.\nValue: id.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nExamples: `1|2`, `!3`",
+                },
+                opNot,
+              ],
+            },
+            "project.status": {
+              description:
+                "Filter by project's status.\nValue: `1` for active, `5` for closed.\nAccepts a value, an array meaning any of them, or one of {not: value or array}, {raw: \"...\"} in Redmine's own syntax, such as a relative date.",
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value[|value2|...]`\nOperators: `=` (default), `!` (not equal)\nValues: `1` (active), `5` (closed)\nExamples: `1`, `!5`",
+                },
+                opNot,
+              ],
+            },
+            comments: {
+              description:
+                'Filter by comments.\nValue: text.\nAccepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `~` (contains, default), `*~` (contains any word), `!~` (does not contain), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)\nExamples: `~keyword`, `^prefix`",
+                },
                 opContains,
                 opNotContains,
                 opStartsWith,
@@ -2612,8 +3403,21 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             hours: {
               description:
-                "Filter by hours.\nFormat: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `=8`, `>=4`, `><1|8`",
-              anyOf: [scalar, scalars, opRaw, opGte, opLte, opBetween, opAny, opNone],
+                'Filter by hours.\nValue: number.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+              anyOf: [
+                scalar,
+                scalars,
+                {
+                  ...opRaw,
+                  description:
+                    "Format: `[operator]value`\nOperators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)\nExamples: `=8`, `>=4`, `><1|8`",
+                },
+                opGte,
+                opLte,
+                opBetween,
+                opAny,
+                opNone,
+              ],
             },
           },
           additionalProperties: false,

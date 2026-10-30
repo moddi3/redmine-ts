@@ -3,7 +3,8 @@ import { uploadKey } from "../src/core/op.ts";
 import { catalogFile } from "./catalog.ts";
 import { mergeCorrected } from "./corrections.ts";
 import type { Drift, Merged } from "./merge.ts";
-import { analyzeOperations, type OpModel } from "./operations.ts";
+import { CUSTOM_FIELD_PROSE, whereLegend } from "./filters.ts";
+import { analyzeOperations, filterDoc, type OpModel } from "./operations.ts";
 import { overlay as defaultOverlay, type Correction, type Overlay } from "./overlay.ts";
 import {
   deref,
@@ -261,10 +262,12 @@ function inputTypes(op: OpModel): string {
     );
     if (op.descriptor.customFieldFilters) {
       fields.push(
-        `${jsDoc("Custom field filters by id, e.g. `cf_12`. Operators depend on the field format.")}[field: \`cf_\${number}\`]: Cond<string | number, "not" | "range" | "text" | "presence">;\n`,
+        `${filterDoc(CUSTOM_FIELD_PROSE, undefined)}[field: \`cf_\${number}\`]: Cond<string | number, "not" | "range" | "text" | "presence">;\n`,
       );
     }
-    out.push(`export interface ${n.where} {\n${fields.join("")}}\n`);
+    out.push(
+      `${jsDoc(whereLegend(op.where, op.descriptor.customFieldFilters))}export interface ${n.where} {\n${fields.join("")}}\n`,
+    );
   }
   const fields: Member[] = [...op.fields];
   if (hasWhere && !op.list) {

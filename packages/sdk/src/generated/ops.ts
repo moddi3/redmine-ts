@@ -128,9 +128,16 @@ import type {
 
 export type GetIssuesByProjectInclude = "attachments" | "relations";
 
+/**
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.
+ */
 export interface GetIssuesByProjectWhere {
   /**
    * Filter by issue ID.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)
    * For equality, separate multiple IDs with commas. A pipe separates range bounds, not IDs in an equality list.
@@ -139,6 +146,10 @@ export interface GetIssuesByProjectWhere {
   issue_id?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by subproject.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Examples: `1|2`, `*`, `!*`
@@ -146,6 +157,10 @@ export interface GetIssuesByProjectWhere {
   subproject_id?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by tracker.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)
    * Examples: `1|2`, `!3`
@@ -153,6 +168,10 @@ export interface GetIssuesByProjectWhere {
   tracker_id?: Cond<string | number, "not">;
   /**
    * Filter by issue status.
+   * Value: id, `open`, `closed`, `any` alone.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `o` (open), `=` (default), `!` (not equal), `c` (closed), `*` (any), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)
    * Examples: `o`, `1|2`, `c`, `!3`
@@ -160,6 +179,10 @@ export interface GetIssuesByProjectWhere {
   status_id?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by priority.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)
    * Examples: `1|2`, `!3`
@@ -167,6 +190,10 @@ export interface GetIssuesByProjectWhere {
   priority_id?: Cond<string | number, "not">;
   /**
    * Filter by assignee.
+   * Value: id, `me` for current user.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)
    * Special values: `me` (current user)
@@ -175,6 +202,10 @@ export interface GetIssuesByProjectWhere {
   assigned_to_id?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by author.
+   * Value: id, `me` for current user.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Special values: `me` (current user)
@@ -183,6 +214,10 @@ export interface GetIssuesByProjectWhere {
   author_id?: Cond<string | number, "not">;
   /**
    * Filter by author's group.
+   * Value: group id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Examples: `1|2`
@@ -190,6 +225,10 @@ export interface GetIssuesByProjectWhere {
   "author.group"?: Cond<string | number, "not">;
   /**
    * Filter by author's role.
+   * Value: role id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Examples: `1|2`
@@ -197,6 +236,10 @@ export interface GetIssuesByProjectWhere {
   "author.role"?: Cond<string | number, "not">;
   /**
    * Filter by assignee's group membership.
+   * Value: group id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Examples: `1`, `*`
@@ -204,6 +247,10 @@ export interface GetIssuesByProjectWhere {
   member_of_group?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by assignee's role.
+   * Value: role id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Examples: `1`, `*`
@@ -211,6 +258,10 @@ export interface GetIssuesByProjectWhere {
   assigned_to_role?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by target version.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)
    * Examples: `1|2`, `!*`
@@ -218,6 +269,10 @@ export interface GetIssuesByProjectWhere {
   fixed_version_id?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by target version's due date.
+   * Value: date.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)
    * Examples: `>=2024-01-01`, `t`, `>t-7`
@@ -225,6 +280,10 @@ export interface GetIssuesByProjectWhere {
   "fixed_version.due_date"?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by target version's status.
+   * Value: `open`, `locked`, `closed`.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Values: `open`, `locked`, `closed`
@@ -233,6 +292,10 @@ export interface GetIssuesByProjectWhere {
   "fixed_version.status"?: Cond<string | number, "not">;
   /**
    * Filter by category.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none), `ev` (has ever been), `!ev` (has never been), `cf` (changed from)
    * Examples: `1|2`, `!*`
@@ -240,20 +303,32 @@ export interface GetIssuesByProjectWhere {
   category_id?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by parent issue.
+   * Value: id, {contains: id} for a parent at any depth.
+   * Accepts a value, an array meaning any of them, or one of {contains: id}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (exact parent ID), `~` (descendant of, subtree search), `*` (any, i.e. is a subtask), `!*` (none, i.e. is a root issue)
    * Examples: `123`, `~123`, `*`, `!*`
    */
-  parent_id?: Cond<string | number, "text" | "presence">;
+  parent_id?: Cond<string | number, "presence" | "contains">;
   /**
    * Filter by child issue.
+   * Value: id, {contains: id} for a child at any depth.
+   * Accepts a value, an array meaning any of them, or one of {contains: id}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (exact child ID), `~` (ancestor of, subtree search), `*` (any, i.e. has subtasks), `!*` (none, i.e. is a leaf issue)
    * Examples: `123`, `~123`, `*`, `!*`
    */
-  child_id?: Cond<string | number, "text" | "presence">;
+  child_id?: Cond<string | number, "presence" | "contains">;
   /**
    * Filter by subject.
+   * Value: text.
+   * Accepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>value`
    * Operators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)
    * Examples: `~keyword`, `^prefix`
@@ -261,6 +336,10 @@ export interface GetIssuesByProjectWhere {
   subject?: Cond<string | number, "text" | "presence">;
   /**
    * Filter by description.
+   * Value: text.
+   * Accepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>value`
    * Operators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)
    * Examples: `~keyword`, `!~excluded`
@@ -268,6 +347,10 @@ export interface GetIssuesByProjectWhere {
   description?: Cond<string | number, "text" | "presence">;
   /**
    * Filter by journal notes.
+   * Value: text.
+   * Accepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>value`
    * Operators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)
    * Examples: `~keyword`
@@ -275,6 +358,10 @@ export interface GetIssuesByProjectWhere {
   notes?: Cond<string | number, "text" | "presence">;
   /**
    * Filter by creation date.
+   * Value: date.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)
    * Examples: `>=2024-01-01`, `t`, `>t-7`, `lm`
@@ -282,6 +369,10 @@ export interface GetIssuesByProjectWhere {
   created_on?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by last updated date.
+   * Value: date.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)
    * Examples: `>=2024-01-01`, `t`, `>t-7`, `lm`
@@ -289,6 +380,10 @@ export interface GetIssuesByProjectWhere {
   updated_on?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by closed date.
+   * Value: date.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)
    * Examples: `>=2024-01-01`, `t`, `>t-7`, `lm`
@@ -296,6 +391,10 @@ export interface GetIssuesByProjectWhere {
   closed_on?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by start date.
+   * Value: date.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)
    * Examples: `>=2024-01-01`, `t`, `>t-7`
@@ -303,6 +402,10 @@ export interface GetIssuesByProjectWhere {
   start_date?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by due date.
+   * Value: date.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `nd` (tomorrow), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `nw` (next week), `m` (this month), `lm` (last month), `nm` (next month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `t+` (in n days), `>t+` (in more than n days), `<t+` (in less than n days), `><t+` (between n1 and n2 days from now), `*` (any), `!*` (none)
    * Examples: `>=2024-01-01`, `t`, `>t-7`
@@ -310,6 +413,10 @@ export interface GetIssuesByProjectWhere {
   due_date?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by estimated hours.
+   * Value: number.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)
    * Examples: `>=5`, `><1|10`, `!*`
@@ -317,6 +424,10 @@ export interface GetIssuesByProjectWhere {
   estimated_hours?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by total spent time.
+   * Value: number.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)
    * Examples: `>=5`, `><1|10`, `!*`
@@ -324,6 +435,10 @@ export interface GetIssuesByProjectWhere {
   spent_time?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by done ratio (percentage).
+   * Value: number.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)
    * Examples: `>=50`, `><0|99`, `100`
@@ -331,6 +446,10 @@ export interface GetIssuesByProjectWhere {
   done_ratio?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by private flag.
+   * Value: `1` for private, `0` for not private.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (default), `!` (not equal)
    * Values: `1` (private), `0` (not private)
@@ -339,6 +458,10 @@ export interface GetIssuesByProjectWhere {
   is_private?: Cond<string | number, "not">;
   /**
    * Filter by attachment filename.
+   * Value: text.
+   * Accepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>value`
    * Operators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)
    * Examples: `~report`, `*.pdf`
@@ -346,6 +469,10 @@ export interface GetIssuesByProjectWhere {
   attachment?: Cond<string | number, "text" | "presence">;
   /**
    * Filter by attachment description.
+   * Value: text.
+   * Accepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>value`
    * Operators: `~` (contains), `!~` (not contains), `*~` (contains any word), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)
    * Examples: `~screenshot`
@@ -353,6 +480,10 @@ export interface GetIssuesByProjectWhere {
   attachment_description?: Cond<string | number, "text" | "presence">;
   /**
    * Filter by watcher.
+   * Value: id, `me` for current user.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Special values: `me` (current user)
@@ -361,6 +492,10 @@ export interface GetIssuesByProjectWhere {
   watcher_id?: Cond<string | number, "not">;
   /**
    * Filter by user who updated the issue.
+   * Value: id, `me` for current user.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Special values: `me` (current user)
@@ -369,6 +504,10 @@ export interface GetIssuesByProjectWhere {
   updated_by?: Cond<string | number, "not">;
   /**
    * Filter by user who last updated the issue.
+   * Value: id, `me` for current user.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Special values: `me` (current user)
@@ -377,6 +516,10 @@ export interface GetIssuesByProjectWhere {
   last_updated_by?: Cond<string | number, "not">;
   /**
    * Filter by project status.
+   * Value: `1` for active, `5` for closed.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Values: `1` (active), `5` (closed)
@@ -385,6 +528,10 @@ export interface GetIssuesByProjectWhere {
   "project.status"?: Cond<string | number, "not">;
   /**
    * Filter by "relates to" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `=p` (same project), `=!p` (different project), `!p` (not in project), `*o` (related to open issue), `!o` (related to closed issue), `*` (any), `!*` (none)
    * Examples: `123`, `=p`, `*o`, `*`
@@ -392,6 +539,10 @@ export interface GetIssuesByProjectWhere {
   relates?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by "duplicates" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`
    * Examples: `123`, `*`
@@ -399,6 +550,10 @@ export interface GetIssuesByProjectWhere {
   duplicates?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by "duplicated by" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`
    * Examples: `123`, `*`
@@ -406,6 +561,10 @@ export interface GetIssuesByProjectWhere {
   duplicated?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by "blocks" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`
    * Examples: `123`, `*o`
@@ -413,6 +572,10 @@ export interface GetIssuesByProjectWhere {
   blocks?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by "blocked by" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`
    * Examples: `123`, `*o`
@@ -420,6 +583,10 @@ export interface GetIssuesByProjectWhere {
   blocked?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by "precedes" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`
    * Examples: `123`, `*`
@@ -427,6 +594,10 @@ export interface GetIssuesByProjectWhere {
   precedes?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by "follows" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`
    * Examples: `123`, `*`
@@ -434,6 +605,10 @@ export interface GetIssuesByProjectWhere {
   follows?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by "copied to" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`
    * Examples: `123`, `*`
@@ -441,6 +616,10 @@ export interface GetIssuesByProjectWhere {
   copied_to?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by "copied from" relation.
+   * Value: issue id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=`, `!`, `=p`, `=!p`, `!p`, `*o`, `!o`, `*`, `!*`
    * Examples: `123`, `*`
@@ -448,13 +627,19 @@ export interface GetIssuesByProjectWhere {
   copied_from?: Cond<string | number, "not" | "presence">;
   /**
    * Full-text search across all searchable fields.
+   * Value: text.
+   * Accepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `<operator>value`
    * Operators: `~` (contains all words), `*~` (contains any word), `!~` (not contains)
    * Examples: `~keyword`, `*~foo bar`
    */
   any_searchable?: Cond<string | number, "text">;
   /**
-   * Custom field filters by id, e.g. `cf_12`. Operators depend on the field format.
+   * Custom field by id, such as `cf_12`. Its format decides the operators.
+   * Value: per the field's format.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
    */
   [field: `cf_${number}`]: Cond<string | number, "not" | "range" | "text" | "presence">;
 }
@@ -507,9 +692,16 @@ export interface CreateIssueUnderProjectInput {
   uploads?: UploadEntry[];
 }
 
+/**
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.
+ */
 export interface GetTimeEntriesByProjectWhere {
   /**
    * Filter by user.
+   * Value: id, `me` for current user.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Special values: `me` (current user)
@@ -518,6 +710,10 @@ export interface GetTimeEntriesByProjectWhere {
   user_id?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by date spent.
+   * Value: date.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (on date), `>=`, `<=`, `><` (between, pipe-separated), `>t-` (more than N days ago), `<t-` (less than N days ago), `><t-` (between N and M days ago), `t-` (N days ago), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `*` (any), `!*` (none)
    * Examples: `=2024-01-01`, `>=2024-01-01`, `><2024-01-01|2024-12-31`, `>t-7`, `t`, `lw`
@@ -525,6 +721,10 @@ export interface GetTimeEntriesByProjectWhere {
   spent_on?: Cond<string | number, "range" | "presence">;
   /**
    * Filter by subproject.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Examples: `1|2`, `*`, `!*`
@@ -532,13 +732,21 @@ export interface GetTimeEntriesByProjectWhere {
   subproject_id?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by issue.
+   * Value: id, {contains: id} for the issue and its subtasks.
+   * Accepts a value, an array meaning any of them, or one of {contains: id}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (exact match), `~` (issue and its subtasks), `*` (any), `!*` (none)
    * Examples: `=1`, `~1`, `*`, `!*`
    */
-  issue_id?: Cond<string | number, "text" | "presence">;
+  issue_id?: Cond<string | number, "presence" | "contains">;
   /**
    * Filter by issue's tracker.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Examples: `1|2`, `!3`
@@ -546,6 +754,10 @@ export interface GetTimeEntriesByProjectWhere {
   "issue.tracker_id"?: Cond<string | number, "not">;
   /**
    * Filter by issue's status.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Examples: `1|2`, `!3`
@@ -553,6 +765,10 @@ export interface GetTimeEntriesByProjectWhere {
   "issue.status_id"?: Cond<string | number, "not">;
   /**
    * Filter by issue's target version.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Examples: `1|2`, `!3`
@@ -560,13 +776,21 @@ export interface GetTimeEntriesByProjectWhere {
   "issue.fixed_version_id"?: Cond<string | number, "not">;
   /**
    * Filter by issue's parent.
+   * Value: id, {contains: id} for a parent at any depth.
+   * Accepts a value, an array meaning any of them, or one of {contains: id}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (exact match), `~` (issue and its subtasks), `*` (any), `!*` (none)
    * Examples: `=1`, `~1`, `*`, `!*`
    */
-  "issue.parent_id"?: Cond<string | number, "text" | "presence">;
+  "issue.parent_id"?: Cond<string | number, "presence" | "contains">;
   /**
    * Filter by issue's category.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Examples: `1|2`, `!*`
@@ -574,6 +798,10 @@ export interface GetTimeEntriesByProjectWhere {
   "issue.category_id"?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by issue's subject.
+   * Value: text.
+   * Accepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `~` (contains, default), `*~` (contains any word), `!~` (does not contain), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)
    * Examples: `~keyword`, `^prefix`, `$suffix`
@@ -581,6 +809,10 @@ export interface GetTimeEntriesByProjectWhere {
   "issue.subject"?: Cond<string | number, "text" | "presence">;
   /**
    * Filter by user's group.
+   * Value: group id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Examples: `1|2`, `*`
@@ -588,6 +820,10 @@ export interface GetTimeEntriesByProjectWhere {
   "user.group"?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by user's role.
+   * Value: role id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Examples: `1|2`, `*`
@@ -595,6 +831,10 @@ export interface GetTimeEntriesByProjectWhere {
   "user.role"?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by author.
+   * Value: id, `me` for current user.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal), `*` (any), `!*` (none)
    * Special values: `me` (current user)
@@ -603,6 +843,10 @@ export interface GetTimeEntriesByProjectWhere {
   author_id?: Cond<string | number, "not" | "presence">;
   /**
    * Filter by activity.
+   * Value: id.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Examples: `1|2`, `!3`
@@ -610,6 +854,10 @@ export interface GetTimeEntriesByProjectWhere {
   activity_id?: Cond<string | number, "not">;
   /**
    * Filter by project's status.
+   * Value: `1` for active, `5` for closed.
+   * Accepts a value, an array meaning any of them, or one of {not: value or array}, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value[|value2|...]`
    * Operators: `=` (default), `!` (not equal)
    * Values: `1` (active), `5` (closed)
@@ -618,6 +866,10 @@ export interface GetTimeEntriesByProjectWhere {
   "project.status"?: Cond<string | number, "not">;
   /**
    * Filter by comments.
+   * Value: text.
+   * Accepts a value, an array meaning any of them, or one of {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `~` (contains, default), `*~` (contains any word), `!~` (does not contain), `^` (starts with), `$` (ends with), `*` (any), `!*` (none)
    * Examples: `~keyword`, `^prefix`
@@ -625,6 +877,10 @@ export interface GetTimeEntriesByProjectWhere {
   comments?: Cond<string | number, "text" | "presence">;
   /**
    * Filter by hours.
+   * Value: number.
+   * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
+   *
+   * `raw` takes Redmine's own syntax:
    * Format: `[operator]value`
    * Operators: `=` (default), `>=`, `<=`, `><` (between, pipe-separated), `*` (any), `!*` (none)
    * Examples: `=8`, `>=4`, `><1|8`

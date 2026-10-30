@@ -40,6 +40,13 @@ export interface Overlay {
   clearAsEmpty: Readonly<Record<string, readonly string[]>>;
   /** Filter name -> words compiled to operator codes. Words whose code a filter lacks are dropped. */
   filterWords: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /** Filter name -> what its value is, for filters whose spec neither lists values nor implies a kind. */
+  filterValues: Readonly<Record<string, string>>;
+  /**
+   * Filter name -> what `{contains: id}` matches. Redmine reads `~` on these id filters as a search of the issue
+   * tree: IssueQuery#sql_for_parent_id_field and #sql_for_child_id_field, TimeEntryQuery#sql_for_issue_id_field.
+   */
+  subtrees: Readonly<Record<string, string>>;
   /** operationId -> filter -> a sentence appended to the first line of the filter's description. */
   filterNotes: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /**
@@ -149,6 +156,21 @@ export const overlay: Overlay = {
       filters: ["issue.category_id", "subproject_id"],
     },
   ],
+  filterValues: {
+    "author.group": "group id",
+    member_of_group: "group id",
+    "user.group": "group id",
+    "author.role": "role id",
+    assigned_to_role: "role id",
+    "user.role": "role id",
+    twofa_scheme: "scheme name, such as `totp`",
+  },
+  subtrees: {
+    parent_id: "a parent at any depth",
+    child_id: "a child at any depth",
+    issue_id: "the issue and its subtasks",
+    "issue.parent_id": "a parent at any depth",
+  },
   filterNotes: {
     getIssues: { project_id: PROJECT_ID_NOTE },
     getTimeEntries: { project_id: PROJECT_ID_NOTE },

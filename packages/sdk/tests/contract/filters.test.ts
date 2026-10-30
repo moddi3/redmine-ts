@@ -1,5 +1,5 @@
 import { beforeAll, expect, it } from "vite-plus/test";
-import { RedmineError } from "../../src/index.ts";
+import { type GetIssuesWhere, RedmineError } from "../../src/index.ts";
 import {
   cleanups,
   clientFor,
@@ -20,6 +20,7 @@ describeServers("issue filters", (server) => {
   let b: number;
   let c: number;
   let d: number;
+  let closedId: number;
 
   beforeAll(async () => {
     const project = await freshProject(admin, cleanup, "filt");
@@ -38,6 +39,7 @@ describeServers("issue filters", (server) => {
     const statuses = await admin.issueStatuses.list().all();
     const closed = statuses.find((s) => s.is_closed);
     if (!closed) throw new Error("the seeded server has no closed status");
+    closedId = closed.id;
 
     const make = async (
       subject: string,
@@ -78,6 +80,70 @@ describeServers("issue filters", (server) => {
 
   it('status_id "closed" returns only the closed issue', async () => {
     expect(await found({ status_id: "closed" })).toEqual([c]);
+  });
+
+  it('status_id { not: "closed" } returns the open issues, and { not: "open" } the closed one', async () => {
+    expect(await found({ status_id: { not: "closed" } })).toEqual([a, b, d]);
+    expect(await found({ status_id: { not: "open" } })).toEqual([c]);
+  });
+
+  it("a status word next to a status id is refused, since Redmine reads o|id as every open issue", async () => {
+    const sent = (await admin.request({
+      method: "GET",
+      path: "issues.json",
+      query: { project_id: projectId, status_id: `o|${closedId}`, sort: "id" },
+    })) as { issues: { id: number }[] };
+    expect(ids(sent.issues)).toEqual([a, b, d]);
+
+    const error = await admin.issues
+      .list({ where: { project_id: projectId, status_id: ["open", closedId] } })
+      .all()
+      .catch((e: unknown) => e);
+    expect(RedmineError.is(error, "invalid_input")).toBe(true);
+  });
+
+  it("a scoped filter without one project is refused, since Redmine drops it and lists every category", async () => {
+    const category = await admin.issueCategories.create({ project_id: projectId, name: needle });
+    await admin.issues.update({ issue_id: a, category_id: category.id });
+    expect(await found({ category_id: category.id })).toEqual([a]);
+
+    const sent = (await admin.request({
+      method: "GET",
+      path: "issues.json",
+      query: { category_id: category.id, issue_id: `${a},${b}`, sort: "id" },
+    })) as { issues: { id: number }[] };
+    expect(ids(sent.issues)).toEqual([a, b]);
+
+    const error = await admin.issues
+      .list({ where: { category_id: category.id, issue_id: [a, b] } })
+      .all()
+      .catch((e: unknown) => e);
+    expect(RedmineError.is(error, "invalid_input")).toBe(true);
+  });
+
+  it("a saved query takes no filter but one project, since Redmine runs the query's own filters", async () => {
+    const queries = (await admin.request({ method: "GET", path: "queries.json" })) as {
+      queries: { id: number; name: string }[];
+    };
+    const reported = queries.queries.find((q) => q.name === "Reported issues");
+    if (!reported) throw new Error("the seeded server has no Reported issues query");
+    const listed = async (where: object) =>
+      ids(
+        await admin.issues
+          .list({ query_id: reported.id, where: { project_id: projectId, ...where }, sort: "id" })
+          .all(),
+      );
+    expect(await listed({})).toEqual([a, b, d]);
+
+    const sent = (await admin.request({
+      method: "GET",
+      path: "issues.json",
+      query: { query_id: reported.id, project_id: projectId, status_id: "c", sort: "id" },
+    })) as { issues: { id: number }[] };
+    expect(ids(sent.issues)).toEqual([a, b, d]);
+
+    const error = await listed({ status_id: "closed" }).catch((e: unknown) => e);
+    expect(RedmineError.is(error, "invalid_input")).toBe(true);
   });
 
   it('status_id "any" returns all four, while the unfiltered list is open-only', async () => {
@@ -135,5 +201,26 @@ describeServers("issue filters", (server) => {
       .catch((e: unknown) => e);
 
     expect(RedmineError.is(error, "invalid_input")).toBe(true);
+  });
+
+  it("parent_id { contains: id } returns every issue below that one", async () => {
+    const tree = await freshProject(admin, cleanup, "tree");
+    const make = async (subject: string, parent?: number) =>
+      (
+        await admin.issues.create({
+          project_id: tree.id,
+          subject,
+          ...(parent === undefined ? {} : { parent_issue_id: parent }),
+        })
+      ).id;
+    const root = await make("root");
+    const child = await make("child", root);
+    const grandchild = await make("grandchild", child);
+    const listed = async (where: Omit<GetIssuesWhere, "project_id">) =>
+      ids(await admin.issues.list({ where: { project_id: tree.id, ...where }, sort: "id" }).all());
+
+    expect(await listed({ parent_id: root })).toEqual([child]);
+    expect(await listed({ parent_id: { contains: root } })).toEqual([child, grandchild]);
+    expect(await listed({ child_id: { contains: grandchild } })).toEqual([root, child]);
   });
 });

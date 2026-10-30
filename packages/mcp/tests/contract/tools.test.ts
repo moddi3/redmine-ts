@@ -138,12 +138,51 @@ describeServers("generated tools", (server) => {
       parent: { id: parent.id },
     });
     const page = await ok("issues_list", {
-      where: { parent_id: parent.id as number },
+      where: { parent_id: { contains: parent.id as number } },
       fields: ["parent"],
     });
     expect(page.items).toEqual([
       expect.objectContaining({ id: child.id, parent: { id: parent.id } }),
     ]);
+  });
+
+  it("reads a status word under not as its opposite, and refuses the filters Redmine would drop", async () => {
+    const marker = `mcp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const closed = (await sdk.issueStatuses.list().all()).find((status) => status.is_closed);
+    if (!closed) throw new Error("the seeded server has no closed status");
+    const open = await ok("issues_create", {
+      project_id: server.projectIdentifier,
+      subject: `MCP open ${marker}`,
+    });
+    created.push(open.id as number);
+    const shut = await ok("issues_create", {
+      project_id: server.projectIdentifier,
+      subject: `MCP closed ${marker}`,
+    });
+    created.push(shut.id as number);
+    await sdk.issues.update({ issue_id: shut.id as number, status_id: closed.id });
+
+    const listed = async (status_id: unknown) => {
+      const page = await ok("issues_list", {
+        where: { project_id: server.projectIdentifier, subject: { contains: marker }, status_id },
+      });
+      return (page.items as { id: number }[]).map((item) => item.id);
+    };
+    expect(await listed({ not: "closed" })).toEqual([open.id]);
+    expect(await listed({ not: "open" })).toEqual([shut.id]);
+
+    const refused = async (args: Record<string, unknown>) => {
+      const result = await client.callTool({ name: "issues_list", arguments: args });
+      expect(result.isError).toBe(true);
+      return texts(result)[0];
+    };
+    expect(await refused({ where: { status_id: ["open", closed.id] } })).toContain("stand alone");
+    expect(await refused({ where: { category_id: 1 } })).toContain(
+      'filter "category_id" on getIssues works only next to one project_id',
+    );
+    expect(await refused({ query_id: 2, where: { status_id: "closed" } })).toContain(
+      "query_id on getIssues runs the saved query's own filters",
+    );
   });
 
   it("cuts a list page at a small result budget and pages through the rest with next_offset", async () => {

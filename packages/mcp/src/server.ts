@@ -154,7 +154,10 @@ export function createRedmineMcpServer(
     const invalid = await check(tool.inputSchema, args);
     if (invalid !== undefined) {
       const reason = (await explainFilters(tool.inputSchema, args.where)) ?? invalid;
-      return failure(redact, `Invalid arguments for ${name}: ${reason}. Nothing was sent.`);
+      return failure(
+        redact,
+        `Invalid arguments for ${name}: ${reason.replace(/\.?$/, ".")} Nothing was sent.`,
+      );
     }
     return call(tool, rm, args, context, observe, redact);
   });
@@ -246,7 +249,7 @@ async function explainFilters(schema: Schema, where: unknown): Promise<string | 
       return `unknown filter "${key}", known filters: ${known.join(", ")}`;
     }
     if ((await check(filter, condition)) !== undefined) {
-      return `where.${key} does not take that form. ${filter.description ?? ""}`.trim();
+      return `where.${key} does not take that form. ${filter.description?.replaceAll("\n", " ") ?? ""}`.trim();
     }
   }
   return undefined;
