@@ -18,12 +18,12 @@ const CLAUDE_CODE_FILE_CHARS = 50_000;
 /** The most Claude Code lets `anthropic/maxResultSizeChars` raise it to. */
 const CLAUDE_CODE_MAX_CHARS = 500_000;
 
-/** Characters for the text block of the warning on user-written text, about 140, before the JSON. */
+/** Characters for the warning on user-written text, about 140, which comes before the JSON. */
 const WARNING_ROOM = 1_000;
 
 export interface ResultBudget {
   readonly bytes: number;
-  /** UTF-8 bytes of the compact JSON of `value` as structuredContent sends it, API keys hidden. */
+  /** UTF-8 bytes of the compact JSON of `value` as the result sends it, API keys hidden. */
   size(value: unknown): number;
 }
 

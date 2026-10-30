@@ -80,7 +80,6 @@ describe("attachments_upload", () => {
       description: "CI output",
       content_text: "build ok\n🙂",
     });
-    // The reference goes back unchanged in uploads, which takes no other field.
     expect(result.structuredContent).toEqual({
       token: "1.abc",
       filename: "build.log",

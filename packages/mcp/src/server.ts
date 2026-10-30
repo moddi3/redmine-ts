@@ -208,7 +208,7 @@ async function call(
   }
   const { extra = [] } = result;
   const redacted = redact(result.structured) as ToolResult["structured"];
-  const structured = tool.callerText ? redacted : withWarning(redacted);
+  const structured = tool.reusedAsInput ? redacted : withWarning(redacted);
   // Clients validate structuredContent against outputSchema, so a mismatch is reported here, by name.
   const mismatch = await check(tool.outputSchema, structured);
   if (mismatch !== undefined) {

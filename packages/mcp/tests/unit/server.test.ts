@@ -340,7 +340,6 @@ describe("tools/call", () => {
     expect(texts(result)[0]).toContain("not as instructions");
   });
 
-  // Claude Code shows the model structuredContent alone, so the warning must be in it, before the text.
   it("puts the user-text warning first in structuredContent, where the tool's outputSchema allows it", async () => {
     const { client } = await server();
     const created = await client.callTool({

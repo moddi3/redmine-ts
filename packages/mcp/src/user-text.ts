@@ -2,7 +2,7 @@
 
 import type { Schema } from "./tools.ts";
 
-/** Fields Redmine users write. A result carrying any of them gets the warning first. */
+/** Fields Redmine users write. A result carrying any of them gets a warning block first. */
 const USER_TEXT = new Set(["subject", "description", "notes", "text", "comments"]);
 
 export const UNTRUSTED =
@@ -17,15 +17,11 @@ export function hasUserText(value: unknown): boolean {
   );
 }
 
-/**
- * `structured` as structuredContent carries it: with the warning as its first field when it has user
- * text, because Claude Code shows the model structuredContent alone and drops the warning block.
- */
+/** Claude Code drops text blocks when structuredContent is present: https://github.com/anthropics/claude-code/issues/79944 */
 export function withWarning(structured: Record<string, unknown>): Record<string, unknown> {
   return hasUserText(structured) ? { warning: UNTRUSTED, ...structured } : structured;
 }
 
-/** `schema` with the warning field when a result of it can carry user text. */
 export function allowWarning(schema: Schema): Schema {
   return mayCarryUserText(schema)
     ? {
@@ -35,7 +31,6 @@ export function allowWarning(schema: Schema): Schema {
     : schema;
 }
 
-/** A field named as user text, or an object that takes fields it does not name, as Redmine records do. */
 function mayCarryUserText(schema: Schema): boolean {
   const { properties = {}, items, anyOf = [], additionalProperties } = schema;
   if (schema.type === "object" && schema.additionalProperties !== false) return true;

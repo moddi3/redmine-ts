@@ -18,7 +18,7 @@ export interface WorkflowTool<I extends z.ZodObject, O extends z.ZodObject> {
   readonly tier: Tier;
   /** Set when the tool stops filling its result at the result budget. */
   readonly budgeted?: boolean;
-  readonly callerText?: boolean;
+  readonly reusedAsInput?: boolean;
   readonly run: (
     rm: Client,
     input: z.output<I>,
@@ -34,7 +34,7 @@ export function defineTool<I extends z.ZodObject, O extends z.ZodObject>(
   return {
     ...rest,
     inputSchema: jsonSchema(input, "input"),
-    outputSchema: tool.callerText ? outputSchema : allowWarning(outputSchema),
+    outputSchema: tool.reusedAsInput ? outputSchema : allowWarning(outputSchema),
     since: VERSIONS[0],
     until: null,
     // The server validated the arguments against inputSchema; parsing adds the defaults.
