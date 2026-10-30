@@ -17,13 +17,23 @@ export function hasUserText(value: unknown): boolean {
   );
 }
 
-/** Claude Code drops text blocks when structuredContent is present: https://github.com/anthropics/claude-code/issues/79944 */
+/**
+ * Claude Code drops text blocks when structuredContent is present: https://github.com/anthropics/claude-code/issues/79944
+ * The warning replaces a record's own `warning` field, such as a plugin's, so that one cannot stand in for it.
+ */
 export function withWarning(structured: Record<string, unknown>): Record<string, unknown> {
-  return hasUserText(structured) ? { warning: UNTRUSTED, ...structured } : structured;
+  if (!hasUserText(structured)) return structured;
+  const warned: Record<string, unknown> = { warning: UNTRUSTED, ...structured };
+  warned.warning = UNTRUSTED;
+  return warned;
 }
 
+/**
+ * A schema that takes fields it does not name takes `warning` already, a record's own of any type
+ * included, so only a closed one that may carry user text declares it.
+ */
 export function allowWarning(schema: Schema): Schema {
-  return mayCarryUserText(schema)
+  return schema.additionalProperties === false && mayCarryUserText(schema)
     ? {
         ...schema,
         properties: { ...schema.properties, warning: { type: "string", const: UNTRUSTED } },

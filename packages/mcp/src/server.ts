@@ -223,7 +223,7 @@ async function call(
   };
   return {
     content: [
-      ...(structured.warning === undefined ? [] : [{ type: "text" as const, text: UNTRUSTED }]),
+      ...(structured.warning === UNTRUSTED ? [{ type: "text" as const, text: UNTRUSTED }] : []),
       json,
       ...extra,
     ],
