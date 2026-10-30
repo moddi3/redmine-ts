@@ -10,9 +10,11 @@ import {
 } from "@modelcontextprotocol/client";
 import type { OAuthClientProvider } from "@modelcontextprotocol/client";
 import { createRedmine } from "@redmine-ts/sdk";
-import { expect, it, onTestFinished } from "vite-plus/test";
+import { expect, it, onTestFinished, vi } from "vite-plus/test";
 import { createRedmineMcpHandler, memoryGrantStore } from "../../src/index.ts";
 import { publicFetch } from "../../src/node.ts";
+import { clientKey, pkce, signJwt } from "../unit/oauth-fakes.ts";
+import type { ClientKey } from "../unit/oauth-fakes.ts";
 import { describeServers, expectAdminToolsHidden } from "./servers.ts";
 import type { ContractServer } from "./servers.ts";
 
@@ -274,7 +276,7 @@ describeServers("OAuth through Redmine", (server) => {
   const admin = createRedmine({ baseUrl: server.baseUrl, auth: { apiKey: server.adminKey } });
   // Nothing listens on this URL: the browser and the client hand its requests to the handler.
   const publicUrl = `http://127.0.0.1:3737${mount}`;
-  const handler = () =>
+  const handler = (fetchClientMetadata: typeof fetch = publicFetch) =>
     createRedmineMcpHandler({
       baseUrl: server.baseUrl,
       version: server.version,
@@ -283,7 +285,7 @@ describeServers("OAuth through Redmine", (server) => {
         secret: randomBytes(32).toString("base64"),
         redmineApp: REDMINE_APP,
         redminePublicUrl: browserUrl(server),
-        fetchClientMetadata: publicFetch,
+        fetchClientMetadata,
       },
     });
 
@@ -352,6 +354,113 @@ describeServers("OAuth through Redmine", (server) => {
     expect(advice).toContain("401 for my/page.js");
     expect(advice).toContain("end the path in .json");
     expect(await (await callTool("users_current")).text()).toContain('"login":"jsmith"');
+  });
+
+  it("refreshes a private_key_jwt client from the key set it kept while every key set fetch is taken", async () => {
+    // Redmine is real; the clients' documents and key sets are served here, as no public host serves them.
+    const clients = Array.from({ length: 5 }, (_, at) => ({
+      id: `https://keyed-${at}.example/client.json`,
+      jwks: `https://keyed-${at}.example/jwks.json`,
+      key: clientKey("RS256"),
+    }));
+    const held: (() => void)[] = [];
+    let holding = false;
+    const serve = handler(async (input, init) => {
+      const url = new Request(input, init).url;
+      const client = clients.find(({ id, jwks }) => url === id || url === jwks)!;
+      if (url === client.id) {
+        return Response.json({
+          client_id: url,
+          redirect_uris: [CLIENT_REDIRECT],
+          token_endpoint_auth_method: "private_key_jwt",
+          token_endpoint_auth_signing_alg: "RS256",
+          jwks_uri: client.jwks,
+        });
+      }
+      if (holding) await new Promise<void>((resolve) => held.push(resolve));
+      return Response.json({ keys: [client.key.jwk] });
+    });
+    const signIn = async (at: number) => {
+      const { verifier, challenge } = pkce();
+      const start = new URL(`${publicUrl}/oauth/authorize`);
+      const params = {
+        response_type: "code",
+        client_id: clients[at]!.id,
+        redirect_uri: CLIENT_REDIRECT,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: publicUrl,
+      };
+      for (const [name, value] of Object.entries(params)) start.searchParams.set(name, value);
+      const person = browser(new URL(publicUrl).origin, serve, JSMITH);
+      const landed = await person.signIn(start);
+      await person.signOut(browserUrl(server));
+      return {
+        grant_type: "authorization_code",
+        code: landed.searchParams.get("code")!,
+        code_verifier: verifier,
+        redirect_uri: CLIENT_REDIRECT,
+      };
+    };
+    const token = (
+      at: number,
+      grant: Record<string, string>,
+      key: ClientKey = clients[at]!.key,
+    ) => {
+      const now = Math.floor(Date.now() / 1000);
+      const { id } = clients[at]!;
+      const claims = { iss: id, sub: id, aud: publicUrl, iat: now, exp: now + 300 };
+      const jwt = signJwt(
+        { alg: "RS256", kid: key.kid, typ: "JWT" },
+        { ...claims, jti: randomBytes(16).toString("base64url") },
+        key.privateKey,
+      );
+      return serve(
+        new Request(`${publicUrl}/oauth/token`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: id,
+            client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            client_assertion: jwt,
+            ...grant,
+          }),
+        }),
+      );
+    };
+
+    const issued = await token(0, await signIn(0));
+    expect(issued.status).toBe(200);
+    const { refresh_token } = (await issued.json()) as { refresh_token: string };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => void vi.useRealTimers());
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    const codes = [];
+    for (const at of [1, 2, 3, 4]) codes.push(await signIn(at));
+    holding = true;
+    const filling = codes.map((grant, at) => token(at + 1, grant));
+    await vi.waitFor(() => expect(held).toHaveLength(4));
+
+    const busy = await token(0, { grant_type: "refresh_token", refresh_token }, clientKey("RS256"));
+    expect(busy.status).toBe(503);
+    expect(await busy.json()).toMatchObject({ error: "temporarily_unavailable" });
+    const renewed = await token(0, { grant_type: "refresh_token", refresh_token });
+    expect(renewed.status, "the kept key set answers").toBe(200);
+    const fresh = (await renewed.json()) as { token_type: string; access_token: string };
+    expect(fresh.token_type).toBe("Bearer");
+    const client = new Client({ name: "contract", version: "0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(publicUrl), {
+        fetch: (input, init) => serve(new Request(input, init)),
+        requestInit: { headers: { authorization: `Bearer ${fresh.access_token}` } },
+      }),
+    );
+    expect(
+      (await client.listTools()).tools.map(({ name }) => name),
+      "the renewed grant still says jsmith is no admin",
+    ).not.toContain("users_list");
+    for (const resume of held) resume();
+    expect((await Promise.all(filling)).map(({ status }) => status)).toEqual([200, 200, 200, 200]);
   });
 
   it("answers 401 invalid_token once the user revokes the sign-in in Redmine", async () => {
