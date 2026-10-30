@@ -514,15 +514,29 @@ describe("tools/call", () => {
   it("names an unknown argument and lists the arguments of every tool, before sending", async () => {
     const { client, seen } = await server();
     for (const tool of (await client.listTools()).tools) {
+      const takes = Object.keys(tool.inputSchema.properties ?? {});
+      if (takes.length === 0) continue;
       const result = await client.callTool({
         name: tool.name,
         arguments: { colour: "red" },
       });
       expect(texts(result)[0]).toBe(
-        `Invalid input for ${tool.name}: unknown argument "colour"; ${tool.name} takes ${Object.keys(tool.inputSchema.properties ?? {}).join(", ")}. Nothing was sent.`,
+        `Invalid input for ${tool.name}: unknown argument "colour"; ${tool.name} takes ${takes.join(", ")}. Nothing was sent.`,
       );
       expect(lastJson(result)).toMatchObject({ kind: "invalid_input" });
     }
+    expect(seen).toEqual([]);
+  });
+
+  it("says a tool without arguments takes none", async () => {
+    const { client, seen } = await server();
+    const result = await client.callTool({
+      name: "my_account_get",
+      arguments: { include: ["groups"] },
+    });
+    expect(texts(result)[0]).toBe(
+      'Invalid input for my_account_get: unknown argument "include"; my_account_get takes no arguments. Nothing was sent.',
+    );
     expect(seen).toEqual([]);
   });
 });

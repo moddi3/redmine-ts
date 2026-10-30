@@ -247,7 +247,8 @@ function unknownArguments(tool: ToolSpec, args: Record<string, unknown>): string
   const unknown = Object.keys(args).filter((key) => !Object.hasOwn(properties, key));
   if (unknown.length === 0) return undefined;
   const named = unknown.map((key) => `"${key}"`).join(", ");
-  return `unknown argument${unknown.length === 1 ? "" : "s"} ${named}; ${tool.name} takes ${Object.keys(properties).join(", ")}`;
+  const takes = Object.keys(properties).join(", ") || "no arguments";
+  return `unknown argument${unknown.length === 1 ? "" : "s"} ${named}; ${tool.name} takes ${takes}`;
 }
 
 /** Ajv reports every anyOf branch of a bad filter; an agent needs the forms the filter accepts. */
