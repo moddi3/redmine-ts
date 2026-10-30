@@ -15,6 +15,8 @@ export type CondText =
   | { not_contains: string }
   | { starts_with: string }
   | { ends_with: string };
+/** `contains` on an id filter, such as parent_id, takes the id and matches the issue tree around it. */
+export type CondContains<V> = { contains: V };
 export type CondPresence = { any: true } | { none: true };
 /**
  * Escape hatch in Redmine's short syntax, sent verbatim after `field=`. For relative dates ("<t-30") and rarer
@@ -24,14 +26,16 @@ export type CondRaw = { raw: string };
 
 /**
  * One condition grammar, narrowed per field by generated Where types. The generator maps documented
- * operators to capabilities: "!" not, ">= <= ><" range, "~ !~ ^ $" text, "* !*" presence.
+ * operators to capabilities: "!" not, ">= <= ><" range, "~ !~ ^ $" text, "* !*" presence, and "~" on an id
+ * filter contains.
  */
-export type Cond<V, Caps extends "not" | "range" | "text" | "presence" = never> =
+export type Cond<V, Caps extends "not" | "range" | "text" | "contains" | "presence" = never> =
   | Many<V>
   | CondRaw
   | ("not" extends Caps ? CondNot<V> : never)
   | ("range" extends Caps ? CondRange<V> : never)
   | ("text" extends Caps ? CondText : never)
+  | ("contains" extends Caps ? CondContains<V> : never)
   | ("presence" extends Caps ? CondPresence : never);
 
 export const CUSTOM_FIELD: FilterSpec = {

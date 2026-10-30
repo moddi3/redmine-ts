@@ -183,7 +183,7 @@ List tools filter with `where`, keyed by Redmine's filter names, such as `status
 { "where": { "status_id": "open", "assigned_to_id": "me", "tracker_id": [1, 2] } }
 ```
 
-An object with one operator picks another comparison: `{ "not": 3 }`, `{ "gte": "2026-10-01" }`, `{ "lte": 5 }`, `{ "between": [1, 10] }`, `{ "contains": "crash" }`, `{ "any": true }`, or `{ "none": true }`. Each filter accepts only the operators Redmine documents for it. `{ "raw": "<t-30" }` sends Redmine's own syntax unchanged, for relative dates and other rare cases. An unknown filter or an operator the filter does not take is refused before any request, with the forms the filter accepts.
+An object with one operator picks another comparison: `{ "not": 3 }`, `{ "gte": "2026-10-01" }`, `{ "lte": 5 }`, `{ "between": [1, 10] }`, `{ "contains": "crash" }`, `{ "any": true }`, or `{ "none": true }`. Each filter accepts only the operators Redmine documents for it. `{ "raw": "<t-30" }` sends Redmine's own syntax unchanged, for relative dates and other rare cases. An unknown filter or an operator the filter does not take is refused before any request, with the forms the filter accepts. So are filters Redmine would drop without an error: `category_id` without one `project_id`, and another filter next to `query_id`. A status word such as `"closed"` stands alone, and `{ "not": "closed" }` means open.
 
 In `tools/list`, `where` has one loose condition for every filter, and its description lists the filters in a table. Each line gives a filter, its value, and what it filters, under the operators it takes:
 

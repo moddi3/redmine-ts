@@ -75,6 +75,10 @@ export function filters() {
   rm.issues.list({ where: { status_id: { contains: "x" } } });
   // @ts-expect-error project_id documents no presence operators
   rm.issues.list({ where: { project_id: { any: true } } });
+  rm.issues.list({ where: { parent_id: { contains: 42 }, child_id: { contains: "7" } } });
+  rm.timeEntries.list({ where: { issue_id: { contains: 42 } } });
+  // @ts-expect-error parent_id takes contains as an id, and no other text operator
+  rm.issues.list({ where: { parent_id: { not_contains: 42 } } });
   // @ts-expect-error "nope" is not a filter
   rm.issues.list({ where: { nope: 1 } });
   // @ts-expect-error offset is owned by the pager

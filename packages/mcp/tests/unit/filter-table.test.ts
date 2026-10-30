@@ -121,7 +121,7 @@ describe("the filter table in where", () => {
     const row = (name: string) => rows.get(name)?.[0];
     expect(legend).toContain("Dates are YYYY-MM-DD.");
     expect(legend).toContain('{between: [from, to]}, {contains: "text"}');
-    expect(row("status_id")).toBe("status_id | id, `open`, `closed`, `any` | issue status");
+    expect(row("status_id")).toBe("status_id | id, `open`, `closed`, `any` alone | issue status");
     expect(row("tracker_id")).toBe("tracker_id | id");
     expect(row("created_on")).toBe("created_on | date | creation date");
     expect(row("estimated_hours")).toBe("estimated_hours | number");
@@ -136,13 +136,35 @@ describe("the filter table in where", () => {
     expect(row("last_updated_by")).toBe(
       "last_updated_by | id, `me` for current user | user who last updated the issue",
     );
-    expect(row("duplicated")).toBe('duplicated |  | "duplicated by" relation');
-    expect(row("project_id")).toContain(
-      "id, `mine` for projects where current user is a member, `bookmarks` for bookmarked projects | project. One id or identifier also matches subprojects",
+    expect(row("duplicated")).toBe('duplicated | issue id | "duplicated by" relation');
+    expect(row("member_of_group")).toBe("member_of_group | group id | assignee's group membership");
+    expect(row("assigned_to_role")).toBe("assigned_to_role | role id | assignee's role");
+    expect(row("category_id")).toBe("category_id | id | Needs one project_id");
+    expect(row("parent_id")).toBe(
+      "parent_id | id, {contains: id} for a parent at any depth | parent issue",
     );
-    expect(row("cf_<id>")).toContain("`cf_12`");
+    expect(row("project_id")).toContain(
+      "id, `mine` for projects where current user is a member, `bookmarks` for bookmarked projects | One id or identifier also matches subprojects",
+    );
+    expect(row("cf_<id>")).toBe(
+      "cf_<id> | per the field's format | Custom field by id, such as `cf_12`. Its format decides the operators",
+    );
     const users = table(where(tools, "users_list").description!).rows;
     expect(users.get("login")?.[0]).toBe("login | text");
+    expect(users.get("twofa_scheme")?.[0]).toBe(
+      "twofa_scheme | scheme name, such as `totp` | two-factor authentication scheme",
+    );
+    const entries = table(where(tools, "time_entries_list").description!).rows;
+    expect(entries.get("issue_id")?.[0]).toBe(
+      "issue_id | id, {contains: id} for the issue and its subtasks",
+    );
+  });
+
+  it.each(LISTS)("gives every filter of %s a value", async (name) => {
+    const { tools } = await listed();
+    for (const [key, [line]] of table(where(tools, name).description!).rows) {
+      expect(line.split(" | ")[1], key).toMatch(/\S/);
+    }
   });
 
   it("keeps wire syntax out of each filter's own description, which a bad-filter error quotes", () => {
@@ -202,13 +224,13 @@ describe("calls with where", () => {
     const refuse = async (filters: Record<string, unknown>) =>
       texts(await client.callTool({ name: "issues_list", arguments: { where: filters } }))[0];
     expect(await refuse({ assigned_to_id: { gte: 3 } })).toBe(
-      'Invalid arguments for issues_list: where.assigned_to_id does not take that form. Filter by assignee. Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date. Special values: `me` (current user). Nothing was sent.',
+      'Invalid arguments for issues_list: where.assigned_to_id does not take that form. Filter by assignee. Value: id, `me` for current user. Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date. Nothing was sent.',
     );
     expect(await refuse({ cf_12: { between: [1] } })).toContain(
-      "where.cf_12 does not take that form. Custom field filter by id",
+      "where.cf_12 does not take that form. Custom field by id",
     );
     expect(await refuse({ status_id: [] })).toContain(
-      'where.status_id does not take that form. Filter by issue status. Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {raw: "..."} in Redmine\'s own syntax, such as a relative date. Also "open", "closed", "any".',
+      'where.status_id does not take that form. Filter by issue status. Value: id, `open`, `closed`, `any` alone. Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
     );
     expect(await refuse({ state: "open" })).toMatch(
       /^Invalid arguments for issues_list: unknown filter "state", known filters: issue_id, project_id, .*, cf_<id>\. Nothing was sent\.$/,
@@ -221,12 +243,17 @@ describe("calls with where", () => {
     const result = await client.callTool({
       name: "issues_list",
       arguments: {
-        where: { cf_12: { gte: 5 }, updated_on: { between: ["2026-10-01", "2026-10-31"] } },
+        where: {
+          cf_12: { gte: 5 },
+          updated_on: { between: ["2026-10-01", "2026-10-31"] },
+          parent_id: { contains: 42 },
+        },
       },
     });
     expect(result.isError).toBeFalsy();
     const query = new URL(sent.at(-1)!.url).searchParams;
     expect(query.get("cf_12")).toBe(">=5");
     expect(query.get("updated_on")).toBe("><2026-10-01|2026-10-31");
+    expect(query.get("parent_id")).toBe("~42");
   });
 });
