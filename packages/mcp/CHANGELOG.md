@@ -1,5 +1,15 @@
 # @redmine-ts/mcp
 
+## 0.7.0
+
+### Minor Changes
+
+- b24928a: Following a clip marker now returns the issue as `{id, updated_on}`. An `issue_context` call with `journals: 0` and ids in `full`, which a clipped journal's marker names, returns those journals with the issue as `{id, updated_on}`, as a `journals_before` page does. It leaves out the rest of the issue and no longer lists the subtasks. A call with `journals` above 0, or without `full`, still returns the whole issue.
+
+  The `issue_context` description now says that journals come oldest first, and that each journal's `note` is N in the issue page's `#note-N`, lower than Redmine's own number after a journal hidden from the key. Clients that do not pass output schemas to the model now get this too.
+
+- 608ecff: `issues_update` and `issues_transition` with `notes` now return `journal: {id, note}`, the journal that the notes were added in. Pass `id` to `journals_update` to edit the notes, and cite `note` as `#note-N`, without reading the issue again. To find the journal, each such call reads the issue's journals before and after the update. When it cannot tell which journal is the right one, or a read fails, the result is `{ok: true}` as before, with `status` for `issues_transition`.
+
 ## 0.6.0
 
 ### Minor Changes
