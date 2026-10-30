@@ -1499,6 +1499,84 @@ describe("metadata document fetches", () => {
     expect(fetches).toBe(2);
   });
 
+  it("shares a client's running fetch while every slot is taken", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const held = heldDocuments();
+    const setupped = setup({}, { fetchClientMetadata: held.fetchClientMetadata });
+    const [client, ...others] = ids("full", 8);
+    const pages = [client!, ...others].map((id) => authorizePage(setupped, id));
+    await vi.waitFor(() => expect(held.open()).toBe(8));
+    const sharing = authorizePage(setupped, client!);
+    await vi.waitFor(() =>
+      expect(vi.getTimerCount(), "the sign-in waits on the running fetch").toBe(9),
+    );
+    held.release();
+    expect((await sharing).status).toBe(200);
+    expect((await Promise.all(pages)).map(({ status }) => status)).toEqual(Array(8).fill(200));
+    expect(held.fetched.filter((url) => url === client)).toHaveLength(1);
+  });
+
+  it("keeps a client's newer document when an older fetch of it lands one after its time", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const answers: ((response: Response) => void)[] = [];
+    const setupped = setup(
+      {},
+      { fetchClientMetadata: () => new Promise<Response>((resolve) => answers.push(resolve)) },
+    );
+    const named = (client_name: string) =>
+      Response.json({ client_id: CLAUDE, client_name, redirect_uris: [CLAUDE_REDIRECT] });
+    const lapsed = authorizePage(setupped, CLAUDE);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect((await lapsed).status).toBe(503);
+    const newer = authorizePage(setupped, CLAUDE);
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    answers[1]!(named("Newer"));
+    expect(await (await newer).text()).toContain("Newer");
+    answers[0]!(named("Older"));
+    await vi.advanceTimersByTimeAsync(0);
+    const page = await (await authorizePage(setupped, CLAUDE)).text();
+    expect(page).toContain("Newer");
+    expect(page).not.toContain("Older");
+    expect(answers).toHaveLength(2);
+  });
+
+  it("drops a kept document whose fetch fails after its time, as one that fails in time", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const held = heldDocuments();
+    let hang = false;
+    const answers: ((response: Response) => void)[] = [];
+    const setupped = setup(
+      {},
+      {
+        fetchClientMetadata: (input, init) => {
+          if (new Request(input, init).url !== CLAUDE) return held.fetchClientMetadata(input, init);
+          return hang
+            ? new Promise<Response>((resolve) => answers.push(resolve))
+            : Promise.resolve(
+                Response.json({ client_id: CLAUDE, redirect_uris: [CLAUDE_REDIRECT] }),
+              );
+        },
+      },
+    );
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(200);
+    hang = true;
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    const lapsed = authorizePage(setupped, CLAUDE);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect((await lapsed).status, "the kept document serves while its fetch is late").toBe(200);
+    const other = authorizePage(setupped, ids("other", 1)[0]!);
+    await vi.waitFor(() => expect(held.open()).toBe(1));
+    held.release();
+    expect((await other).status).toBe(200);
+    answers[0]!(new Response(null, { status: 404 }));
+    await vi.advanceTimersByTimeAsync(0);
+    const filling = ids("fill", 8).map((id) => authorizePage(setupped, id));
+    await vi.waitFor(() => expect(held.open()).toBe(8));
+    expect((await authorizePage(setupped, CLAUDE)).status).toBe(503);
+    held.release();
+    await Promise.all(filling);
+  });
+
   it("keeps the 256 newest documents, and a refetched one counts as new", async () => {
     const setupped = setup();
     const others = ids("kept", 256);
@@ -1632,6 +1710,42 @@ function renew(setupped: Setup, refreshToken: string, params: Record<string, str
 
 const fetchesOf = (setupped: Setup, url: string) =>
   setupped.fetched.filter((fetched) => fetched === url).length;
+
+/**
+ * `count` clients that declare private_key_jwt, each with its own key set URL. A key set fetch waits
+ * in `pending` until the test answers it.
+ */
+function heldKeySets(count: number) {
+  const clients = ids("keyed", count).map((id) => ({
+    id,
+    jwks: id.replace("meta.json", "jwks.json"),
+    key: clientKey("RS256"),
+  }));
+  const pending: { url: string; answer: (keys: object[]) => void }[] = [];
+  const setupped = setup(
+    {},
+    {
+      fetchClientMetadata: async (input, init) => {
+        const url = new Request(input, init).url;
+        const client = clients.find(({ id }) => id === url);
+        if (client !== undefined) {
+          return Response.json({ ...CHATGPT_DOCUMENT, client_id: url, jwks_uri: client.jwks });
+        }
+        return new Promise((resolve) =>
+          pending.push({ url, answer: (keys) => resolve(Response.json({ keys })) }),
+        );
+      },
+    },
+  );
+  const signedIn = (at: number) =>
+    signIn(setupped, { clientId: clients[at]!.id, redirectUri: CHATGPT_REDIRECT });
+  const proved = (at: number, key = clients[at]!.key) => ({
+    client_id: clients[at]!.id,
+    ...proof(assertion(key, { iss: clients[at]!.id, sub: clients[at]!.id })),
+  });
+  const fetches = (at: number) => pending.filter(({ url }) => url === clients[at]!.jwks).length;
+  return { setupped, clients, pending, signedIn, proved, fetches };
+}
 
 describe("private_key_jwt clients", () => {
   it.each([
@@ -1966,6 +2080,98 @@ describe("private_key_jwt clients", () => {
       200,
     );
     expect(documentFetches).toBe(2);
+  });
+
+  it("shares a client's running key set fetch while every slot is taken", async () => {
+    const held = heldKeySets(4);
+    const signed: Awaited<ReturnType<typeof held.signedIn>>[] = [];
+    for (const at of [0, 1, 2, 3, 0]) signed.push(await held.signedIn(at));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const first = [0, 1, 2, 3].map((at) => redeem(held.setupped, signed[at]!, held.proved(at)));
+    await vi.waitFor(() => expect(held.pending).toHaveLength(4));
+    const timers = vi.getTimerCount();
+    const sharing = redeem(held.setupped, signed[4]!, held.proved(0));
+    await vi.waitFor(() =>
+      expect(vi.getTimerCount(), "the token request waits on the running fetch").toBe(timers + 1),
+    );
+    for (const { url, answer } of held.pending) {
+      answer([held.clients.find(({ jwks }) => jwks === url)!.key.jwk]);
+    }
+    const answers = await Promise.all([...first, sharing]);
+    expect(answers.map(({ status }) => status)).toEqual(Array(5).fill(200));
+    expect(held.fetches(0)).toBe(1);
+  });
+
+  it("keeps a client's newer key set when an older fetch of it lands after its time", async () => {
+    const held = heldKeySets(1);
+    const signed = [await held.signedIn(0), await held.signedIn(0)];
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const rotated = clientKey("RS256");
+    const lapsed = redeem(held.setupped, signed[0]!, held.proved(0));
+    await vi.waitFor(() => expect(held.pending).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(6000);
+    expect((await lapsed).status).toBe(503);
+    const newer = redeem(held.setupped, signed[1]!, held.proved(0, rotated));
+    await vi.waitFor(() => expect(held.pending).toHaveLength(2));
+    held.pending[1]!.answer([rotated.jwk]);
+    const issued = await newer;
+    expect(issued.status).toBe(200);
+    held.pending[0]!.answer([held.clients[0]!.key.jwk]);
+    await vi.advanceTimersByTimeAsync(0);
+    const renewed = await renew(held.setupped, issued.body.refresh_token, held.proved(0, rotated));
+    expect(renewed.status).toBe(200);
+    expect(held.pending).toHaveLength(2);
+  });
+
+  it("answers from the key set fetched within the hour while no fetch can, if it holds the assertion's kid", async () => {
+    const held = heldKeySets(5);
+    const tokens: string[] = [];
+    for (const at of [0, 1, 2, 3, 4]) {
+      const issued = redeem(held.setupped, await held.signedIn(at), held.proved(at));
+      await vi.waitFor(() => expect(held.pending).toHaveLength(at + 1));
+      held.pending[at]!.answer([held.clients[at]!.key.jwk]);
+      tokens.push((await issued).body.refresh_token);
+    }
+    const refresh = async (at: number, key?: ClientKey) => {
+      const answer = await renew(held.setupped, tokens[at]!, held.proved(at, key));
+      if (answer.status === 200) tokens[at] = answer.body.refresh_token;
+      return answer.status;
+    };
+    const fill = async () => {
+      const from = held.pending.length;
+      const filling = [1, 2, 3, 4].map((at) => refresh(at));
+      await vi.waitFor(() => expect(held.pending).toHaveLength(from + 4));
+      return async () => {
+        for (const { url, answer } of held.pending.slice(from)) {
+          answer([held.clients.find(({ jwks }) => jwks === url)!.key.jwk]);
+        }
+        expect(await Promise.all(filling)).toEqual([200, 200, 200, 200]);
+      };
+    };
+    const rotated = clientKey("RS256");
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const start = Date.now();
+
+    vi.setSystemTime(start + 10 * 60_000);
+    let drain = await fill();
+    expect(await refresh(0), "every slot is taken").toBe(200);
+    expect(await refresh(0, rotated), "a kid the kept set lacks").toBe(503);
+    await drain();
+    expect(held.fetches(0)).toBe(1);
+
+    const timers = vi.getTimerCount();
+    const lapsing = [refresh(0, rotated), refresh(0)];
+    await vi.waitFor(() => expect(vi.getTimerCount(), "both wait on one fetch").toBe(timers + 2));
+    expect(held.fetches(0)).toBe(2);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(await Promise.all(lapsing), "the fetch has not settled after 6 seconds").toEqual([
+      503, 200,
+    ]);
+
+    vi.setSystemTime(start + 61 * 60_000);
+    drain = await fill();
+    expect(await refresh(0), "the kept set is over an hour old").toBe(503);
+    await drain();
   });
 });
 
