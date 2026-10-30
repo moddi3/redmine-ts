@@ -43,7 +43,7 @@ export function defineTool<I extends z.ZodObject, O extends z.ZodObject>(
 }
 
 /** z.int() bounds every integer to the safe range, which tells an agent nothing. */
-function jsonSchema(schema: z.ZodObject, io: "input" | "output"): Schema {
+export function jsonSchema(schema: z.ZodObject, io: "input" | "output"): Schema {
   return portable(
     z.toJSONSchema(schema, {
       io,

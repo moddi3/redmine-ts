@@ -132,6 +132,7 @@ export function createRedmineMcpServer(
   });
   const redact = redactor(config.auth, dangerouslyRevealApiKeys === true);
   const context: ToolContext = {
+    access,
     lookups: createLookups(rm),
     files,
     budget: resultBudget(maxResultBytes, redact),

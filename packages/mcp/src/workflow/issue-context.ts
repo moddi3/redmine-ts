@@ -14,7 +14,7 @@ import { UNTRUSTED } from "../user-text.ts";
 import { clip, journalRest, TEXT_CAP } from "./clip.ts";
 import { bestEffort, defineTool, ToolError } from "./define.ts";
 import { LINE_CAP } from "./diff.ts";
-import { changesOf, FROM_TO_CAP, RELATION_PHRASES, resolveNames } from "./journals.ts";
+import { changesOf, FROM_TO_CAP, noteNumber, RELATION_PHRASES, resolveNames } from "./journals.ts";
 import type { Lookups } from "./lookups.ts";
 
 export const DEFAULT_JOURNALS = 20;
@@ -355,7 +355,7 @@ async function journalPage(
       const rest = whole.has(journal.id) ? undefined : journalRest(issue.id, journal.id);
       const entry: IssueContext["journals"][number] = {
         id: journal.id,
-        note: all.indexOf(journal) + 1,
+        note: noteNumber(all, journal),
         user: journal.user?.name ?? null,
         created_on: journal.created_on,
         notes: clip(journal.notes ?? "", TEXT_CAP, rest),

@@ -91,9 +91,7 @@ describeServers("generated tools", (server) => {
 
     expect(
       await ok("issues_update", { issue_id, notes: "Updated over MCP.", done_ratio: 30 }),
-    ).toEqual({
-      ok: true,
-    });
+    ).toEqual({ ok: true, journal: { id: expect.any(Number), note: 1 } });
     const updated = await client.callTool({
       name: "issues_get",
       arguments: { issue_id, include: ["journals"] },

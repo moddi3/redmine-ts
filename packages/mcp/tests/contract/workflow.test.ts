@@ -401,6 +401,49 @@ describeServers("workflow tools", (server) => {
     ]);
   });
 
+  it("returns the journal that notes were added in, which journals_update edits and issue_context numbers the same", async () => {
+    const issue = await sdk.issues.create({
+      project_id: server.projectIdentifier,
+      subject: `MCP added journals ${marker}`,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+    await sdk.issues.update({ issue_id: issue.id, notes: "Before the MCP." });
+
+    const notes = "Line one\r\nline two\n";
+    const updated = await value("issues_update", { issue_id: issue.id, notes });
+    const again = await value("issues_update", { issue_id: issue.id, notes });
+    const moved = await value("issues_transition", {
+      issue_id: issue.id,
+      status: "In Progress",
+      notes: "Started.",
+    });
+    const blank = await value("issues_update", {
+      issue_id: issue.id,
+      notes: " \n",
+      done_ratio: 10,
+    });
+    expect([updated, again, moved, blank]).toEqual([
+      { ok: true, journal: { id: expect.any(Number), note: 2 } },
+      { ok: true, journal: { id: expect.any(Number), note: 3 } },
+      { ok: true, status: expect.any(Object), journal: { id: expect.any(Number), note: 4 } },
+      { ok: true },
+    ]);
+
+    await value("journals_update", { journal_id: moved.journal.id, notes: "Started, edited." });
+    const context = await value("issue_context", { issue_id: issue.id });
+    const shown = new Map(
+      context.journals.map((journal: { id: number; note: number; notes: string }) => [
+        journal.id,
+        [journal.note, journal.notes],
+      ]),
+    );
+    expect([updated, again, moved].map(({ journal }) => shown.get(journal.id))).toEqual([
+      [2, notes],
+      [3, notes],
+      [4, "Started, edited."],
+    ]);
+  });
+
   it("labels a subtask added and removed as Subtask on the parent, in issue_context and the resource", async () => {
     const parent = await value("issues_create", {
       project_id: server.projectIdentifier,
