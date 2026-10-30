@@ -8,6 +8,7 @@
 # changes, and the Redmine application the run creates is deleted at the end.
 set -euo pipefail
 set -m # background jobs get their own process group, so cleanup stops their children too
+# Each job is disowned once started, so bash does not report it as Terminated when cleanup kills it.
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 out="$root/packages/mcp/docs/oauth"
@@ -59,6 +60,7 @@ REDMINE_URL=$redmine_url REDMINE_MCP_PUBLIC_URL=$mcp_url REDMINE_MCP_AUTH_SECRET
   node "$root/packages/mcp/dist/cli.mjs" --http --no-delete \
   --allow-origin http://localhost:6274 --allow-origin http://127.0.0.1:6274 >"$tmp/server.log" 2>&1 &
 jobs_started+=($!)
+disown
 until_ok curl -sf "$mcp_url/.well-known/oauth-protected-resource"
 
 echo '{ "mcpServers": {} }' >"$tmp/mcp.json"
@@ -66,6 +68,7 @@ echo '{ "mcpServers": {} }' >"$tmp/mcp.json"
   MCP_INSPECTOR_SECRET_STORE=memory MCP_AUTO_OPEN_ENABLED=false \
   vp dlx "@modelcontextprotocol/inspector@$inspector_version" >"$tmp/inspector.log" 2>&1) &
 jobs_started+=($!)
+disown
 until_ok grep -qE 'MCP_INSPECTOR_API_TOKEN=' "$tmp/inspector.log"
 inspector=$(grep -oE 'http://[^ ]*:6274[^ ]*MCP_INSPECTOR_API_TOKEN=[0-9a-f]+' "$tmp/inspector.log" | tail -1)
 
@@ -87,6 +90,7 @@ agent-browser open "$inspector" >/dev/null
 agent-browser set viewport 1280 800 1 >/dev/null
 node "$root/scripts/oauth-walkthrough/bypass-csp.mjs" "$(agent-browser get cdp-url)" &
 jobs_started+=($!)
+disown
 pause 1.5
 agent-browser record start "$tmp/sign-in.mp4" --cursor >/dev/null
 pause 2
