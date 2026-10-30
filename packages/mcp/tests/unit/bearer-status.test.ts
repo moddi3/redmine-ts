@@ -462,7 +462,7 @@ describe("a bearer subscriptions/listen", () => {
     const text = await response.text();
     expect(text).toContain("notifications/subscriptions/acknowledged");
     expect(text).toContain('"resultType":"complete"');
-  }, 2000);
+  });
 
   it("is passed on as a stream that stays open when the server honors the filter", async () => {
     const honoring = vi
@@ -487,7 +487,7 @@ describe("a bearer subscriptions/listen", () => {
     } finally {
       honoring.mockRestore();
     }
-  }, 2000);
+  });
 
   it("is held like any call when a 2025-era request names it only in Mcp-Method", async () => {
     const { send } = gated();

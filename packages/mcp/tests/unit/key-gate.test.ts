@@ -1,5 +1,5 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { createRedmineMcpHandler } from "../../src/index.ts";
 import type { RedmineMcpHandlerOptions } from "../../src/index.ts";
 
@@ -141,20 +141,33 @@ describe("an X-Redmine-API-Key that Redmine refuses", () => {
   );
 
   it("gets 401 for a body past 64 KiB that stalls, without waiting for the rest", async () => {
-    const { handle } = handler();
-    const response = await handle(post("bogus", [toolCall(100 * 1024)], { end: false }));
-    expect(response.status).toBe(401);
-  }, 1000);
+    vi.useFakeTimers();
+    try {
+      const { handle } = handler();
+      const started = Date.now();
+      const response = handle(post("bogus", [toolCall(100 * 1024)], { end: false }));
+      await vi.runAllTimersAsync();
+      expect((await response).status).toBe(401);
+      expect(Date.now() - started).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-  it("gets 401 about a second after a small body stalls", async () => {
-    const { handle, calls } = handler();
-    const started = Date.now();
-    const response = await handle(post("bogus", ['{"jsonrpc":"2.0","id":7,'], { end: false }));
-    expect(response.status).toBe(401);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(1000);
-    expect(Date.now() - started).toBeLessThan(1900);
-    expect(calls).toEqual(["/users/current.json"]);
-  }, 3000);
+  it("gets 401 a second after a small body stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      const { handle, calls } = handler();
+      const started = Date.now();
+      const response = handle(post("bogus", ['{"jsonrpc":"2.0","id":7,'], { end: false }));
+      await vi.runAllTimersAsync();
+      expect((await response).status).toBe(401);
+      expect(Date.now() - started).toBe(1000);
+      expect(calls).toEqual(["/users/current.json"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("holds the rest of a small body while a slow key check runs, so no tool runs", async () => {
     const { handle, calls } = handler({ checkDelayMs: 500 });
@@ -162,7 +175,7 @@ describe("an X-Redmine-API-Key that Redmine refuses", () => {
     const response = await handle(post("bogus", [body.slice(0, 30), 1300, body.slice(30)]));
     expect(response.status).toBe(401);
     expect(calls).toEqual(["/users/current.json"]);
-  }, 4000);
+  });
 
   it.each(["legacy", "modern"] as const)(
     "gets 401 on the %s leg for a tool call past 64 KiB, before the tool runs",
@@ -216,7 +229,7 @@ describe("an X-Redmine-API-Key that Redmine refuses", () => {
     expect((await handle(text)).status).toBe(415);
     await sleep(1200);
     expect(calls).toEqual([]);
-  }, 3000);
+  });
 });
 
 describe("an X-Redmine-API-Key when Redmine does not answer", () => {
@@ -241,7 +254,7 @@ describe("an X-Redmine-API-Key when Redmine does not answer", () => {
     const body = toolsList();
     const response = await handle(post("good-key", [body.slice(0, 30), 1300, body.slice(30)]));
     expect(response.status).toBe(503);
-  }, 4000);
+  });
 
   it("logs nothing when the client leaves during the key check", async () => {
     const { handle, errors } = handler({ checkDelayMs: 1000 });
@@ -290,7 +303,7 @@ describe("an X-Redmine-API-Key that Redmine accepts", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("attachments_upload");
     expect(calls).toEqual(["/users/current.json"]);
-  }, 4000);
+  });
 
   it("serves a 2025-03-26 batch past 64 KiB after one key check", async () => {
     const { handle, calls } = handler();

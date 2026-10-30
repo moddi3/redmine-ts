@@ -1,0 +1,160 @@
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+type Holder =
+  | { kind: "free" }
+  | { kind: "no-pid"; since: Date }
+  | { kind: "run"; pid: number; by: string; since: string; alive: boolean };
+
+interface PidFile {
+  pid: number;
+  by: string;
+  since: string;
+}
+
+interface LockOptions {
+  timeoutMs?: number;
+  pollMs?: number;
+  log?: (line: string) => void;
+}
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * The three Docker Redmines are one per machine, but agents run in separate git worktrees, so the lock
+ * lives in the main checkout's .redmine, where the manual `mkdir` protocol takes it too.
+ */
+function contractLockPath(): string {
+  try {
+    const common = execFileSync(
+      "git",
+      ["-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    return join(dirname(common), ".redmine", "contract.lock");
+  } catch {
+    return join(root, ".redmine", "contract.lock");
+  }
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function holder(lock: string): Holder {
+  let since: Date;
+  try {
+    since = statSync(lock).mtime;
+  } catch {
+    return { kind: "free" };
+  }
+  try {
+    const file: PidFile = JSON.parse(readFileSync(join(lock, "pid"), "utf8"));
+    return { kind: "run", ...file, alive: alive(file.pid) };
+  } catch {
+    return { kind: "no-pid", since };
+  }
+}
+
+function holdingLine(lock: string, held: Exclude<Holder, { kind: "free" }>): string {
+  return held.kind === "no-pid"
+    ? `${lock} was made by hand at ${held.since.toISOString()} and is held until its rmdir`
+    : `${lock} is held by pid ${held.pid} (${held.by}) since ${held.since}`;
+}
+
+function pidFile(): string {
+  const file: PidFile = { pid: process.pid, by: process.cwd(), since: new Date().toISOString() };
+  return JSON.stringify(file) + "\n";
+}
+
+/**
+ * Takes a stale lock in place, so that no other run can `mkdir` the directory in between. The
+ * `takeover` directory lets one of several waiters that saw the same dead pid win.
+ */
+function takeOver(lock: string, stalePid: number): boolean {
+  const takeover = join(lock, "takeover");
+  try {
+    mkdirSync(takeover);
+  } catch {
+    return false;
+  }
+  try {
+    const now = holder(lock);
+    if (now.kind !== "run" || now.pid !== stalePid) return false;
+    writeFileSync(join(lock, "pid"), pidFile());
+    return true;
+  } finally {
+    rmdirSync(takeover);
+  }
+}
+
+function tryTake(lock: string): boolean {
+  try {
+    mkdirSync(lock);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+  writeFileSync(join(lock, "pid"), pidFile(), { flag: "wx" });
+  return true;
+}
+
+function release(lock: string): void {
+  const held = holder(lock);
+  if (held.kind !== "run" || held.pid !== process.pid) return;
+  rmSync(lock, { recursive: true });
+}
+
+export async function acquireContractLock(
+  lock: string,
+  {
+    timeoutMs = 30 * 60_000,
+    pollMs = 2_000,
+    log = (line) => process.stderr.write(`${line}\n`),
+  }: LockOptions = {},
+): Promise<() => void> {
+  mkdirSync(dirname(lock), { recursive: true });
+  const deadline = Date.now() + timeoutMs;
+  let said = "";
+  for (;;) {
+    if (tryTake(lock)) return () => release(lock);
+    const held = holder(lock);
+    if (held.kind === "free") continue;
+    // A root `vp test` sets up both packages' contract projects in one process. Vitest tears them down
+    // after every test has run, so the first one's release covers both.
+    if (held.kind === "run" && held.pid === process.pid) return () => {};
+    if (held.kind === "run" && !held.alive && takeOver(lock, held.pid)) {
+      log(`${lock}: took over from pid ${held.pid}, which is gone`);
+      return () => release(lock);
+    }
+    const line = holdingLine(lock, held);
+    if (line !== said) log(`${line}; waiting`);
+    said = line;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Gave up on the contract lock after ${timeoutMs / 1000} s: ${line}. Remove it by hand only if nothing runs the contract suites.`,
+      );
+    }
+    await new Promise((done) => setTimeout(done, pollMs));
+  }
+}
+
+export default async function setup(): Promise<(() => void) | undefined> {
+  if (!existsSync(join(root, ".redmine", "env.json"))) return undefined;
+  return acquireContractLock(contractLockPath());
+}

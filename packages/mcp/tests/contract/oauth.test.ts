@@ -9,7 +9,8 @@ import {
   UnauthorizedError,
 } from "@modelcontextprotocol/client";
 import type { OAuthClientProvider } from "@modelcontextprotocol/client";
-import { expect, it } from "vite-plus/test";
+import { createRedmine } from "@redmine-ts/sdk";
+import { expect, it, onTestFinished } from "vite-plus/test";
 import { createRedmineMcpHandler } from "../../src/index.ts";
 import { publicFetch } from "../../src/node.ts";
 import { describeServers } from "./servers.ts";
@@ -20,13 +21,14 @@ const REDMINE_APP = {
   clientId: "redmine-mcp-contract",
   clientSecret: "redmine-mcp-contract-secret",
 };
-const JSMITH = { username: "jsmith", password: "sdk-user-pass-1" };
+const JSMITH: Account = { username: "jsmith", password: "sdk-user-pass-1" };
 /** The MCP client's loopback callback, which nothing listens on: the browser below stops there. */
 const CLIENT_REDIRECT = "http://127.0.0.1:43210/callback";
 
 const cli = fileURLToPath(new URL("../../dist/cli.mjs", import.meta.url));
 
 type Serve = (request: Request) => Promise<Response>;
+type Account = { username: string; password: string };
 
 /** Browsers reach Redmine at 127.0.0.1 while the server keeps the configured localhost URL. */
 const browserUrl = (server: ContractServer) => server.baseUrl.replace("localhost", "127.0.0.1");
@@ -36,7 +38,7 @@ const browserUrl = (server: ContractServer) => server.baseUrl.replace("localhost
  * the rest to the network; it answers our consent page, Redmine's login and Redmine's consent, and
  * stops at the client's redirect URI.
  */
-function browser(publicOrigin: string, serve: Serve) {
+function browser(publicOrigin: string, serve: Serve, account: Account) {
   const jar = new Map<string, Map<string, string>>();
   const visited: string[] = [];
   async function send(url: URL, init: RequestInit = {}): Promise<Response> {
@@ -84,7 +86,7 @@ function browser(publicOrigin: string, serve: Serve) {
         if (ours !== undefined) {
           response = await submit(new URL(ours.action, url), { ...ours.fields, decision: "allow" });
         } else if (login !== undefined) {
-          response = await submit(new URL(login.action, url), { ...login.fields, ...JSMITH });
+          response = await submit(new URL(login.action, url), { ...login.fields, ...account });
         } else if (consent !== undefined) {
           response = await submit(new URL(consent.action, url), consent.fields);
         } else {
@@ -93,21 +95,21 @@ function browser(publicOrigin: string, serve: Serve) {
       }
       throw new Error("too many steps");
     },
-    /** Ends jsmith's Redmine session, as Redmine's own sign-out form does. */
+    /** Ends the account's Redmine session, as Redmine's own sign-out form does. */
     async signOut(redmine: string): Promise<void> {
       const page = await (await send(new URL("logout", `${redmine}/`))).text();
       const logout = form(page, (action) => action.endsWith("/logout"));
       if (logout !== undefined) await submit(new URL(logout.action, redmine), logout.fields);
     },
     /**
-     * Signs jsmith in to Redmine and revokes every application on its authorized applications page,
+     * Signs the account in to Redmine and revokes every application on its authorized applications page,
      * as each row's Revoke link does: a DELETE that Rails reads from `_method`.
      */
     async revokeAll(redmine: string): Promise<number> {
       const login = form(await (await send(new URL("login", `${redmine}/`))).text(), (action) =>
         action.endsWith("/login"),
       );
-      await submit(new URL(login!.action, redmine), { ...login!.fields, ...JSMITH });
+      await submit(new URL(login!.action, redmine), { ...login!.fields, ...account });
       const page = await (
         await send(new URL("oauth/authorized_applications", `${redmine}/`))
       ).text();
@@ -153,11 +155,16 @@ function decode(text: string): string {
 }
 
 /**
- * The whole sign-in with the official MCP client: it registers itself, the browser signs jsmith in,
- * the client redeems the code, and a tool runs as jsmith. Then a refresh, and the old refresh token
+ * The whole sign-in with the official MCP client: it registers itself, the browser signs the account
+ * in, the client redeems the code, and a tool runs as the account. Then a refresh, and the old refresh token
  * dies once the new access token has been used, as Doorkeeper rotates it.
  */
-async function signInAndUse(server: ContractServer, publicUrl: string, serve: Serve) {
+async function signInAndUse(
+  server: ContractServer,
+  publicUrl: string,
+  serve: Serve,
+  account = JSMITH,
+) {
   const toServer: typeof fetch = async (input, init) => {
     const request = new Request(input, init);
     return new URL(request.url).origin === new URL(publicUrl).origin
@@ -196,7 +203,7 @@ async function signInAndUse(server: ContractServer, publicUrl: string, serve: Se
   await expect(
     new Client({ name: "contract", version: "0" }).connect(pending),
   ).rejects.toBeInstanceOf(UnauthorizedError);
-  const person = browser(new URL(publicUrl).origin, serve);
+  const person = browser(new URL(publicUrl).origin, serve, account);
   const landed = await person.signIn(store.url!);
   await person.signOut(browserUrl(server));
   const redmine =
@@ -216,7 +223,7 @@ async function signInAndUse(server: ContractServer, publicUrl: string, serve: Se
   const client = new Client({ name: "contract", version: "0" });
   await client.connect(transport());
   const me = await client.callTool({ name: "users_current", arguments: {} });
-  expect(me.structuredContent).toMatchObject({ login: "jsmith" });
+  expect(me.structuredContent).toMatchObject({ login: account.username });
 
   const refresh = (token: string) =>
     toServer(`${publicUrl}/oauth/token`, {
@@ -248,7 +255,7 @@ async function signInAndUse(server: ContractServer, publicUrl: string, serve: Se
         params: { name, arguments: args },
       }),
     });
-  expect(await (await callTool("users_current")).text()).toContain('"login":"jsmith"');
+  expect(await (await callTool("users_current")).text()).toContain(`"login":"${account.username}"`);
   expect(await (await refresh(first)).json()).toMatchObject({ error: "invalid_grant" });
   return { person, callTool, refresh: () => refresh(renewed.refresh_token) };
 }
@@ -256,6 +263,7 @@ async function signInAndUse(server: ContractServer, publicUrl: string, serve: Se
 describeServers("OAuth through Redmine", (server) => {
   // The subpath server's MCP endpoint sits under Redmine's own path, as a same-origin proxy mounts it.
   const mount = server.name === "7.0-subpath" ? "/redmine/mcp" : "/mcp";
+  const admin = createRedmine({ baseUrl: server.baseUrl, auth: { apiKey: server.adminKey } });
   // Nothing listens on this URL: the browser and the client hand its requests to the handler.
   const publicUrl = `http://127.0.0.1:3737${mount}`;
   const handler = () =>
@@ -291,8 +299,19 @@ describeServers("OAuth through Redmine", (server) => {
     expect(await (await callTool("users_current")).text()).toContain('"login":"jsmith"');
   });
 
-  it("answers 401 invalid_token once jsmith revokes the sign-in in Redmine", async () => {
-    const { person, callTool, refresh } = await signInAndUse(server, publicUrl, handler());
+  it("answers 401 invalid_token once the user revokes the sign-in in Redmine", async () => {
+    // Revoking ends every sign-in of the user through the application, so it is a user no other run uses.
+    const username = `oauth-${randomBytes(4).toString("hex")}`;
+    const account = { username, password: "contract-pass-1" };
+    const user = await admin.users.create({
+      login: username,
+      firstname: "OAuth",
+      lastname: "Revoker",
+      mail: `${username}@example.net`,
+      password: account.password,
+    });
+    onTestFinished(() => admin.users.delete({ user_id: user.id }));
+    const { person, callTool, refresh } = await signInAndUse(server, publicUrl, handler(), account);
     expect(await person.revokeAll(browserUrl(server))).toBeGreaterThan(0);
     const refused = await callTool("users_current");
     expect(refused.status).toBe(401);

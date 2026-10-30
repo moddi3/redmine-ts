@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { createRedmineMcpHandler } from "../../src/index.ts";
 import type { BearerGrant, BearerVerifier, RedmineMcpHandlerOptions } from "../../src/index.ts";
 import { texts } from "../connect.ts";
@@ -144,28 +144,32 @@ describe("createRedmineMcpHandler", () => {
   it.each([
     ["no declared length", {}],
     ["a declared length over 64 KiB", { "content-length": String(64 * 1024 + 1) }],
-  ])(
-    "refuses at once, with id null, a body with %s that never ends",
-    async (_, length) => {
+  ])("refuses at once, with id null, a body with %s that never ends", async (_, length) => {
+    vi.useFakeTimers();
+    try {
       const { handle } = handler({ allowedHosts: ["localhost"] });
+      const started = Date.now();
       for (const [headers, status] of [
         [{}, 401],
         [{ origin: "https://evil.example" }, 403],
         [{ host: "evil.example" }, 403],
       ] as const) {
-        const response = await handle(stalled({ ...length, ...headers }));
-        expect(response.status).toBe(status);
-        expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id: null });
+        const response = handle(stalled({ ...length, ...headers }));
+        await vi.runAllTimersAsync();
+        expect((await response).status).toBe(status);
+        expect(await (await response).json()).toMatchObject({ jsonrpc: "2.0", id: null });
       }
-    },
-    1000,
-  );
+      expect(Date.now() - started).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("refuses with id null a small body that stalls, instead of waiting for its end", async () => {
     const response = await handler().handle(stalled({ "content-length": "100" }));
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ jsonrpc: "2.0", id: null });
-  }, 3000);
+  });
 
   it("refuses a browser Origin that is not allowed with 403, before the key is checked", async () => {
     const { handle } = handler({ allowedOrigins: ["app.example.com"] });

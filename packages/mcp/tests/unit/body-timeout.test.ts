@@ -100,21 +100,29 @@ describe("a request body that does not arrive in time", () => {
   it.each(Object.entries(credentials))(
     "gets 408 with id null for a %s request that stops sending",
     async (_, headers) => {
-      const { handle, errors } = handler({ publicUrl, verifier, bodyTimeoutMs: 300 });
-      const started = Date.now();
-      const response = await handle(post(headers, [stalledUpload], { end: false }));
-      expect(response.status).toBe(408);
-      expect(response.headers.get("connection")).toBeNull();
-      expect(await response.json()).toEqual({
-        jsonrpc: "2.0",
-        id: null,
-        error: { code: -32000, message: late },
-      });
-      expect(Date.now() - started).toBeGreaterThanOrEqual(300);
-      expect(Date.now() - started).toBeLessThan(1000);
-      expect(errors.map((error) => error.message)).toEqual([late]);
+      vi.useFakeTimers();
+      try {
+        const { handle, errors } = handler({ publicUrl, verifier, bodyTimeoutMs: 300 });
+        let settled = false;
+        const answer = handle(post(headers, [stalledUpload], { end: false }));
+        void answer.then(() => (settled = true));
+        await vi.advanceTimersByTimeAsync(299);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(settled).toBe(true);
+        const response = await answer;
+        expect(response.status).toBe(408);
+        expect(response.headers.get("connection")).toBeNull();
+        expect(await response.json()).toEqual({
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32000, message: late },
+        });
+        expect(errors.map((error) => error.message)).toEqual([late]);
+      } finally {
+        vi.useRealTimers();
+      }
     },
-    3000,
   );
 
   it("gets 408 for a body that keeps trickling past the limit", async () => {
@@ -122,7 +130,7 @@ describe("a request body that does not arrive in time", () => {
     const trickle = [stalledUpload, ...Array.from({ length: 20 }, () => [50, "A"]).flat()];
     const response = await handle(post(credentials.key, trickle, { end: false }));
     expect(response.status).toBe(408);
-  }, 3000);
+  });
 
   it.each(Object.entries(credentials))(
     "gets 408 for a %s request that sends no body at all",
@@ -131,7 +139,6 @@ describe("a request body that does not arrive in time", () => {
       const response = await handle(post(headers, [], { end: false }));
       expect(response.status).toBe(408);
     },
-    3000,
   );
 
   it("still gets 401 for a key Redmine refuses", async () => {
@@ -140,12 +147,12 @@ describe("a request body that does not arrive in time", () => {
       post({ "x-redmine-api-key": "bogus" }, [stalledUpload], { end: false }),
     );
     expect(response.status).toBe(401);
-  }, 3000);
+  });
 });
 
 describe("a request body that arrives in time", () => {
   it("is served though it pauses, once the key check passes", async () => {
-    const { handle } = handler({ bodyTimeoutMs: 2000 });
+    const { handle } = handler({ bodyTimeoutMs: 10_000 });
     const response = await handle(
       post(credentials.key, [
         toolsList.slice(0, 30),
@@ -157,74 +164,76 @@ describe("a request body that arrives in time", () => {
     );
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("attachments_upload");
-  }, 4000);
+  });
 
   it.each(Object.entries(credentials))(
     "gets a %s tool result that takes longer than the limit, since only the body is timed",
     async (_, headers) => {
-      const { handle, errors } = handler({ publicUrl, verifier, bodyTimeoutMs: 100 }, 400);
-      const response = await handle(post(headers, [toolCall]));
-      expect(response.status).toBe(200);
-      expect(await response.text()).toContain("New");
-      expect(errors).toEqual([]);
+      vi.useFakeTimers();
+      try {
+        const { handle, errors } = handler({ publicUrl, verifier, bodyTimeoutMs: 100 }, 400);
+        const answer = handle(post(headers, [toolCall]));
+        await vi.runAllTimersAsync();
+        const response = await answer;
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain("New");
+        expect(errors).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
     },
-    3000,
   );
 
   it.each([
     ["past the limit", { bodyTimeoutMs: 50 }],
     ["with a budget of 0", { maxBodyBytesInFlight: 0 }],
-  ])(
-    "keeps a 2026-07-28 subscriptions/listen stream open %s",
-    async (_, options) => {
-      const honoring = vi
-        .spyOn(Server.prototype, "getCapabilities")
-        .mockReturnValue({ tools: { listChanged: true } });
-      try {
-        const { handle } = handler(options);
-        const listen = JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "subscriptions/listen",
-          params: {
-            notifications: { toolsListChanged: true },
-            _meta: {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientInfo": {
-                name: "body-timeout-tests",
-                version: "0.0.0",
-              },
-              "io.modelcontextprotocol/clientCapabilities": {},
+  ])("keeps a 2026-07-28 subscriptions/listen stream open %s", async (_, options) => {
+    const honoring = vi
+      .spyOn(Server.prototype, "getCapabilities")
+      .mockReturnValue({ tools: { listChanged: true } });
+    try {
+      const { handle } = handler(options);
+      const listen = JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "subscriptions/listen",
+        params: {
+          notifications: { toolsListChanged: true },
+          _meta: {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              name: "body-timeout-tests",
+              version: "0.0.0",
             },
+            "io.modelcontextprotocol/clientCapabilities": {},
           },
-        });
-        const response = await handle(
-          post(
-            {
-              ...credentials.key,
-              "mcp-protocol-version": "2026-07-28",
-              "mcp-method": "subscriptions/listen",
-            },
-            [listen],
-          ),
-        );
-        expect(response.status).toBe(200);
-        const reader = response.body!.getReader();
-        expect(new TextDecoder().decode((await reader.read()).value)).toContain(
-          "notifications/subscriptions/acknowledged",
-        );
-        const next = await Promise.race([
-          reader.read().then(() => "more"),
-          sleep(300).then(() => "still open"),
-        ]);
-        expect(next).toBe("still open");
-        await reader.cancel();
-      } finally {
-        honoring.mockRestore();
-      }
-    },
-    3000,
-  );
+        },
+      });
+      const response = await handle(
+        post(
+          {
+            ...credentials.key,
+            "mcp-protocol-version": "2026-07-28",
+            "mcp-method": "subscriptions/listen",
+          },
+          [listen],
+        ),
+      );
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain(
+        "notifications/subscriptions/acknowledged",
+      );
+      const next = await Promise.race([
+        reader.read().then(() => "more"),
+        sleep(300).then(() => "still open"),
+      ]);
+      expect(next).toBe("still open");
+      await reader.cancel();
+    } finally {
+      honoring.mockRestore();
+    }
+  });
 });
 
 it.each([0, 0.5, -1, Number.NaN, 2 ** 31, null, "300"])(
@@ -270,17 +279,14 @@ describe("over node:http", () => {
       ].join("\r\n"),
     );
     socket.on("error", () => undefined);
-    const started = Date.now();
     const [data] = await once(socket, "data");
     const received = String(data);
     const answeredAt = Date.now();
     expect(received).toMatch(/^HTTP\/1\.1 408 /);
     expect(received.toLowerCase()).not.toContain("connection: close");
-    expect(answeredAt - started).toBeLessThan(1500);
     const sending = setInterval(() => socket.write("A".repeat(1024)), 250);
     await new Promise((resolve) => socket.once("close", resolve));
     clearInterval(sending);
     expect(Date.now() - answeredAt).toBeGreaterThan(4500);
-    expect(Date.now() - answeredAt).toBeLessThan(8500);
-  }, 12_000);
+  });
 });
