@@ -1,5 +1,5 @@
 import { beforeAll, expect, it } from "vite-plus/test";
-import { RedmineError } from "../../src/index.ts";
+import { type GetIssuesWhere, RedmineError } from "../../src/index.ts";
 import {
   cleanups,
   clientFor,
@@ -203,21 +203,24 @@ describeServers("issue filters", (server) => {
     expect(RedmineError.is(error, "invalid_input")).toBe(true);
   });
 
-  // It adds two open issues to the project, which the tests above count.
   it("parent_id { contains: id } returns every issue below that one", async () => {
-    const child = await admin.issues.create({
-      project_id: projectId,
-      subject: "child",
-      parent_issue_id: a,
-    });
-    const grandchild = await admin.issues.create({
-      project_id: projectId,
-      subject: "grandchild",
-      parent_issue_id: child.id,
-    });
+    const tree = await freshProject(admin, cleanup, "tree");
+    const make = async (subject: string, parent?: number) =>
+      (
+        await admin.issues.create({
+          project_id: tree.id,
+          subject,
+          ...(parent === undefined ? {} : { parent_issue_id: parent }),
+        })
+      ).id;
+    const root = await make("root");
+    const child = await make("child", root);
+    const grandchild = await make("grandchild", child);
+    const listed = async (where: Omit<GetIssuesWhere, "project_id">) =>
+      ids(await admin.issues.list({ where: { project_id: tree.id, ...where }, sort: "id" }).all());
 
-    expect(await found({ parent_id: a })).toEqual([child.id]);
-    expect(await found({ parent_id: { contains: a } })).toEqual([child.id, grandchild.id]);
-    expect(await found({ child_id: { contains: grandchild.id } })).toEqual([a, child.id]);
+    expect(await listed({ parent_id: root })).toEqual([child]);
+    expect(await listed({ parent_id: { contains: root } })).toEqual([child, grandchild]);
+    expect(await listed({ child_id: { contains: grandchild } })).toEqual([root, child]);
   });
 });

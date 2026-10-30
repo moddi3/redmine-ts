@@ -43,8 +43,8 @@ export interface Overlay {
   /** Filter name -> what its value is, for filters whose spec neither lists values nor implies a kind. */
   filterValues: Readonly<Record<string, string>>;
   /**
-   * Filter name -> what `{contains: id}` matches, for id filters that document `~`. Redmine reads `~` there as a
-   * search of the issue tree: IssueQuery#sql_for_parent_id_field and TimeEntryQuery#sql_for_issue_id_field.
+   * Filter name -> what `{contains: id}` matches. Redmine reads `~` on these id filters as a search of the issue
+   * tree: IssueQuery#sql_for_parent_id_field and #sql_for_child_id_field, TimeEntryQuery#sql_for_issue_id_field.
    */
   subtrees: Readonly<Record<string, string>>;
   /** operationId -> filter -> a sentence appended to the first line of the filter's description. */

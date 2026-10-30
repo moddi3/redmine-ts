@@ -34,14 +34,20 @@ const TRANSPORT_QUERY = new Set(["offset", "limit", "nometa", "format"]);
 /** Keys ListInput contributes to every list input. The spec's own `sort` param is ListInput.sort. */
 const LIST_KEYS = ["where", "sort", "pageSize", "paging"];
 
-/** `contains` alone is the `~` of an id filter, which takes the id instead of text. */
 type Cap = "not" | "range" | "text" | "contains" | "presence";
 
-const CAPS: Record<Exclude<Cap, "contains">, readonly string[]> = {
+const CAPS: Partial<Record<Cap, readonly string[]>> = {
   not: ["!"],
   range: [">=", "<=", "><"],
   text: ["~", "!~", "^", "$"],
   presence: ["*", "!*"],
+};
+
+/** On an id filter `~` takes the id, not text. */
+const ID_CAPS: Partial<Record<Cap, readonly string[]>> = {
+  ...CAPS,
+  text: ["!~", "^", "$"],
+  contains: ["~"],
 };
 
 export interface Filter {
@@ -52,9 +58,11 @@ export interface Filter {
   prose: FilterProse;
 }
 
-/** The JSDoc of a filter: its prose, then the spec's syntax under raw. */
 export function filterDoc(prose: FilterProse, since: string | undefined): string {
-  const raw = prose.raw === "" ? "" : `\n\n\`raw\` takes Redmine's own syntax:\n${prose.raw}`;
+  const raw =
+    prose.wireSyntax === undefined
+      ? ""
+      : `\n\n\`raw\` takes Redmine's own syntax:\n${prose.wireSyntax}`;
   return jsDoc(`${prose.description}${raw}`, sinceTag(since));
 }
 
@@ -189,12 +197,10 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
         overlay,
         pathParams.some((q) => q.name === "project_id"),
       );
-      const idContains = prose.kind === "id" && codes.includes("~");
-      const capCodes = idContains ? codes.filter((code) => code !== "~") : codes;
-      const caps: Cap[] = (Object.keys(CAPS) as (keyof typeof CAPS)[]).filter((c) =>
-        CAPS[c].some((code) => capCodes.includes(code)),
+      const table = prose.kind === "id" ? ID_CAPS : CAPS;
+      const caps = (Object.keys(table) as Cap[]).filter((c) =>
+        table[c]!.some((code) => codes.includes(code)),
       );
-      if (idContains) caps.push("contains");
       where.push({
         name: p.name,
         spec,

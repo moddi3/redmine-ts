@@ -433,10 +433,7 @@ function withFilterTable(schema: JsonSchema, where: JsonSchema): JsonSchema {
   };
 }
 
-/**
- * `name | value | what it filters`, from the SDK's description of a filter: a summary line, then a `Value:`
- * line. The summary drops a first sentence that says no more than the name, as "Filter by tracker." does.
- */
+/** `name | value | what it filters`, without the last cells when they are empty. */
 function filterLine(name: string, description: string): string {
   const [summary = "", ...lines] = description.split("\n");
   const value = lines.find((line) => line.startsWith("Value: "))?.slice("Value: ".length, -1) ?? "";
@@ -451,7 +448,7 @@ function filterLine(name: string, description: string): string {
   return [name, value, about].join(" | ").replace(/( \| )+$/, "");
 }
 
-/** The operator objects a filter's schema accepts besides raw, in the SDK's order. */
+/** The operator objects a filter's schema accepts, in the SDK's order. */
 function operatorsOf(filter: JsonSchema): string[] {
   return (filter.anyOf ?? [])
     .flatMap((form) => form.required ?? [])

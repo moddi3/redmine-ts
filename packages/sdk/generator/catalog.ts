@@ -129,16 +129,13 @@ export function catalogFile(ops: OpModel[], merged: Merged): string {
     additionalProperties: false,
   });
 
-  /**
-   * The `Cond` forms compileWhere accepts for a filter: equality always, `raw` always, operators as documented.
-   * The spec's own syntax describes only `raw`, which takes it.
-   */
+  /** The `Cond` forms compileWhere accepts for a filter: equality always, `raw` always, operators as documented. */
   const condition = (spec: FilterSpec, prose: FilterProse): Js => ({
     description: prose.description,
     anyOf: [
       scalar,
       scalars,
-      prose.raw === "" ? raw : withKeys(raw, { description: prose.raw }),
+      prose.wireSyntax === undefined ? raw : withKeys(raw, { description: prose.wireSyntax }),
       ...operatorsOf(spec).map((o) =>
         o.name === "contains" && prose.kind === "id" ? idContains : refs.get(o.name)!,
       ),

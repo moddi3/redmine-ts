@@ -15,7 +15,6 @@ export type CondText =
   | { not_contains: string }
   | { starts_with: string }
   | { ends_with: string };
-/** `contains` on an id filter, such as parent_id, takes the id and matches the issue tree around it. */
 export type CondContains<V> = { contains: V };
 export type CondPresence = { any: true } | { none: true };
 /**
@@ -124,11 +123,6 @@ function isOneProject(wire: string): boolean {
   return /^[\w-]+$/.test(wire) && !PROJECT_WORDS.has(wire);
 }
 
-/**
- * Redmine drops a filter it does not read without an error, so the request would come back wider than asked.
- * A saved query runs its own filters and reads only one project_id from the request, and a scoped filter
- * exists only in a query of one project.
- */
 export function checkScope(
   op: AnyOp,
   where: Readonly<Record<string, Compiled>>,
@@ -254,13 +248,9 @@ function compileCond(cond: unknown, spec: FilterSpec, at: string): Compiled {
   throw invalidInput(`${at}: unknown operator "${name}"`);
 }
 
-/** The operator that matches what a word's operator leaves out. */
 const OPPOSITE: Readonly<Record<string, string>> = { o: "c", c: "o" };
 
-/**
- * A word such as status_id's "closed" is an operator, and an operator takes no values: Redmine reads `o|3` as
- * every open issue and `!closed` as a status id. So a word stands alone, and under not it turns into its opposite.
- */
+/** Redmine reads `o|3` as every open issue, and `!closed` as a status id named "closed". */
 function compileWord(
   value: unknown,
   { words }: FilterSpec,
