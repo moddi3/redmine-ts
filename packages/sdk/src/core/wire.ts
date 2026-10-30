@@ -15,7 +15,7 @@ export interface Plan {
   /** Accept, Content-Type (only with a body), X-Redmine-Switch-User. */
   readonly headers: Readonly<Record<string, string>>;
   /** Bodyless PUT/DELETE/POST send nothing: no Content-Type, no "null". */
-  readonly body: BodyInit | undefined;
+  readonly body: RequestInit["body"];
   /** False for ReadableStream bodies: no retry and no 401 replay. */
   readonly replayable: boolean;
   /** The JSON body carried `lock_version`, which decides what an empty-errors 422 means. */
@@ -223,7 +223,7 @@ function rejectLeftovers(
   }
 }
 
-function toBodyInit(value: unknown): BodyInit | undefined {
+function toBodyInit(value: unknown): RequestInit["body"] {
   if (value instanceof Blob || value instanceof ArrayBuffer || value instanceof ReadableStream)
     return value;
   if (value instanceof Uint8Array) {
