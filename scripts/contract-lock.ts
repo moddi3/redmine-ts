@@ -141,6 +141,9 @@ export async function acquireContractLock(
     if (tryTake(lock)) return () => release(lock);
     const held = holder(lock);
     if (held.kind === "free") continue;
+    // A root `vp test` sets up both packages' contract projects in one process. Vitest tears them down
+    // after every test has run, so the first one's release covers both.
+    if (held.kind === "run" && held.pid === process.pid) return () => {};
     if (held.kind === "run" && !held.alive && takeOver(lock, held.pid)) {
       log(`${lock}: took over from pid ${held.pid}, which is gone`);
       return () => release(lock);
