@@ -11,13 +11,9 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/**
- * Who holds the lock directory. A directory without a pid file was made by hand with `mkdir`, or by a
- * run that has not written its pid yet, and is held either way.
- */
 type Holder =
   | { kind: "free" }
-  | { kind: "by-hand"; since: Date }
+  | { kind: "no-pid"; since: Date }
   | { kind: "run"; pid: number; by: string; since: string; alive: boolean };
 
 interface PidFile {
@@ -26,7 +22,7 @@ interface PidFile {
   since: string;
 }
 
-export interface LockOptions {
+interface LockOptions {
   timeoutMs?: number;
   pollMs?: number;
   log?: (line: string) => void;
@@ -38,7 +34,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  * The three Docker Redmines are one per machine, but agents run in separate git worktrees, so the lock
  * lives in the main checkout's .redmine, where the manual `mkdir` protocol takes it too.
  */
-export function contractLockPath(): string {
+function contractLockPath(): string {
   try {
     const common = execFileSync(
       "git",
@@ -71,12 +67,12 @@ function holder(lock: string): Holder {
     const file: PidFile = JSON.parse(readFileSync(join(lock, "pid"), "utf8"));
     return { kind: "run", ...file, alive: alive(file.pid) };
   } catch {
-    return { kind: "by-hand", since };
+    return { kind: "no-pid", since };
   }
 }
 
 function holdingLine(lock: string, held: Exclude<Holder, { kind: "free" }>): string {
-  return held.kind === "by-hand"
+  return held.kind === "no-pid"
     ? `${lock} was made by hand at ${held.since.toISOString()} and is held until its rmdir`
     : `${lock} is held by pid ${held.pid} (${held.by}) since ${held.since}`;
 }
@@ -118,14 +114,12 @@ function tryTake(lock: string): boolean {
   return true;
 }
 
-/** Removes the lock only while its pid file names this process. */
 function release(lock: string): void {
   const held = holder(lock);
   if (held.kind !== "run" || held.pid !== process.pid) return;
   rmSync(lock, { recursive: true });
 }
 
-/** Waits for the lock directory and returns the function that releases it. */
 export async function acquireContractLock(
   lock: string,
   {
@@ -160,10 +154,6 @@ export async function acquireContractLock(
   }
 }
 
-/**
- * Vitest globalSetup of the contract projects. Without .redmine/env.json in this checkout the contract
- * suites skip and touch no Redmine, so there is nothing to lock.
- */
 export default async function setup(): Promise<(() => void) | undefined> {
   if (!existsSync(join(root, ".redmine", "env.json"))) return undefined;
   return acquireContractLock(contractLockPath());

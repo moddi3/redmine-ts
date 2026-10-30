@@ -4,9 +4,6 @@ import { defineConfig } from "vite-plus";
 // Tests run before the SDK is built (CI checks, then builds), so they read its source.
 const sdk = (file: string): string => fileURLToPath(new URL(`../sdk/src/${file}`, import.meta.url));
 
-// Several suites share a machine at load averages up to 60, where Vitest's 5-second default fails tests that pass alone.
-const unitTimeoutMs = 20_000;
-// Takes the machine-wide lock on the Docker Redmines that the contract suites share.
 const contractLock = fileURLToPath(new URL("../../scripts/contract-lock.ts", import.meta.url));
 
 export default defineConfig({
@@ -32,7 +29,7 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { name: "unit", include: ["tests/unit/**/*.test.ts"], testTimeout: unitTimeoutMs },
+        test: { name: "unit", include: ["tests/unit/**/*.test.ts"], testTimeout: 20_000 },
       },
       {
         extends: true,
