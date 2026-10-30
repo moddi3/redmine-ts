@@ -215,19 +215,23 @@ function read(
   return hunks;
 }
 
+const MIN_CUT = 2;
+
 /** Whether `shown` is `text` with … in place of each part left out. */
 function fits(shown: string, text: string): boolean {
   const pieces = shown.split("…");
   if (!text.startsWith(pieces[0]!)) return false;
   let at = pieces[0]!.length;
   for (const piece of pieces.slice(1, -1)) {
-    const found = text.indexOf(piece, at + 1);
+    const found = text.indexOf(piece, at + MIN_CUT);
     if (piece === "" || found < 0) return false;
     at = found + piece.length;
   }
   const last = pieces.at(-1)!;
   if (pieces.length === 1) return at === text.length;
-  return last === "" ? at < text.length : text.endsWith(last) && text.length - last.length > at;
+  return last === ""
+    ? text.length - at >= MIN_CUT
+    : text.endsWith(last) && text.length - last.length - at >= MIN_CUT;
 }
 
 /** The README's pairs in a block. */
@@ -340,5 +344,20 @@ describe("lineDiff against a reference LCS", () => {
     expect(tally.cut).toBeGreaterThan(1000);
     expect(tally.shown).toBeGreaterThan(8000);
     expect(tally.hiddenByCut).toBeLessThan(tally.shown / 10);
+  });
+});
+
+describe("lineDiff on a long line", () => {
+  it("shows the line's first and last character in place of a … that would hide only that one", () => {
+    const old = "0123456789".repeat(60);
+    const next = `${old.slice(0, 41)}x${old.slice(42, 558)}y${old.slice(559)}`;
+    expect(lineDiff(old, next, REST)).toBe(
+      [
+        "@@ line 1 @@",
+        `- ${old.slice(0, 82)}…${old.slice(518)}`,
+        `+ ${next.slice(0, 82)}…${next.slice(518)}`,
+        "[clipped: 872 more characters. Read the rest elsewhere.]",
+      ].join("\n"),
+    );
   });
 });

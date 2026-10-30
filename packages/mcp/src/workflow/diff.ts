@@ -332,8 +332,8 @@ function visible(text: string, budget: number, changes?: Changes): Span[] {
 
 function around(text: string, spans: readonly Span[]): Span[] {
   return spans.map(([from, to]) => [
-    snap(text, Math.max(0, from - LEAD)),
-    snap(text, Math.min(text.length, to + LEAD)),
+    from - LEAD <= 1 ? 0 : snap(text, from - LEAD),
+    to + LEAD >= text.length - 1 ? text.length : snap(text, to + LEAD),
   ]);
 }
 
