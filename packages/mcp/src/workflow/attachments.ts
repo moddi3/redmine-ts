@@ -90,6 +90,8 @@ export function uploadTool(dir: string | undefined): ToolSpec {
           }),
     }),
     output: UploadRef,
+    // The reference goes back unchanged in uploads, which takes no warning field.
+    callerText: true,
     ...BY_METHOD.POST,
     run: async (rm, input, { files }) => {
       const { filename, content_type, description } = input;

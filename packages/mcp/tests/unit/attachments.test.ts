@@ -80,13 +80,14 @@ describe("attachments_upload", () => {
       description: "CI output",
       content_text: "build ok\n🙂",
     });
+    // The reference goes back unchanged in uploads, which takes no other field.
     expect(result.structuredContent).toEqual({
-      warning: UNTRUSTED,
       token: "1.abc",
       filename: "build.log",
       content_type: "text/plain",
       description: "CI output",
     });
+    expect(texts(result)).toHaveLength(1);
     const [upload] = uploads(seen);
     expect(upload?.contentType).toBe("application/octet-stream");
     expect(new TextDecoder().decode(upload?.bytes)).toBe("build ok\n🙂");
