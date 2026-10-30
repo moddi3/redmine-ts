@@ -39,7 +39,7 @@ import type {
   ToolSpec,
 } from "./tools.ts";
 import { UNTRUSTED, withWarning } from "./user-text.ts";
-import { ToolError } from "./workflow/define.ts";
+import { invalidInput, ToolError } from "./workflow/define.ts";
 import { workflowTools } from "./workflow/index.ts";
 import { createLookups } from "./workflow/lookups.ts";
 
@@ -159,11 +159,11 @@ export function createRedmineMcpServer(
     }
     const invalid = await check(tool.inputSchema, args);
     if (invalid !== undefined) {
-      const reason = (await explainFilters(tool.inputSchema, args.where)) ?? invalid;
-      return failure(
-        redact,
-        `Invalid arguments for ${name}: ${reason.replace(/\.?$/, ".")} Nothing was sent.`,
-      );
+      const reason =
+        unknownArguments(tool, args) ??
+        (await explainFilters(tool.inputSchema, args.where)) ??
+        invalid;
+      return redmineFailure(tool, invalidInput(reason), redact);
     }
     return call(tool, rm, args, context, observe, redact);
   });
@@ -240,6 +240,16 @@ async function call(
   };
 }
 
+/** Ajv's message leaves out the key that additionalProperties refused. */
+function unknownArguments(tool: ToolSpec, args: Record<string, unknown>): string | undefined {
+  const { properties = {}, additionalProperties } = tool.inputSchema;
+  if (additionalProperties !== false) return undefined;
+  const unknown = Object.keys(args).filter((key) => !Object.hasOwn(properties, key));
+  if (unknown.length === 0) return undefined;
+  const named = unknown.map((key) => `"${key}"`).join(", ");
+  return `unknown argument${unknown.length === 1 ? "" : "s"} ${named}; ${tool.name} takes ${Object.keys(properties).join(", ")}`;
+}
+
 /** Ajv reports every anyOf branch of a bad filter; an agent needs the forms the filter accepts. */
 async function explainFilters(schema: Schema, where: unknown): Promise<string | undefined> {
   const filters = schema.properties?.where;
@@ -298,7 +308,7 @@ function redmineFailure(tool: ToolSpec, error: RedmineError, redact: Redact): Ca
       case "not_found":
         return `Redmine answered 404 for ${tool.name}${data.hint ? `: ${data.hint}` : ""}. Check the ids; the matching list tool returns valid ones.`;
       case "invalid_input":
-        return `Invalid input for ${tool.name}: ${data.detail}. Nothing was sent.`;
+        return `Invalid input for ${tool.name}: ${data.detail.replace(/\.$/, "")}. Nothing was sent.`;
       case "access_denied":
         return `${tool.name} sends ${data.method}, which the "${data.access}" access mode refuses. Nothing was sent.`;
       case "unsupported_version":

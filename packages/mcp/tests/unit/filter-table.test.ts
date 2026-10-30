@@ -224,16 +224,16 @@ describe("calls with where", () => {
     const refuse = async (filters: Record<string, unknown>) =>
       texts(await client.callTool({ name: "issues_list", arguments: { where: filters } }))[0];
     expect(await refuse({ assigned_to_id: { gte: 3 } })).toBe(
-      'Invalid arguments for issues_list: where.assigned_to_id does not take that form. Filter by assignee. Value: id, `me` for current user. Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date. Nothing was sent.',
+      'Invalid input for issues_list: where.assigned_to_id does not take that form. Filter by assignee. Value: id, `me` for current user. Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date. Nothing was sent.',
     );
     expect(await refuse({ cf_12: { between: [1] } })).toContain(
       "where.cf_12 does not take that form. Custom field by id",
     );
     expect(await refuse({ status_id: [] })).toContain(
-      'where.status_id does not take that form. Filter by issue status. Value: id, `open`, `closed`, `any` alone. Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+      'where.status_id does not take that form. Filter by issue status. Value: id, `open`, `closed`, `any` alone. Accepts a value, an array meaning any of them, or one of {not: value or array}, {any: true} for any value set, {raw: "..."} in Redmine\'s own syntax, such as a relative date. Nothing was sent.',
     );
     expect(await refuse({ state: "open" })).toMatch(
-      /^Invalid arguments for issues_list: unknown filter "state", known filters: issue_id, project_id, .*, cf_<id>\. Nothing was sent\.$/,
+      /^Invalid input for issues_list: unknown filter "state", known filters: issue_id, project_id, .*, cf_<id>\. Nothing was sent\.$/,
     );
     expect(sent).toEqual([]);
   });

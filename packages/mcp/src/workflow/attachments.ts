@@ -159,7 +159,7 @@ export function downloadTool(files: boolean): ToolSpec {
       'Returns {attachment, content: "image", "text" or "none", text, note}.',
     ].join(" "),
     input: z.strictObject({
-      id: AttachmentId,
+      attachment_id: AttachmentId,
       thumbnail: z
         .boolean()
         .default(false)
@@ -180,8 +180,8 @@ export function downloadTool(files: boolean): ToolSpec {
       note: z.string().optional(),
     }),
     ...BY_METHOD.GET,
-    run: async (rm, { id, thumbnail, size }) => {
-      const attachment = await rm.attachments.get({ attachment_id: id });
+    run: async (rm, { attachment_id, thumbnail, size }) => {
+      const attachment = await rm.attachments.get({ attachment_id });
       const metadata = metadataOf(attachment);
       const none = (note: string) => ({
         structured: { attachment: metadata, content: "none" as const, note: `${note}${save}` },
@@ -199,7 +199,10 @@ export function downloadTool(files: boolean): ToolSpec {
         );
       if (!thumbnail && attachment.filesize > cap) return tooLarge(attachment.filesize);
       const download = thumbnail
-        ? await rm.attachments.thumbnail({ id, ...(size === undefined ? {} : { size }) })
+        ? await rm.attachments.thumbnail({
+            id: attachment_id,
+            ...(size === undefined ? {} : { size }),
+          })
         : await rm.attachments.download(attachment);
       const bytes = await download.bytes();
       if (bytes.byteLength > cap) return tooLarge(bytes.byteLength);
@@ -243,17 +246,17 @@ export const saveTool: ToolSpec = defineTool({
     "It only reads from Redmine, so read-only mode lists it too.",
     "Returns {path, bytes, attachment}.",
   ].join(" "),
-  input: z.strictObject({ id: AttachmentId }),
+  input: z.strictObject({ attachment_id: AttachmentId }),
   output: z.object({ path: z.string(), bytes: z.int(), attachment: Metadata }),
   tier: "read",
   annotations: SAVE,
-  run: async (rm, { id }, { files }) => {
-    const attachment = await rm.attachments.get({ attachment_id: id });
+  run: async (rm, { attachment_id }, { files }) => {
+    const attachment = await rm.attachments.get({ attachment_id });
     const download = await rm.attachments.download(attachment);
     // Listed only with a files directory.
     const { path, bytes } = await files!.save(
       attachment.filename,
-      `attachment-${id}`,
+      `attachment-${attachment_id}`,
       download.body,
     );
     return { structured: { path, bytes, attachment: metadataOf(attachment) } };

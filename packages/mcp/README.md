@@ -240,12 +240,12 @@ The budget counts UTF-8 bytes, because those clients count bytes, and Cyrillic l
 
 ### Errors
 
-A failed Redmine request comes back as a tool result with `isError: true`, never as a protocol error. Over OAuth, a sign-in that Redmine refuses gets HTTP 401 instead, and a call beyond the token's scope gets HTTP 403. Three cases keep the error result, as [What holds either way](#what-holds-either-way) describes: a call that the server's own mode refuses, a request in which Redmine may have applied a write, and a Redmine 401 on a path outside its REST formats (`.json` and `.xml`). The first text block says what went wrong and what to do. The last text block is the SDK's error as JSON, with a `kind` such as `validation`, `not_found`, `conflict`, `access_denied`, or `unsupported_version`.
+A failed Redmine request comes back as a tool result with `isError: true`, never as a protocol error. Over OAuth, a sign-in that Redmine refuses gets HTTP 401 instead, and a call beyond the token's scope gets HTTP 403. Three cases keep the error result, as [What holds either way](#what-holds-either-way) describes: a call that the server's own mode refuses, a request in which Redmine may have applied a write, and a Redmine 401 on a path outside its REST formats (`.json` and `.xml`). The first text block says what went wrong and what to do. The last text block is the SDK's error as JSON, with a `kind` such as `validation`, `not_found`, `conflict`, `invalid_input`, `access_denied`, or `unsupported_version`.
 
 - A 422 carries Redmine's own messages, such as `Subject cannot be blank`, in the user's language.
 - A 404 says to check the ids.
 - A 403 from a [tool that needs an admin key](#tools-that-need-an-admin-key) says so, and names what works without one.
-- Input that does not match the tool's schema, a filter form that the filter does not take, or a name in `fields` that is not an item field, is refused before any request. For a bad filter, the message lists the forms the filter accepts, and for a bad field name, the item fields.
+- Input that does not match the tool's schema, a filter form that the filter does not take, or a name in `fields` that is not an item field, is refused before any request, with the kind `invalid_input`. For an unknown argument, the message names it and lists the arguments the tool takes. For a bad filter, it lists the forms the filter accepts, and for a bad field name, the item fields.
 
 ### Tools that need an admin key
 

@@ -205,7 +205,9 @@ describe("issues_list items", () => {
   it("refuse fields that is not an array of names, before sending", async () => {
     const { client, seen } = await serve(ROUTES);
     const result = await callError(client, "issues_list", { fields: "due_date" });
-    expect(texts(result)[0]).toContain("Invalid arguments for issues_list");
+    expect(texts(result)[0]).toBe(
+      "Invalid input for issues_list: data/fields must be array. Nothing was sent.",
+    );
     expect(seen).toEqual([]);
   });
 
@@ -248,7 +250,9 @@ describe("other list tools", () => {
     const input = tools.find((tool) => tool.name === "time_entries_list")!.inputSchema;
     expect(input.properties).not.toHaveProperty("fields");
     const refused = await callError(client, "time_entries_list", { fields: ["hours"] });
-    expect(texts(refused)[0]).toContain("Invalid arguments for time_entries_list");
+    expect(texts(refused)[0]).toContain(
+      'Invalid input for time_entries_list: unknown argument "fields"; time_entries_list takes',
+    );
     expect(sent(seen)).toEqual(["GET /time_entries.json?offset=0&limit=25"]);
   });
 });
