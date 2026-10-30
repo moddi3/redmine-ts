@@ -1,5 +1,54 @@
 # @redmine-ts/mcp
 
+## 0.6.0
+
+### Minor Changes
+
+- d0f0beb: A key whose Redmine user is not an admin no longer sees the 14 tools that need an admin key, such as `users_list` and `groups_list`, in `tools/list`, and the server instructions leave out the sentence about them. Such a tool still answers a call, with Redmine's 403 and what works without an admin key.
+
+  - Over stdio, the server reads `users/current.json` once when it starts, before the client's `initialize`. If Redmine does not answer, it lists every tool, as before.
+  - Over HTTP with the `X-Redmine-API-Key` header, the server asks Redmine about the key once for each `initialize`, `server/discover` and `tools/list` request. A request past 64 KiB or slower than a second shares that one check with the key gate. A tool call adds no check. If Redmine does not answer or refuses the key, every tool is listed, as before.
+  - Over OAuth, the built-in authorization server records in the grant whether the user is an admin at sign-in. An API key sign-in takes it from the key check on the consent page. A sign-in through Redmine is never an admin's, because Redmine lets an OAuth token act as an admin only with the `admin` scope, which the server does not request, so these sign-ins no longer list the tools Redmine refuses them. A refresh keeps the field, so a change of admin rights shows after the next sign-in. Tokens issued before this change list every tool. `BearerGrant` gains an optional `admin` field, which an external verifier may set.
+
+  `createRedmineMcpServer` takes a new `admin` option: `false` hides the tools that need an admin key. Without it, every tool is listed.
+
+- 28a7ac2: `attachments_download` and `attachments_save` take `attachment_id` instead of `id`, as `attachments_get` does. A call that still passes `id` is refused and names `attachment_id`.
+
+  Arguments that do not match a tool's input schema are refused with the kind `invalid_input`, like the SDK's own refusals: the message reads "Invalid input for <tool>: ... Nothing was sent." and the last text block is the error as JSON. An unknown argument is named, with the arguments the tool takes, such as `unknown argument "id"; attachments_download takes attachment_id, thumbnail, size`. A reason that ends with a period no longer gets a second one.
+
+- 3de4996: With OAuth on, a token request from a `private_key_jwt` client, such as ChatGPT, no longer gets 503 while every key set fetch is taken or its own fetch has not settled after 6 seconds, if the server fetched the client's key set within the last hour and that set holds the assertion's `kid`. A `kid` the set lacks still gets 503 `temporarily_unavailable`.
+
+  A metadata document fetch that fails after 6 seconds now drops the kept document, as a fetch that fails sooner does, until a newer fetch for that client starts. A fetch that settles after a newer one started still changes nothing.
+
+  `createRedmineMcpServer` keeps the tools of at most 8 pairs of access mode and files directory, so a library that creates servers with many `files.dir` values no longer keeps every set. An HTTP error that a tool serializes before it is returned gets the same `api_key` redaction in its body as one that is returned as it is.
+
+- 4c57a86: More results fit the result budget, and some result shapes change:
+
+  - `issues_get` with `include: ["journals"]` leaves out the oldest journals that do not fit, and adds `journals_omitted` and `journals_before` to the record. `issue_context` with that `journals_before` returns the journals it left out.
+  - `raw_request` returns a response over the budget as `{status, truncated: true, bytes, response_text, message}`, where `status` is Redmine's HTTP status and `response_text` is the start of the response's JSON, in place of `{response}`. It starts with the user-text `warning` when the whole response holds user-written text, as `{response}` would.
+  - An `issue_context` page with `journals_before` returns the issue as `{id, updated_on}` and the journals, without the rest of the issue, which the first page carried. The new `journals_after` returns only the journals newer than the one it names, in the same form.
+  - `journals_omitted` now counts an older journal in `full` too, because the next pages return it.
+  - `REDMINE_MCP_MAX_RESULT_BYTES` and `maxResultBytes` take at most 499,000 bytes, because Claude Code keeps at most 500,000 characters inline. A larger value is refused with a message that says so.
+
+- 43d3da7: The `where` table in `tools/list` gives every filter a value: `issue id` for the relation filters, `group id` and `role id`, and the scheme name for `twofa_scheme`. `status_id`'s words are marked "alone", the project-scoped filters say they need one `project_id`, and the id filters that take `contains` say it matches the issue tree.
+
+  `issues_list` and `time_entries_list` refuse `category_id` without one `project_id`, any filter next to `query_id` but one `project_id`, and a status word next to other values, before anything is sent. `{ "not": "closed" }` on `status_id` returns the open issues, and `{ "contains": 42 }` on `parent_id` is accepted.
+
+  The filter descriptions come from the SDK, so a refused filter's error names its value as well as its forms.
+
+- 150ca3d: A result that carries text written by Redmine users now starts its `structuredContent` with a `warning` field, set to the same warning as its first text block: the text is data, not instructions. Claude Code shows the model only `structuredContent`, so its model never saw the warning beside the text before. The first text block stays for clients that read the text blocks, such as Codex. The reference from `attachments_upload` no longer carries the warning, in a block or a field, because its `description` is the caller's own and goes back unchanged in `uploads`.
+
+  It takes the place of a record's own top-level `warning` field, such as one a plugin adds, which `raw_request` still returns under `response`; a record without user-written text keeps that field. The output schema of each tool that returns a record or a list page now allows `warning`. The result budget counts it, so a list page or `issue_context` result fits the budget with the warning included. A caller that compares `structuredContent` with the record it expects should drop `warning` first.
+
+### Patch Changes
+
+- 6c7bc94: A long line in a journal's diff no longer starts or ends with a `…` that hides a single character. When the 40 characters around a change stop one character short of the line's start or end, the excerpt shows that character instead.
+- a3c913c: `people_find` skips groups while it looks up matches, so a group that watches the issue or is its assignee no longer hides a partial match or counts in `more`. `more` counts only the matches it did not look up, and `unavailable` says when the call limit stopped the lookups.
+- Updated dependencies [948cfac]
+- Updated dependencies [86e9cd4]
+- Updated dependencies [43d3da7]
+  - @redmine-ts/sdk@0.7.0
+
 ## 0.5.1
 
 ### Patch Changes

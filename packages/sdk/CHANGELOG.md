@@ -1,5 +1,31 @@
 # @redmine-ts/sdk
 
+## 0.7.0
+
+### Minor Changes
+
+- 948cfac: Call options take `onResponse`, which gets the status of each response the call receives, retries included. The last one is the response the call resolved with, so `rm.request` callers can tell a 201 or a 202 from a 200:
+
+  ```ts
+  let status = 0;
+  const body = await rm.request(
+    { method: "POST", path: "issues.json", body: { issue: { project_id: 1, subject: "New" } } },
+    { onResponse: (response) => (status = response.status) },
+  );
+  ```
+
+- 43d3da7: `where` refuses filters Redmine drops without an error, on every request. `category_id` and `subproject_id`, and `issue.category_id` on time entries, need one `project_id`, and `query_id` takes no filter but one `project_id`. Before, both went out in the short form and came back wider than asked.
+
+  `status_id`'s `"open"`, `"closed"` and `"any"` stand alone. `{ not: "closed" }` now means open and `{ not: "open" }` closed. Before, they went out as `!closed` and `!open`, which Redmine reads as a status id, so every issue came back. A word in a list, such as `["open", 3]`, is `invalid_input`, where Redmine read it as open issues and dropped the 3.
+
+  `contains` on `parent_id`, `child_id`, and `issue_id` and `issue.parent_id` on time entries takes the id as a number too.
+
+  Filter descriptions in the catalog and the JSDoc use the `where` grammar: a summary, the value, and the forms the filter takes. Redmine's own syntax stays on the `raw` form. Every filter's description now names its value, such as `issue id` for the relation filters, `group id` and `role id`.
+
+### Patch Changes
+
+- 86e9cd4: An inline upload that passes a `ReadableStream` another call is sending at the same moment now gets `invalid_input` before it sends anything, as one made after that call does. It failed at `fetch` as `network` before. A call that fails before it sends its stream releases it, so a later call can upload it.
+
 ## 0.6.0
 
 ### Minor Changes
