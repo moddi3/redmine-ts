@@ -59,9 +59,22 @@ describe("building requests", () => {
     ["a dot-dot segment", { issue_id: ".." }],
     ["a missing parameter", {}],
     ["an object", { issue_id: { id: 1 } }],
+    ["NaN", { issue_id: Number.NaN }],
+    ["Infinity", { issue_id: Number.POSITIVE_INFINITY }],
   ])("refuses %s as a path parameter before the network", async (_name, input) => {
     const { call, requests } = testEngine(ok);
     const error = await failure(call(ops.getIssue, input));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
+  test.each([
+    ["NaN", [Number.NaN]],
+    ["Infinity next to a name", ["journals", Number.POSITIVE_INFINITY]],
+  ])("refuses %s in a query value before the network", async (_name, include) => {
+    const { call, requests } = testEngine(ok);
+    const error = await failure(call(ops.getIssue, { issue_id: 1, include }));
 
     expect(error.kind).toBe("invalid_input");
     expect(requests).toHaveLength(0);

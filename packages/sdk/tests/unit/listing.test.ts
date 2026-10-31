@@ -81,6 +81,14 @@ describe("compileWhere", () => {
     ["two words", { status_id: ["open", "closed"] }, "stand alone"],
     ["a word next to an id under not", { status_id: { not: ["open", 3] } }, "stand alone"],
     ["any under not", { status_id: { not: "any" } }, "matches no issue"],
+    ["NaN as a value", { issue_id: Number.NaN }, "issue_id"],
+    ["Infinity in a list", { assigned_to_id: [1, Number.POSITIVE_INFINITY] }, "assigned_to_id"],
+    ["NaN as a bound", { done_ratio: { gte: Number.NaN } }, "done_ratio"],
+    [
+      "-Infinity in a range",
+      { done_ratio: { between: [0, Number.NEGATIVE_INFINITY] } },
+      "done_ratio",
+    ],
   ])("rejects %s with invalid_input naming it", (_name, where, mention) => {
     const run = (): unknown =>
       compileWhere("cf_1" in where ? ops.getProjects : ops.getIssues, where);
@@ -423,6 +431,29 @@ describe("offset paging", () => {
     expect(requests[0]?.url.searchParams.get("limit")).toBe("5");
     expect(page).toMatchObject({ total_count: 250, offset: 20, limit: 5 });
     expect(page.items).toEqual([21, 22, 23, 24, 25].map((id) => ({ id })));
+  });
+
+  test.each([
+    ["a NaN offset", { offset: Number.NaN }],
+    ["a negative offset", { offset: -1 }],
+    ["a fractional offset", { offset: 1.5 }],
+    ["a NaN limit", { limit: Number.NaN }],
+    ["a zero limit", { limit: 0 }],
+    ["an infinite limit", { limit: Number.POSITIVE_INFINITY }],
+  ])("page() refuses %s before any request", async (_name, at) => {
+    const { list, requests } = testEngine(issueServer(250));
+    const error = await failure(list(ops.getIssues).page(at));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a NaN query_id is refused before any request", async () => {
+    const { list, requests } = testEngine(issueServer(5));
+    const error = await failure(list(ops.getIssues, { query_id: Number.NaN }).page());
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
   });
 
   test("pages() yields whole pages", async () => {

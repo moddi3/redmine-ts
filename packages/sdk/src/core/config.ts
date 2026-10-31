@@ -251,9 +251,9 @@ function positive(name: string, value: number): number {
   return value;
 }
 
-function positiveInteger(name: string, value: number): number {
+export function positiveInteger(name: string, value: number, op?: string): number {
   if (!Number.isInteger(value) || value < 1)
-    throw invalidInput(`${name} must be a positive integer`);
+    throw invalidInput(`${name} must be a positive integer`, op);
   return value;
 }
 
@@ -263,8 +263,8 @@ function nonNegative(name: string, value: number): number {
   return value;
 }
 
-function nonNegativeInteger(name: string, value: number): number {
+export function nonNegativeInteger(name: string, value: number, op?: string): number {
   if (!Number.isInteger(value) || value < 0)
-    throw invalidInput(`${name} must be a non-negative integer`);
+    throw invalidInput(`${name} must be a non-negative integer`, op);
   return value;
 }

@@ -58,6 +58,8 @@ Every operation is `rm.<namespace>.<verb>(input, options?)`. `input` is one flat
 
 To clear a field on update, set it to `null`, for example `rm.issues.update({ issue_id: 42, assigned_to_id: null })`. Redmine ignores a `null` `assigned_to_id` but clears it for `""`, so the client sends `""` for that one field. Every other nullable field clears with `null` as is.
 
+A number in `input` must be finite. JSON would send `NaN` or `Infinity` as `null`, and `null` clears most fields. A URL would carry the word `NaN`. So the client throws `invalid_input` for a non-finite number in a path, query, body, or `where` value, before it sends anything. An `undefined` item in a body array fails the same way. `page()` takes only a whole `offset` from 0 and a whole `limit` from 1.
+
 The package exports a type for every input and every schema. Input types are named after the spec's operation id: `GetIssuesInput`, `GetIssuesWhere`, `GetIssueInclude`, `CreateIssueInput`, and so on. Schema types use the schema name: `Issue`, `Project`, `TimeEntry`.
 
 ### Filter lists with `where`
@@ -427,7 +429,7 @@ Every method takes call options as its second argument: `signal`, `timeoutMs`, `
 
 `rm.request` sends an untyped request with the same auth, retries, timeouts, and errors as typed calls. Use it for plugin endpoints. `path` is relative to `baseUrl`, without a leading slash. The result is the parsed JSON as `unknown`, or `undefined` for an empty body.
 
-`body` takes any JSON value: an object, array, string, number, boolean, or `null`. It is sent as it is, with no envelope. A function, symbol, bigint, or non-finite number fails with `invalid_input`, and so does a body on `GET`. Leave `body` out to send none. The body and `query` are separate, so both can use the same key.
+`body` takes any JSON value: an object, array, string, number, boolean, or `null`. It is sent as it is, with no envelope. A function, symbol, bigint, non-finite number, or `undefined` array item fails with `invalid_input`, and so does a body on `GET`. A non-finite number in `query` fails the same way. Leave `body` out to send none. The body and `query` are separate, so both can use the same key.
 
 An array in `query` goes out as `k[]=a&k[]=b` by default. Set `arrayFormat` to `"comma"` for `k=a,b` or `"repeat"` for `k=a&k=b`. Redmine itself reads the first two. With a repeated key it keeps only the last value, so use `"repeat"` only for a plugin that expects it.
 
