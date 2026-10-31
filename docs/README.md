@@ -39,3 +39,4 @@ Pick the task you have. Each page links on to the details.
 - [Releasing](releasing.md) covers changesets, the Version Packages pull request, and publishing to npm.
 - [Contract-test servers](../docker/README.md) lists the Docker Redmine servers, their seeded data, and their ports.
 - [Vendored spec](../spec/README.md) explains how the OpenAPI spec is pinned and updated.
+- [Style guide](style-guide.md) covers how to write and check these pages.

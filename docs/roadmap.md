@@ -109,7 +109,7 @@ The OAuth server keeps no list of the tokens it issued, so it has no revocation 
 
 ### A list of connected clients
 
-Nobody can see which MCP clients hold tokens: neither the person who signed in nor an admin. Such a list needs a durable record of every sign-in, which the sealed, stateless design avoids. A shared grant store does not provide it, because a store keeps only markers of used tokens and ended sign-ins. Not planned.
+Neither the person who signed in nor an admin can see which MCP clients hold tokens. Such a list needs a durable record of every sign-in, which the sealed, stateless design avoids. A shared grant store does not provide it, because a store keeps only markers of used tokens and ended sign-ins. Not planned.
 
 ### The CLI forgets used tokens on restart
 
