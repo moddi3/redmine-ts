@@ -42,15 +42,15 @@ Write each page for one of them. Link to the other readers' pages instead of rep
 ## Write the examples
 
 - Each section that shows new API syntax gets its own example.
-- SDK examples are excerpts of `packages/sdk/examples/*.ts`, which `vp check` typechecks. `packages/sdk/tests/unit/readme.test.ts` fails when a `ts` block in the root README, the SDK README, or `docs/sdk/` is not an exact excerpt. Change the example file first, then copy the lines into the page.
-- Keep SDK code in `ts` fences. Another fence label hides the block from the test.
+- Code on a page is an excerpt of an example file, which `vp check` typechecks. SDK code comes from `packages/sdk/examples/`, and MCP code from `packages/mcp/examples/`. `packages/sdk/tests/unit/readme.test.ts` and `packages/mcp/tests/unit/docs.test.ts` fail when a `ts` block is not an exact excerpt. Change the example file first, then copy the lines into the page.
+- Put TypeScript in `ts` fences, the label the tests read. `vp run docs:check` fails on a `js` or `typescript` fence, and on a fence without a language.
 - The test also builds the namespace table from the client and compares it with the table in [reference.md](sdk/reference.md).
 
 ## Link between pages
 
 - npm ships a package without the `docs/` folder, so links in a package README are absolute, such as `https://github.com/moddi3/redmine-ts/blob/main/docs/sdk/queries.md`.
 - Pages in the repository link to each other with relative paths.
-- When you rename a heading, search the repository for links to its old anchor.
+- `vp run docs:check` fails on a link to a missing file or heading, and on a relative link in a package README. Run it after you rename a heading or move a page.
 
 ## Format
 

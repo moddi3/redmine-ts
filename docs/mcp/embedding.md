@@ -107,7 +107,7 @@ export class GrantKey extends DurableObject {
     const until = await this.ctx.storage.get<number>("until");
     return until !== undefined && until > Date.now();
   }
-  async alarm(): Promise<void> {
+  override async alarm(): Promise<void> {
     await this.ctx.storage.deleteAll();
   }
 }

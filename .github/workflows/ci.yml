@@ -32,6 +32,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: true
       - run: vp check
+      - run: vp run docs:check
       - run: vp run --no-cache -r test
       - run: vp run -r build
       - run: vp run gen:check

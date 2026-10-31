@@ -15,7 +15,7 @@ const guides = readdirSync(resolve(repo, "docs/sdk"))
   .map((name) => `docs/sdk/${name}`);
 
 /** Pages with SDK code, relative to the repository root. Each must hold at least one ts block. */
-const pages = ["packages/sdk/README.md", "README.md", ...guides];
+const pages = ["packages/sdk/README.md", "README.md", "docs/architecture.md", ...guides];
 const namespaceTable = "docs/sdk/reference.md";
 
 const read = (page: string) => readFileSync(resolve(repo, page), "utf8");

@@ -22,9 +22,9 @@ const rm = createRedmine({
 });
 
 const issue = await rm.issues.get({ issue_id: 42, include: ["journals", "allowed_statuses"] });
-issue.journals; // Journal[]: required because it was included
+console.log(issue.journals.length); // journals is Journal[], not optional, because it was included
 
-for await (const i of rm.issues.list({
+for await (const open of rm.issues.list({
   where: {
     project_id: "web",
     status_id: "open", // status_id=o
@@ -34,7 +34,7 @@ for await (const i of rm.issues.list({
   },
   sort: "updated_on:desc",
 })) {
-  // pages of 100 under the hood; `break` stops fetching
+  console.log(open.subject); // fetched in pages of 100; `break` stops fetching
 }
 
 const upload = await rm.attachments.upload({ file: blob, filename: "trace.zip" });

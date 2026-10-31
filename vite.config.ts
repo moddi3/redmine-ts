@@ -22,6 +22,8 @@ export default defineConfig({
     // second run and skip its side effects, such as the version bump or the publish.
     tasks: {
       changeset: { command: "changeset", cache: false },
+      // Reads every Markdown file that git lists, which the cache cannot see as inputs.
+      "docs:check": { command: "node scripts/check-docs.ts", cache: false },
       // changeset version leaves trailing spaces in multi-paragraph entries, which vp check rejects.
       "version-packages": { command: "changeset version && vp fmt", cache: false },
       release: { command: "vp run -r build && changeset publish", cache: false },

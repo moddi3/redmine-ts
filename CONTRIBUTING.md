@@ -16,12 +16,13 @@ Run `vp install` again after you pull changes.
 
 Run these from the repository root:
 
-| Command           | What it does                                                                                            |
-| ----------------- | ------------------------------------------------------------------------------------------------------- |
-| `vp check`        | Checks formatting, lints, and typechecks everything, including the SDK's type tests and `examples/`.    |
-| `vp run -r test`  | Runs the unit and generator tests of every package. Contract tests skip when no server is up.           |
-| `vp run -r build` | Builds every package. Each build runs publint and Are the Types Wrong and fails on any issue.           |
-| `vp run ready`    | Runs the three commands above, building before testing, because the MCP HTTP tests start the built CLI. |
+| Command             | What it does                                                                                                                           |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `vp check`          | Checks formatting, lints, and typechecks everything, including the SDK's type tests and both packages' `examples/`.                    |
+| `vp run docs:check` | Checks every link and anchor in the Markdown, that package READMEs link by absolute URL, and that every code fence names its language. |
+| `vp run -r test`    | Runs the unit and generator tests of every package. Contract tests skip when no server is up.                                          |
+| `vp run -r build`   | Builds every package. Each build runs publint and Are the Types Wrong and fails on any issue.                                          |
+| `vp run ready`      | Runs the four commands above, building before testing, because the MCP HTTP tests start the built CLI.                                 |
 
 `vp check --fix` formats the files it can. A pull request is ready for review when `vp run ready` passes.
 
@@ -85,7 +86,12 @@ CI lints `.github/workflows/` with [jactionlint](https://github.com/jdx/jactionl
 
 ## Change the documentation
 
-`packages/sdk/tests/unit/readme.test.ts` requires every `ts` block in the root README, the SDK README, and each page in `docs/sdk/` to be an exact excerpt of a file in `packages/sdk/examples/`, which `vp check` typechecks. It also requires the namespace table in `docs/sdk/reference.md` to match the client. To change an example, change the example file first, then copy the lines into the page. [The documentation style guide](docs/style-guide.md) covers page types, links, and wording.
+Two tests keep the code on the pages compiling, and `vp check` typechecks the examples they read:
+
+- `packages/sdk/tests/unit/readme.test.ts` requires every `ts` block in the root README, the SDK README, `docs/architecture.md`, and each page in `docs/sdk/` to be an exact excerpt of a file in `packages/sdk/examples/`. It also requires the namespace table in `docs/sdk/reference.md` to match the client.
+- `packages/mcp/tests/unit/docs.test.ts` requires the same of the MCP README and each page in `docs/mcp/`, against `packages/mcp/examples/`. The Bun and Workers examples there have their own `tsconfig.json`, which loads the Bun or Workers types.
+
+To change an example, change the example file first, then copy the lines into the page. Run `vp test readme.test docs.test` from the repository root to run both tests. `vp run docs:check` finds broken links and anchors, and code fences without a language. [The documentation style guide](docs/style-guide.md) covers page types, links, and wording.
 
 ## Find the design record
 
