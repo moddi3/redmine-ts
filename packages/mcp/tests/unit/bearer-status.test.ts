@@ -336,6 +336,13 @@ describe("a bearer call beyond the token's scope", () => {
     ["alice", "issues_delete", { issue_id: 1 }, "redmine:delete"],
     ["reader", "raw_request", { method: "POST", path: "issues.json", body: {} }, "redmine:write"],
     ["alice", "raw_request", { method: "DELETE", path: "issues/1.json" }, "redmine:delete"],
+    ["alice", "journals_update", { journal_id: 1, notes: "" }, "redmine:delete"],
+    [
+      "alice",
+      "raw_request",
+      { method: "PUT", path: "issues/1.json", body: { issue: { deleted_attachment_ids: [5] } } },
+      "redmine:delete",
+    ],
   ])("answers 403 insufficient_scope when %s calls %s %j", async (token, name, args, needed) => {
     const { send, requests } = gated();
     const response = await send({ Authorization: `Bearer ${token}` }, tool(1, name, args));

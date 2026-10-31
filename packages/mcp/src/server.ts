@@ -211,7 +211,11 @@ async function call(
     result = await tool.run(rm, args, context);
   } catch (error) {
     if (RedmineError.is(error, "access_denied")) {
-      observe?.({ kind: "refused", tier: BY_METHOD[error.data.method].tier });
+      const { method, deletes } = error.data;
+      observe?.({
+        kind: "refused",
+        tier: deletes === undefined ? BY_METHOD[method].tier : "delete",
+      });
     }
     if (error instanceof RedmineError) return redmineFailure(tool, error, redact);
     if (error instanceof ToolError) return failure(redact, error.message, error.data);
@@ -313,7 +317,9 @@ function redmineFailure(tool: ToolSpec, error: RedmineError, redact: Redact): Ca
       case "invalid_input":
         return `Invalid input for ${tool.name}: ${data.detail.replace(/\.$/, "")}. Nothing was sent.`;
       case "access_denied":
-        return `${tool.name} sends ${data.method}, which the "${data.access}" access mode refuses. Nothing was sent.`;
+        return data.deletes === undefined
+          ? `${tool.name} sends ${data.method}, which the "${data.access}" access mode refuses. Nothing was sent.`
+          : `The "${data.access}" access mode refused ${tool.name}, because ${data.deletes}. Nothing was changed.`;
       case "unsupported_version":
         return `${tool.name} needs Redmine ${data.since}${data.until ? ` to ${data.until}` : " or newer"}, and this server is configured for ${data.declared}. Nothing was sent.`;
       case "conflict":
@@ -340,7 +346,8 @@ function instructions(
 ): string {
   const mode = {
     full: "Access: full, writes and deletes included.",
-    "no-delete": "Access: no-delete, so delete tools are hidden and refused.",
+    "no-delete":
+      "Access: no-delete, so delete tools are hidden and refused, and so are updates that delete.",
     "read-only": "Access: read-only, so only read tools are listed and writes are refused.",
   }[access];
   return [

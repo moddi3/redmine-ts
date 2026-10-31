@@ -24,7 +24,7 @@ Then ask Claude what is assigned to you in Redmine. `--no-delete` leaves every t
 - **Tested with claude.ai and ChatGPT.** On 2026-10-26 both signed in to Redmine 7.0 through this server, ran tool calls, and refreshed their tokens. ChatGPT proves who it is with a signed JWT, which the server checks at the token endpoint.
 - **A typed tool for every SDK operation.** 86 tools come from [`@redmine-ts/sdk`](https://www.npmjs.com/package/@redmine-ts/sdk), each with a JSON Schema for its input and its output, and hints that tell the client whether it reads, writes, or deletes.
 - **Workflow tools for the common jobs.** `issue_context` returns an issue with the statuses it can move to, its relations, and its journals as readable changes, in one call. `issues_transition` changes a status by name and lists the allowed ones when the workflow refuses. `people_find` returns a colleague's login by name, for any key.
-- **Access modes the SDK enforces.** `--read-only` lists 44 tools and sends only `GET`. `--no-delete` lists 77 and never sends `DELETE`. A hidden tool called anyway gets an error, and Redmine sees nothing.
+- **Access modes the SDK enforces.** `--read-only` lists 44 tools and sends only `GET`. `--no-delete` lists 77, never sends `DELETE`, and refuses an update that deletes, such as blank journal notes. A hidden tool called anyway gets an error, and Redmine sees nothing.
 - **One server for a team.** With `--http`, each request brings its own API key or OAuth token. The server needs no database, because it seals codes and tokens with one secret.
 - **Node, Bun, and Cloudflare Workers.** `npx` runs the CLI on Node 22 or later. `createRedmineMcpHandler` is the same server as a web-standard request handler. CI runs it on Node and Bun, and it was checked on Workers in workerd.
 
@@ -284,6 +284,8 @@ The access mode decides which tools the server lists and which requests the SDK 
 With `REDMINE_MCP_FILES_DIR` set, each mode lists one more tool, `attachments_save`.
 
 A client can still call a tool the mode hides, for example from a tool list it cached earlier. The server then answers with an error that names the mode, and the SDK sends nothing to Redmine.
+
+`no-delete` also refuses an update that would make Redmine delete records: blank `notes` on `journals_update`, `memberships_update` without `role_ids`, and `deleted_attachment_ids` on `issues_update` or `wiki_update`. The error says what Redmine would delete. The SDK reads the request as it would be sent, so `raw_request` to those routes is refused too. A plugin endpoint that deletes on a `POST`, `PUT` or `PATCH` is unknown to the SDK, and `raw_request` sends it.
 
 The mode limits what the server does. It does not limit the API key. A key that belongs to an admin can still do everything outside this server, so give the server a key of a user whose Redmine role allows only what the agent needs.
 

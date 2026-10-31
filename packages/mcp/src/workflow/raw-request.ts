@@ -18,7 +18,8 @@ const BY_ACCESS: Readonly<Record<Access, { sends: string; annotations: Annotatio
     annotations: BY_METHOD.GET.annotations,
   },
   "no-delete": {
-    sends: "This server refuses DELETE before sending; GET, POST, PUT and PATCH are sent.",
+    sends:
+      "This server refuses DELETE before sending, and an update that makes Redmine delete records, such as blank journal notes; GET, POST, PUT and PATCH are sent otherwise.",
     annotations: { ...BY_METHOD.DELETE.annotations, idempotentHint: false },
   },
   full: {
