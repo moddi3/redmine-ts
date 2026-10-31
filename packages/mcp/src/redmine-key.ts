@@ -1,5 +1,6 @@
 import { createRedmine, RedmineError } from "@redmine-ts/sdk";
 import type { RedmineConfig } from "@redmine-ts/sdk";
+import { withUserAgent } from "./user-agent.ts";
 
 /** claude.ai gives token calls 10 seconds, and a key check may sit in front of one. */
 export const KEY_CHECK_TIMEOUT_MS = 8000;
@@ -15,6 +16,7 @@ export async function checkCredential(
 ): Promise<KeyVerdict> {
   const rm = createRedmine({
     ...redmine,
+    fetch: withUserAgent(redmine.fetch),
     timeoutMs: Math.min(KEY_CHECK_TIMEOUT_MS, redmine.timeoutMs ?? KEY_CHECK_TIMEOUT_MS),
     retry: false,
   });

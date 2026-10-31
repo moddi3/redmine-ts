@@ -38,6 +38,7 @@ import type {
   ToolResult,
   ToolSpec,
 } from "./tools.ts";
+import { withUserAgent } from "./user-agent.ts";
 import { UNTRUSTED, USER_TEXT_FIELDS, withWarning } from "./user-text.ts";
 import { invalidInput, ToolError } from "./workflow/define.ts";
 import { workflowTools } from "./workflow/index.ts";
@@ -128,7 +129,10 @@ export function createRedmineMcpServer(
     ...config,
     // The tools' output, such as journals oldest first, relies on the SDK's response fixes.
     normalize: true,
-    ...(observe === undefined ? {} : { fetch: observed(config.fetch, observe) }),
+    fetch:
+      observe === undefined
+        ? withUserAgent(config.fetch)
+        : observed(withUserAgent(config.fetch), observe),
   });
   const redact = redactor(config.auth, dangerouslyRevealApiKeys === true);
   const context: ToolContext = {
@@ -179,11 +183,7 @@ export function createRedmineMcpServer(
   return server;
 }
 
-function observed(
-  base: typeof fetch | undefined,
-  observe: (observation: Observation) => void,
-): typeof fetch {
-  const send = base ?? ((input, init) => globalThis.fetch(input, init));
+function observed(send: typeof fetch, observe: (observation: Observation) => void): typeof fetch {
   return async (input, init) => {
     const exchange: Observation = {
       kind: "exchange",

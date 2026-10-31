@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import pkg from "../../package.json" with { type: "json" };
 import { checkCredential } from "../../src/redmine-key.ts";
 
 function redmine(answer: (signal: AbortSignal | null) => Promise<Response>) {
-  const seen: { url: string; key: string | null }[] = [];
+  const seen: { url: string; key: string | null; agent: string | null }[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
-    seen.push({ url: request.url, key: request.headers.get("x-redmine-api-key") });
+    seen.push({
+      url: request.url,
+      key: request.headers.get("x-redmine-api-key"),
+      agent: request.headers.get("user-agent"),
+    });
     return answer(init?.signal ?? request.signal);
   };
   return { fetch, seen };
@@ -26,7 +31,7 @@ describe("checkCredential", () => {
     [true, { kind: "ok", admin: true }],
     [undefined, { kind: "ok" }],
   ])(
-    "answers ok with admin %s when Redmine returns the key's user, asking once at users/current.json",
+    "answers ok with admin %s when Redmine returns the key's user, asking once at users/current.json as redmine-ts-mcp",
     async (admin, expected) => {
       const { fetch, seen } = redmine(async () =>
         Response.json({ user: { id: 1, login: "alice", admin } }),
@@ -38,7 +43,11 @@ describe("checkCredential", () => {
       });
       expect(verdict).toEqual(expected);
       expect(seen).toEqual([
-        { url: "http://redmine.test/redmine/users/current.json", key: "key-1" },
+        {
+          url: "http://redmine.test/redmine/users/current.json",
+          key: "key-1",
+          agent: `redmine-ts-mcp/${pkg.version} (+https://github.com/moddi3/redmine-ts)`,
+        },
       ]);
     },
   );

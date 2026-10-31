@@ -32,6 +32,7 @@ import { checkResultBytes, DEFAULT_RESULT_BYTES } from "./result-budget.ts";
 import { createRedmineMcpServer } from "./server.ts";
 import type { Observation } from "./server.ts";
 import { allows, isApiPath, strictest } from "./tools.ts";
+import { withUserAgent } from "./user-agent.ts";
 import { MAX_UPLOAD_BYTES } from "./workflow/attachments.ts";
 
 export const API_KEY_HEADER = "X-Redmine-API-Key";
@@ -215,8 +216,7 @@ export function createRedmineMcpHandler(
     createAuthorizationServer(oauth, {
       paths,
       redmineUrl: withSlash(new URL(config.baseUrl)),
-      // As in the SDK: Workers refuse a bare fetch called as a method.
-      fetch: config.fetch ?? ((input, init) => globalThis.fetch(input, init)),
+      fetch: withUserAgent(config.fetch),
       version: config.version,
       access,
       onError,

@@ -37,6 +37,7 @@ export function fakeRedmine({ user = "jsmith", expiresIn = 7200, doorkeeper = fa
   const authorizeRequests: URLSearchParams[] = [];
   const tokenRequests: URLSearchParams[] = [];
   const apiCalls: { path: string; authorization: string | null; key: string | null }[] = [];
+  const agents = new Set<string | null>();
   const keys = new Map([
     ["jsmith-api-key", "jsmith"],
     ["admin-api-key", "admin"],
@@ -81,6 +82,7 @@ export function fakeRedmine({ user = "jsmith", expiresIn = 7200, doorkeeper = fa
   /** The server's view: the token endpoint and the REST API at the internal URL. */
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
+    agents.add(request.headers.get("user-agent"));
     const url = new URL(request.url);
     if (!url.href.startsWith(REDMINE_INTERNAL)) {
       throw new Error(`the server called ${url.origin}, not Redmine's internal URL`);
@@ -149,6 +151,7 @@ export function fakeRedmine({ user = "jsmith", expiresIn = 7200, doorkeeper = fa
     authorizeRequests,
     tokenRequests,
     apiCalls,
+    agents,
     tokens,
     revokeAll: () => {
       tokens.clear();
