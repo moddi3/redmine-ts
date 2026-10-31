@@ -4,12 +4,21 @@ import { createRedmine } from "../../src/index.ts";
 import type { Access, RawRequest } from "../../src/index.ts";
 import { BASE_URL, empty, failure, fakeFetch, json } from "./fixtures/fake-fetch.ts";
 
+const membership = {
+  id: 16,
+  roles: [
+    { id: 3, name: "Manager" },
+    { id: 4, name: "Developer", inherited: true },
+  ],
+};
+
 function client<A extends Access>(access: A, baseUrl = BASE_URL) {
-  const fake = fakeFetch((request) =>
-    request.url.pathname.endsWith("/uploads.json")
-      ? json({ upload: { id: 9, token: "9.t" } }, 201)
-      : empty(),
-  );
+  const fake = fakeFetch((request) => {
+    if (request.url.pathname.endsWith("/uploads.json")) {
+      return json({ upload: { id: 9, token: "9.t" } }, 201);
+    }
+    return request.method === "GET" ? json({ membership }) : empty();
+  });
   const rm = createRedmine({ baseUrl, auth: { apiKey: "secret-key" }, fetch: fake.fetch, access });
   return { rm, requests: fake.requests };
 }
@@ -38,8 +47,6 @@ const keeping: Record<string, (rm: Rm) => Promise<unknown>> = {
   "journals.update with notes": (rm) => rm.journals.update({ journal_id: 1, notes: "Fixed" }),
   "journals.update without notes": (rm) =>
     rm.journals.update({ journal_id: 1, private_notes: true }),
-  "memberships.update with role_ids": (rm) =>
-    rm.memberships.update({ membership_id: 1, role_ids: [3] }),
   "issues.update without deleted_attachment_ids": (rm) =>
     rm.issues.update({ issue_id: 1, notes: "n" }),
   "issues.update with empty deleted_attachment_ids": (rm) =>
@@ -66,7 +73,7 @@ describe("no-delete refuses updates that delete", () => {
       method: "PUT",
       deletes: expect.any(String),
     });
-    expect(error.message).toContain("nothing was sent");
+    expect(error.message).toContain("Nothing was changed");
     expect(requests).toHaveLength(0);
   });
 
@@ -182,5 +189,71 @@ describe("no-delete reads rm.request as Redmine routes it", () => {
 
     expect(error.data).toMatchObject({ kind: "access_denied", deletes: expect.any(String) });
     expect(requests).toHaveLength(0);
+  });
+});
+
+describe("no-delete reads a membership before an update that names roles", () => {
+  const sent = (requests: ReturnType<typeof client>["requests"]) =>
+    requests.map(({ method, url }) => `${method} ${url.pathname}`);
+  const update = (role_ids: unknown[]) =>
+    ({
+      method: "PUT",
+      path: "memberships/16.json",
+      body: { membership: { role_ids } },
+    }) as const;
+
+  test("refuses role_ids that keep no current role, and sends only the read", async () => {
+    const { rm, requests } = client("no-delete");
+    const error = await failure(rm.memberships.update({ membership_id: 16, role_ids: [999999] }));
+
+    expect(error.data).toMatchObject({
+      kind: "access_denied",
+      access: "no-delete",
+      method: "PUT",
+      deletes: expect.stringContaining("role_ids"),
+    });
+    expect(sent(requests)).toEqual(["GET /redmine/memberships/16.json"]);
+  });
+
+  test.each([
+    ["a role id Redmine reads another way", ["3x"]],
+    ["a role id that is not a number", [true]],
+  ])("refuses %s through rm.request", async (_name, role_ids) => {
+    const { rm, requests } = client("no-delete");
+    const error = await failure(rm.request(update(role_ids)));
+
+    expect(error.data).toMatchObject({ kind: "access_denied", deletes: expect.any(String) });
+    expect(sent(requests)).toEqual(["GET /redmine/memberships/16.json"]);
+  });
+
+  test.each([
+    ["a direct role", [5, 3]],
+    ["an inherited role", [4]],
+    ["a role id as a string", ["3"]],
+  ])("sends role_ids that keep %s", async (_name, role_ids) => {
+    const { rm, requests } = client("no-delete");
+    await rm.request(update(role_ids));
+
+    expect(sent(requests)).toEqual([
+      "GET /redmine/memberships/16.json",
+      "PUT /redmine/memberships/16.json",
+    ]);
+  });
+
+  test("reads the membership as JSON when rm.request names it as XML", async () => {
+    const { rm, requests } = client("no-delete");
+    const error = await failure(
+      rm.request({ ...update([999999]), method: "PATCH", path: "memberships/16.xml" }),
+    );
+
+    expect(error.data).toMatchObject({ kind: "access_denied", deletes: expect.any(String) });
+    expect(sent(requests)).toEqual(["GET /redmine/memberships/16.json"]);
+  });
+
+  test("full access sends without the read", async () => {
+    const { rm, requests } = client("full");
+    await rm.memberships.update({ membership_id: 16, role_ids: [999999] });
+
+    expect(sent(requests)).toEqual(["PUT /redmine/memberships/16.json"]);
   });
 });

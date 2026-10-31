@@ -1,6 +1,7 @@
 // The pure half of a request: plan it, interpret the response, decide retries, decode.
 // No fetch, no clocks, no state, so each Redmine quirk here is a table-driven unit test.
 
+import { VERSIONS } from "../generated/versions.ts";
 import type { RetryPolicy } from "./config.ts";
 import { RedmineError, type RedmineErrorData } from "./errors.ts";
 import { checkScope, type Compiled, compileWhere, longForm, type Page } from "./listing.ts";
@@ -131,6 +132,16 @@ function carriesLockVersion(payload: unknown): boolean {
   return has(payload) || (isRecord(payload) && Object.values(payload).some(has));
 }
 
+export interface Deletion {
+  readonly effect: string;
+  readonly unless?: Unless;
+}
+
+interface Unless {
+  readonly read: AnyOp;
+  readonly keeps: (record: unknown) => boolean;
+}
+
 const ATTACHMENTS = "`deleted_attachment_ids` deletes those attachments";
 
 const deletesAttachments = ({ deleted_attachment_ids: ids }: Readonly<Record<string, unknown>>) =>
@@ -139,7 +150,7 @@ const deletesAttachments = ({ deleted_attachment_ids: ids }: Readonly<Record<str
 const DELETING_UPDATES: readonly {
   route: RegExp;
   envelope: string;
-  deletes: (fields: Readonly<Record<string, unknown>>) => boolean;
+  deletes: (fields: Readonly<Record<string, unknown>>, route: string) => boolean | Unless;
   effect: string;
 }[] = [
   {
@@ -153,8 +164,10 @@ const DELETING_UPDATES: readonly {
     route: /^memberships\/[^/]+$/,
     envelope: "membership",
     // MembersController#update reads a missing role_ids as none.
-    deletes: ({ role_ids }) => !Array.isArray(role_ids) || role_ids.length === 0,
-    effect: "a membership left without `role_ids` is deleted",
+    deletes: ({ role_ids }, route) =>
+      !Array.isArray(role_ids) || role_ids.length === 0 || currentRoleCheck(route, role_ids),
+    effect:
+      "`role_ids` that name none of the membership's current roles can delete it. To swap roles, send the new roles with one current role, then send the new roles alone",
   },
   { route: /^issues\/[^/]+$/, envelope: "issue", deletes: deletesAttachments, effect: ATTACHMENTS },
   {
@@ -165,7 +178,42 @@ const DELETING_UPDATES: readonly {
   },
 ];
 
-export function deletedBy(base: URL, plan: Plan): string | undefined {
+/**
+ * Redmine drops each named role the key cannot manage, which the API does not show, and keeps each current
+ * role the key cannot manage. So a named role the membership has now stays either way, and the membership with it.
+ */
+function currentRoleCheck(route: string, roleIds: readonly unknown[]): Unless {
+  // Redmine reads ids with Ruby's to_i, which takes "3x" as 3, so only ids that read the same here count.
+  const named = roleIds.flatMap((id) =>
+    typeof id === "number" ? [id] : typeof id === "string" && /^\d+$/.test(id) ? [Number(id)] : [],
+  );
+  return {
+    read: {
+      id: "getMembership",
+      method: "GET",
+      path: `${route.replace(/\..*$/, "")}.json`,
+      pathParams: [],
+      query: {},
+      filters: {},
+      customFieldFilters: false,
+      body: null,
+      response: { kind: "item", unwrap: "membership" },
+      includes: [],
+      since: VERSIONS[0],
+      until: null,
+      safety: "read",
+      stability: "stable",
+    },
+    keeps: (membership) =>
+      isRecord(membership) &&
+      Array.isArray(membership.roles) &&
+      membership.roles.some(
+        (role) => isRecord(role) && typeof role.id === "number" && named.includes(role.id),
+      ),
+  };
+}
+
+export function deletedBy(base: URL, plan: Plan): Deletion | undefined {
   if (plan.method !== "PUT" && plan.method !== "PATCH") return undefined;
   // Rails squeezes repeated slashes and drops a trailing one before routing.
   const route = plan.url.pathname
@@ -174,13 +222,16 @@ export function deletedBy(base: URL, plan: Plan): string | undefined {
     .replace(/^\/|\/$/g, "");
   const rule = DELETING_UPDATES.find((candidate) => candidate.route.test(route));
   if (rule === undefined) return undefined;
+  const { effect } = rule;
   // Rails merges query parameters over the body's, so an envelope field there replaces the body's envelope.
   if ([...plan.url.searchParams.keys()].some((key) => key.startsWith(`${rule.envelope}[`))) {
-    return rule.effect;
+    return { effect };
   }
   const body: unknown = typeof plan.body === "string" ? JSON.parse(plan.body) : undefined;
   const fields = isRecord(body) ? body[rule.envelope] : undefined;
-  return isRecord(fields) && rule.deletes(fields) ? rule.effect : undefined;
+  const deletes = isRecord(fields) && rule.deletes(fields, route);
+  if (deletes === false) return undefined;
+  return deletes === true ? { effect } : { effect, unless: deletes };
 }
 
 /** JSON.stringify would silently drop a function and turn NaN into null, so those are refused instead. */

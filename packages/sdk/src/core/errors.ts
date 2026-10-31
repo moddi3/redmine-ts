@@ -48,8 +48,9 @@ export type RedmineErrorData =
       until: RedmineVersion | null;
     }
   /**
-   * Refused before the network: the client's `access` mode does not allow this HTTP method. With `deletes`, the
-   * method is allowed, and `deletes` says what this update would make Redmine delete.
+   * Refused before sending: the client's `access` mode does not allow this HTTP method. With `deletes`, the method
+   * is allowed, and `deletes` says what this update would make Redmine delete. A membership update reads the
+   * membership first, and a failed read rejects with its own error.
    */
   | { kind: "access_denied"; access: Exclude<Access, "full">; method: HttpMethod; deletes?: string }
   /** Refused before the network: bad config, unknown filter key or operator, conflicting paging options. */
@@ -152,7 +153,7 @@ function describe(data: RedmineErrorData, op: string | undefined): string {
     case "access_denied":
       return data.deletes === undefined
         ? `${op ?? "This request"} sends ${data.method}, which a client with access "${data.access}" refuses; nothing was sent`
-        : `${op ?? "This request"} would delete in Redmine (${data.deletes}), which a client with access "${data.access}" refuses; nothing was sent`;
+        : `A client with access "${data.access}" refused ${op ?? "this request"}, because ${data.deletes}. Nothing was changed`;
     case "invalid_input":
       return `Invalid input${where}: ${data.detail}`;
     case "transition_not_allowed":

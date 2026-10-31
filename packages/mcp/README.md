@@ -285,7 +285,7 @@ With `REDMINE_MCP_FILES_DIR` set, each mode lists one more tool, `attachments_sa
 
 A client can still call a tool the mode hides, for example from a tool list it cached earlier. The server then answers with an error that names the mode, and the SDK sends nothing to Redmine.
 
-`no-delete` also refuses an update that would make Redmine delete records: blank `notes` on `journals_update`, `memberships_update` without `role_ids`, and `deleted_attachment_ids` on `issues_update` or `wiki_update`. The error says what Redmine would delete. The SDK reads the request as it would be sent, so `raw_request` to those routes is refused too. A plugin endpoint that deletes on a `POST`, `PUT` or `PATCH` is unknown to the SDK, and `raw_request` sends it.
+`no-delete` also refuses an update that would make Redmine delete records: blank `notes` on `journals_update`, `deleted_attachment_ids` on `issues_update` or `wiki_update`, and `memberships_update` with `role_ids` that name none of the membership's current roles. To check `role_ids`, the server reads the membership first. The error says what Redmine would delete, and for a membership it says how to swap roles in two updates. The SDK reads the request as it would be sent, so `raw_request` to those routes is refused too. A plugin endpoint that deletes on a `POST`, `PUT` or `PATCH` is unknown to the SDK, and `raw_request` sends it.
 
 The mode limits what the server does. It does not limit the API key. A key that belongs to an admin can still do everything outside this server, so give the server a key of a user whose Redmine role allows only what the agent needs.
 

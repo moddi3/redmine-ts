@@ -193,7 +193,7 @@ try {
 | `timeout`                | An attempt ran longer than `timeoutMs`.                                                                                          |
 | `aborted`                | Your `signal` aborted the call.                                                                                                  |
 | `unsupported_version`    | The declared `version` lacks the operation. Nothing was sent.                                                                    |
-| `access_denied`          | `data.access` refuses the HTTP method in `data.method`, or an update that deletes what `data.deletes` says. Nothing was sent.    |
+| `access_denied`          | `data.access` refuses the HTTP method in `data.method`, or an update that deletes what `data.deletes` says. Nothing was changed. |
 | `invalid_input`          | Bad config, an unknown filter, or conflicting paging options. Nothing was sent.                                                  |
 | `transition_not_allowed` | `issues.transition` asked for a status the workflow does not allow.                                                              |
 
@@ -359,7 +359,8 @@ A derived client shares the parent's `maxConcurrent` limit. `with` accepts any c
 | `"no-delete"`      | `GET`, `POST`, `PUT`, `PATCH`. |
 | `"read-only"`      | `GET` only.                    |
 
-- `"no-delete"` also refuses an update that would make Redmine delete records: blank journal `notes`, a membership update without `role_ids`, and `deleted_attachment_ids` on an issue or a wiki page. It reads the request as it would be sent, so `rm.request` to those routes is refused too.
+- `"no-delete"` also refuses an update that would make Redmine delete records: blank journal `notes`, `deleted_attachment_ids` on an issue or a wiki page, and membership `role_ids` that name none of the membership's current roles. The client reads the request as it would be sent, so `rm.request` to those routes is refused too.
+- For a membership update with roles in `role_ids`, the client first reads the membership with one `GET`. Redmine silently drops the roles that the key cannot manage, and the API does not list them, so only a role that the membership has now is sure to stay. A failed read fails the call with the read's error. To swap roles, send the new roles with one current role, then send the new roles alone.
 - With a literal such as `access: "read-only"`, the client type has only the methods that send what the mode allows, so a write on a read-only client does not compile. `rm.request` takes only the allowed `method` values.
 - With an access read from config, typed `Access`, the client type has every method, and the runtime refusal below still applies.
 

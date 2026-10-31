@@ -201,15 +201,13 @@ export function createUploadingCall(engine: Engine, upload: AnyOp): UploadingCal
     };
     const entries = list.map((entry: unknown, at) => checked(entry, `${key}[${at}]`));
     const placeholders = entries.map((e) => (e.file === undefined ? e : refOf("0.0", e)));
-    const deleting = engine.deletion(
-      op,
-      planRequest(engine.config.base, op, { ...input, [key]: placeholders }, {}),
-    );
-    if (deleting) throw deleting;
+    const plan = planRequest(engine.config.base, op, { ...input, [key]: placeholders }, {});
     for (const stream of streams.keys()) claimedStreams.add(stream);
 
     const resolved = [...entries];
     try {
+      const deleting = await engine.checkDeletion(op, plan, options);
+      if (deleting) throw deleting;
       for (const [at, entry] of entries.entries()) {
         if (entry.file !== undefined) resolved[at] = await send(entry, options);
       }

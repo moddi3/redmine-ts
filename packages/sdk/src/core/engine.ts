@@ -32,8 +32,7 @@ export interface Engine {
   ): Promise<Response>;
   /** Why the client refuses `op` without sending anything (its `access` or declared `version`), if it does. */
   refusal(op: AnyOp): RedmineError | undefined;
-  /** Why a restricted `access` refuses to send `plan`, an update that would make Redmine delete records. */
-  deletion(op: AnyOp, plan: Plan): RedmineError | undefined;
+  checkDeletion(op: AnyOp, plan: Plan, options: CallOptions): Promise<RedmineError | undefined>;
 }
 
 interface Delivered {
@@ -70,13 +69,22 @@ export function createEngine(config: ResolvedConfig): Engine {
     );
   }
 
-  function deletion(op: AnyOp, plan: Plan): RedmineError | undefined {
+  async function checkDeletion(
+    op: AnyOp,
+    plan: Plan,
+    options: CallOptions,
+  ): Promise<RedmineError | undefined> {
     const { access } = config;
     if (access === "full") return undefined;
-    const deleted = deletedBy(config.base, plan);
-    if (deleted === undefined) return undefined;
+    const deleting = deletedBy(config.base, plan);
+    if (deleting === undefined) return undefined;
+    const { unless } = deleting;
+    if (unless !== undefined) {
+      const { value } = await run(unless.read, {}, options, undefined, false);
+      if (unless.keeps(decode(unless.read, value, false))) return undefined;
+    }
     return new RedmineError(
-      { kind: "access_denied", access, method: op.method, deletes: deleted },
+      { kind: "access_denied", access, method: op.method, deletes: deleting.effect },
       { op: op.id },
     );
   }
@@ -178,7 +186,7 @@ export function createEngine(config: ResolvedConfig): Engine {
       query,
       ...(options.as === undefined ? {} : { as: options.as }),
     });
-    const deleting = deletion(op, plan);
+    const deleting = await checkDeletion(op, plan, options);
     if (deleting) throw deleting;
     if (
       options.as !== undefined &&
@@ -333,7 +341,7 @@ export function createEngine(config: ResolvedConfig): Engine {
       dispatch(op, input, options) as ReturnOf<O>,
     send,
     refusal,
-    deletion,
+    checkDeletion,
   };
 }
 
