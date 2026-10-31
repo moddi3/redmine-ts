@@ -193,7 +193,7 @@ try {
 | `timeout`                | An attempt ran longer than `timeoutMs`.                                                                                          |
 | `aborted`                | Your `signal` aborted the call.                                                                                                  |
 | `unsupported_version`    | The declared `version` lacks the operation. Nothing was sent.                                                                    |
-| `access_denied`          | The client's `access` does not allow the request's HTTP method. `data.access` and `data.method` say which. Nothing was sent.     |
+| `access_denied`          | `data.access` refuses the HTTP method in `data.method`, or an update that deletes what `data.deletes` says. Nothing was sent.    |
 | `invalid_input`          | Bad config, an unknown filter, or conflicting paging options. Nothing was sent.                                                  |
 | `transition_not_allowed` | `issues.transition` asked for a status the workflow does not allow.                                                              |
 
@@ -359,6 +359,7 @@ A derived client shares the parent's `maxConcurrent` limit. `with` accepts any c
 | `"no-delete"`      | `GET`, `POST`, `PUT`, `PATCH`. |
 | `"read-only"`      | `GET` only.                    |
 
+- `"no-delete"` also refuses an update that would make Redmine delete records: blank journal `notes`, a membership update without `role_ids`, and `deleted_attachment_ids` on an issue or a wiki page. It reads the request as it would be sent, so `rm.request` to those routes is refused too.
 - With a literal such as `access: "read-only"`, the client type has only the methods that send what the mode allows, so a write on a read-only client does not compile. `rm.request` takes only the allowed `method` values.
 - With an access read from config, typed `Access`, the client type has every method, and the runtime refusal below still applies.
 
@@ -388,7 +389,7 @@ try {
 }
 ```
 
-At runtime the client refuses any other request with `access_denied` before it sends anything, whatever its type says. `createRedmine` throws `invalid_input` for an unknown mode. The rule covers every namespace method, listings, the hand-written methods, and `rm.request`, which is judged by its `method`. `issues.transition` reads the issue and then updates it, so a read-only client refuses it before the read, and its type has no `transition`. `attachments.upload` is a `POST`. A create or update with files in `uploads` also sends a `POST` for each file, and the client refuses the whole call before the first upload when either method is not allowed. A client derived with `with` keeps its parent's `access`, in its type too.
+At runtime the client refuses any other request with `access_denied` before it sends anything, whatever its type says. `createRedmine` throws `invalid_input` for an unknown mode. The rule covers every namespace method, listings, the hand-written methods, and `rm.request`, which is judged by its `method`. `issues.transition` reads the issue and then updates it, so a read-only client refuses it before the read, and its type has no `transition`. `attachments.upload` is a `POST`. A create or update with files in `uploads` also sends a `POST` for each file, and the client refuses the whole call before the first upload when either method is not allowed or the update would delete. A client derived with `with` keeps its parent's `access`, in its type too.
 
 ## Retries, timeouts, and concurrency
 

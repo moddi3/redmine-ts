@@ -12,7 +12,7 @@ import type { FetchPage, ListInput } from "./listing.ts";
 import type { AnyOp, InputOf, ReturnOf } from "./op.ts";
 import { invalidInput, isRecord } from "./util.ts";
 import { isAvailable } from "./version.ts";
-import { decode, decodePage, interpret, planRequest, retryDecision } from "./wire.ts";
+import { decode, decodePage, deletedBy, interpret, planRequest, retryDecision } from "./wire.ts";
 import type { Plan } from "./wire.ts";
 
 /** One engine per createRedmine(). Owns two pieces of mutable state its requests share: the concurrency limiter and the cached admin check. */
@@ -32,6 +32,8 @@ export interface Engine {
   ): Promise<Response>;
   /** Why the client refuses `op` without sending anything (its `access` or declared `version`), if it does. */
   refusal(op: AnyOp): RedmineError | undefined;
+  /** Why a restricted `access` refuses to send `plan`, an update that would make Redmine delete records. */
+  deletion(op: AnyOp, plan: Plan): RedmineError | undefined;
 }
 
 interface Delivered {
@@ -64,6 +66,17 @@ export function createEngine(config: ResolvedConfig): Engine {
     if (version === undefined || isAvailable(version, op.since, op.until)) return undefined;
     return new RedmineError(
       { kind: "unsupported_version", declared: version, since: op.since, until: op.until },
+      { op: op.id },
+    );
+  }
+
+  function deletion(op: AnyOp, plan: Plan): RedmineError | undefined {
+    const { access } = config;
+    if (access === "full") return undefined;
+    const deleted = deletedBy(config.base, plan);
+    if (deleted === undefined) return undefined;
+    return new RedmineError(
+      { kind: "access_denied", access, method: op.method, deletes: deleted },
       { op: op.id },
     );
   }
@@ -165,6 +178,8 @@ export function createEngine(config: ResolvedConfig): Engine {
       query,
       ...(options.as === undefined ? {} : { as: options.as }),
     });
+    const deleting = deletion(op, plan);
+    if (deleting) throw deleting;
     if (
       options.as !== undefined &&
       !(await abortable(adminGuard.isAdmin(), options.signal, op.id))
@@ -318,6 +333,7 @@ export function createEngine(config: ResolvedConfig): Engine {
       dispatch(op, input, options) as ReturnOf<O>,
     send,
     refusal,
+    deletion,
   };
 }
 

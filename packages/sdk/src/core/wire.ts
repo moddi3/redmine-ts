@@ -131,6 +131,58 @@ function carriesLockVersion(payload: unknown): boolean {
   return has(payload) || (isRecord(payload) && Object.values(payload).some(has));
 }
 
+const ATTACHMENTS = "`deleted_attachment_ids` deletes those attachments";
+
+const deletesAttachments = ({ deleted_attachment_ids: ids }: Readonly<Record<string, unknown>>) =>
+  ids !== undefined && ids !== null && !(Array.isArray(ids) && ids.length === 0);
+
+const DELETING_UPDATES: readonly {
+  route: RegExp;
+  envelope: string;
+  deletes: (fields: Readonly<Record<string, unknown>>) => boolean;
+  effect: string;
+}[] = [
+  {
+    route: /^journals\/[^/]+$/,
+    envelope: "journal",
+    deletes: ({ notes }) => notes === null || (typeof notes === "string" && notes.trim() === ""),
+    effect:
+      "blank `notes` delete the journal on Redmine 6.1.0 to 6.1.3 and 7.0.0, and hide it from include=journals on later versions",
+  },
+  {
+    route: /^memberships\/[^/]+$/,
+    envelope: "membership",
+    // MembersController#update reads a missing role_ids as none.
+    deletes: ({ role_ids }) => !Array.isArray(role_ids) || role_ids.length === 0,
+    effect: "a membership left without `role_ids` is deleted",
+  },
+  { route: /^issues\/[^/]+$/, envelope: "issue", deletes: deletesAttachments, effect: ATTACHMENTS },
+  {
+    route: /^projects\/[^/]+\/wiki\/[^/]+$/,
+    envelope: "wiki_page",
+    deletes: deletesAttachments,
+    effect: ATTACHMENTS,
+  },
+];
+
+export function deletedBy(base: URL, plan: Plan): string | undefined {
+  if (plan.method !== "PUT" && plan.method !== "PATCH") return undefined;
+  // Rails squeezes repeated slashes and drops a trailing one before routing.
+  const route = plan.url.pathname
+    .slice(base.pathname.length)
+    .replace(/\/+/g, "/")
+    .replace(/^\/|\/$/g, "");
+  const rule = DELETING_UPDATES.find((candidate) => candidate.route.test(route));
+  if (rule === undefined) return undefined;
+  // Rails merges query parameters over the body's, so an envelope field there replaces the body's envelope.
+  if ([...plan.url.searchParams.keys()].some((key) => key.startsWith(`${rule.envelope}[`))) {
+    return rule.effect;
+  }
+  const body: unknown = typeof plan.body === "string" ? JSON.parse(plan.body) : undefined;
+  const fields = isRecord(body) ? body[rule.envelope] : undefined;
+  return isRecord(fields) && rule.deletes(fields) ? rule.effect : undefined;
+}
+
 /** JSON.stringify would silently drop a function and turn NaN into null, so those are refused instead. */
 function jsonText(op: AnyOp, value: unknown): string {
   let text: string | undefined;

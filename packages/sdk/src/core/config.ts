@@ -88,7 +88,10 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Which HTTP methods the client sends. Anything else is refused with kind "access_denied" before a request. */
+/**
+ * Which HTTP methods the client sends. Anything else is refused with kind "access_denied" before a request, and
+ * so is an update that would make Redmine delete records under "no-delete".
+ */
 export type Access = "full" | "no-delete" | "read-only";
 
 /** The methods each restricted mode allows. "full" allows every method. */
@@ -131,9 +134,9 @@ export interface RedmineConfig<
    */
   version?: V;
   /**
-   * "read-only" sends only GET, "no-delete" refuses DELETE, "full" (the default) sends everything. Applies to
-   * every method, listing, extra and `rm.request`, and is checked before any request. A literal also narrows
-   * the client type to the methods it allows.
+   * "read-only" sends only GET, "no-delete" refuses DELETE and updates that delete, such as blank journal
+   * notes, "full" (the default) sends everything. Applies to every method, listing, extra and `rm.request`, and
+   * is checked before any request. A literal also narrows the client type to the methods it allows.
    */
   access?: A;
   /** For proxies, internal CAs, browsers behind a CORS proxy, and tests. Default globalThis.fetch. */

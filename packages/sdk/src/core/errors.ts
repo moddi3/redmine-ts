@@ -47,8 +47,11 @@ export type RedmineErrorData =
       since: RedmineVersion;
       until: RedmineVersion | null;
     }
-  /** Refused before the network: the client's `access` mode does not allow this HTTP method. */
-  | { kind: "access_denied"; access: Exclude<Access, "full">; method: HttpMethod }
+  /**
+   * Refused before the network: the client's `access` mode does not allow this HTTP method. With `deletes`, the
+   * method is allowed, and `deletes` says what this update would make Redmine delete.
+   */
+  | { kind: "access_denied"; access: Exclude<Access, "full">; method: HttpMethod; deletes?: string }
   /** Refused before the network: bad config, unknown filter key or operator, conflicting paging options. */
   | { kind: "invalid_input"; detail: string }
   | { kind: "transition_not_allowed"; wanted: number; allowed: readonly number[] };
@@ -147,7 +150,9 @@ function describe(data: RedmineErrorData, op: string | undefined): string {
     case "unsupported_version":
       return `${op ?? "This operation"} needs Redmine ${data.since}${data.until ? ` to ${data.until}` : "+"}, but the client declared ${data.declared}`;
     case "access_denied":
-      return `${op ?? "This request"} sends ${data.method}, which a client with access "${data.access}" refuses; nothing was sent`;
+      return data.deletes === undefined
+        ? `${op ?? "This request"} sends ${data.method}, which a client with access "${data.access}" refuses; nothing was sent`
+        : `${op ?? "This request"} would delete in Redmine (${data.deletes}), which a client with access "${data.access}" refuses; nothing was sent`;
     case "invalid_input":
       return `Invalid input${where}: ${data.detail}`;
     case "transition_not_allowed":
