@@ -120,7 +120,7 @@ export function planRequest(
     method: op.method,
     url,
     headers,
-    body: JSON.stringify(payload),
+    body: jsonText(op, payload),
     replayable: true,
     lockVersion: carriesLockVersion(payload),
   };
@@ -234,11 +234,17 @@ export function deletedBy(base: URL, plan: Plan): Deletion | undefined {
   return deletes === true ? { effect } : { effect, unless: deletes };
 }
 
-/** JSON.stringify would silently drop a function and turn NaN into null, so those are refused instead. */
+/**
+ * JSON.stringify would silently drop a function, and turn NaN or an undefined array item into null, which
+ * clears a field on Redmine, so those are refused instead.
+ */
 function jsonText(op: AnyOp, value: unknown): string {
   let text: string | undefined;
   try {
-    text = JSON.stringify(value, (_key, v: unknown) => {
+    text = JSON.stringify(value, function (this: unknown, _key, v: unknown) {
+      if (v === undefined && Array.isArray(this)) {
+        throw new TypeError("undefined in an array cannot be sent as JSON");
+      }
       const kind = typeof v;
       if (kind === "function" || kind === "symbol" || kind === "bigint") {
         throw new TypeError(`a ${kind} cannot be sent as JSON`);

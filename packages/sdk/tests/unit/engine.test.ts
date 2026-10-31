@@ -108,6 +108,23 @@ describe("building requests", () => {
     expect(requests[0]?.json()).toEqual({ issue: sent });
   });
 
+  test.each([
+    ["NaN", { estimated_hours: Number.NaN }],
+    ["Infinity", { estimated_hours: Number.POSITIVE_INFINITY }],
+    ["-Infinity", { assigned_to_id: Number.NEGATIVE_INFINITY }],
+    ["NaN inside a custom field value", { custom_fields: [{ id: 1, value: [Number.NaN] }] }],
+    ["undefined inside an array", { watcher_user_ids: [1, undefined] }],
+    ["a bigint", { estimated_hours: 1n }],
+    ["a function", { notes: () => "n" }],
+    ["a circular object", { custom_fields: [circular] }],
+  ])("a typed body refuses %s before the network", async (_name, input) => {
+    const { call, requests } = testEngine(() => empty());
+    const error = await failure(call(ops.updateIssue, { issue_id: 7, ...input }));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
   test("an operation with no clear fields sends null as null", async () => {
     const { call, requests } = testEngine(() => json({ user: { id: 9 } }, 201));
     await call(ops.createUser, { login: "jsmith", auth_source_id: null });
@@ -191,6 +208,7 @@ describe("building requests", () => {
     ["a bigint", { payload: 1n }],
     ["NaN", { payload: Number.NaN }],
     ["Infinity nested in an array", { payload: [Number.POSITIVE_INFINITY] }],
+    ["undefined inside an array", { payload: [1, undefined] }],
     ["a circular object", { payload: circular }],
   ])("a value body refuses %s before the network", async (_name, input) => {
     const { call, requests } = testEngine(() => empty());
