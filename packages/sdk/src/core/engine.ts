@@ -104,29 +104,14 @@ export function createEngine(config: ResolvedConfig): Engine {
     stream: boolean,
   ): Promise<Delivered | Failed> {
     const release = await limiter.acquire(options.signal, op.id);
-    try {
-      const sent = { ...plan.headers, ...(await config.auth.headers()) };
-      return await exchange(op, plan, sent, options, timeoutMs, attemptNo, stream);
-    } finally {
-      release();
-    }
-  }
-
-  async function exchange(
-    op: AnyOp,
-    plan: Plan,
-    sent: Record<string, string>,
-    options: CallOptions,
-    timeoutMs: number,
-    attemptNo: number,
-    stream: boolean,
-  ): Promise<Delivered | Failed> {
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), timeoutMs);
     const signal = options.signal
       ? AbortSignal.any([options.signal, timeout.signal])
       : timeout.signal;
+    let sent: Record<string, string> = { ...plan.headers };
     try {
+      sent = { ...sent, ...(await untilAborted(config.auth.headers(), signal)) };
       emit({
         type: "request",
         op: op.id,
@@ -172,6 +157,7 @@ export function createEngine(config: ResolvedConfig): Engine {
       };
     } finally {
       clearTimeout(timer);
+      release();
     }
   }
 
@@ -213,8 +199,9 @@ export function createEngine(config: ResolvedConfig): Engine {
       if (error.kind === "unauthorized" && !replayed && plan.replayable) {
         let changed: boolean;
         try {
-          changed = await config.auth.onUnauthorized(result.sent);
+          changed = await abortable(config.auth.onUnauthorized(result.sent), options.signal, op.id);
         } catch (cause) {
+          if (RedmineError.is(cause, "aborted") && options.signal?.aborted) return fail(op, cause);
           return fail(op, new RedmineError(error.data, { op: op.id, cause }));
         }
         if (changed) {
@@ -374,18 +361,26 @@ function retryAfter(response: Response): number | undefined {
   return Number.isFinite(ms) ? Math.max(0, ms) : undefined;
 }
 
-/** Lets a caller stop waiting on work shared with other callers, without cancelling it for them. */
+/** Other callers may share `promise`, so a fired signal ends only this wait and never cancels the work. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const aborted = (): void => reject(signal.reason);
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+    if (signal.aborted) aborted();
+    else signal.addEventListener("abort", aborted, { once: true });
+  });
+}
+
 function abortable<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
   op: string,
 ): Promise<T> {
   if (signal === undefined) return promise;
-  return new Promise((resolve, reject) => {
-    const aborted = (): void => reject(new RedmineError({ kind: "aborted" }, { op }));
-    if (signal.aborted) return aborted();
-    signal.addEventListener("abort", aborted, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+  return untilAborted(promise, signal).catch((cause: unknown) => {
+    throw signal.aborted && cause === signal.reason
+      ? new RedmineError({ kind: "aborted" }, { op })
+      : cause;
   });
 }
 

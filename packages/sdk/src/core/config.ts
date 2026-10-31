@@ -14,10 +14,16 @@ export type Auth =
   | { bearer: string | BearerSource };
 
 export interface BearerSource {
+  /**
+   * Asked before each request until a `refresh()` succeeds, after which the client sends the refreshed token.
+   * The wait counts against `timeoutMs`. An abort or a timeout stops the call's wait without cancelling the
+   * promise, so one promise can serve many callers. A throw or a rejection fails the attempt as kind "network"
+   * with the error as `cause`, and retries as any network error does.
+   */
   token(): string | Promise<string>;
   /**
    * Called after a 401. Single-flight: concurrent 401s share one refresh. The failed request replays
-   * once, and only when its body is replayable.
+   * once, and only when its body is replayable. A caller that aborts stops waiting without cancelling it.
    */
   refresh?(): string | Promise<string>;
 }
