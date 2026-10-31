@@ -250,6 +250,21 @@ describe("no-delete reads a membership before an update that names roles", () =>
     expect(sent(requests)).toEqual(["GET /redmine/memberships/16.json"]);
   });
 
+  test("a failed read fails the call with the read's error, and the update is not sent", async () => {
+    const fake = fakeFetch(() => json({ errors: [] }, 404));
+    const rm = createRedmine({
+      baseUrl: BASE_URL,
+      auth: { apiKey: "secret-key" },
+      fetch: fake.fetch,
+      access: "no-delete",
+    });
+    const error = await failure(rm.memberships.update({ membership_id: 16, role_ids: [3] }));
+
+    expect(error.data.kind).toBe("not_found");
+    expect(error.op).toBe("getMembership");
+    expect(sent(fake.requests)).toEqual(["GET /redmine/memberships/16.json"]);
+  });
+
   test("full access sends without the read", async () => {
     const { rm, requests } = client("full");
     await rm.memberships.update({ membership_id: 16, role_ids: [999999] });
