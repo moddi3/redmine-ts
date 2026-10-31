@@ -1,10 +1,10 @@
-# @redmine-ts/sdk architecture
+# Architecture
 
-This is the synthesized design from a three-way design bakeoff, with candidates in `.audit/arena/`. The type contract lives in `packages/sdk/src/core/*.ts`. Bodies marked `not implemented` are filled against it.
+This page explains how `@redmine-ts/sdk` is built and why, and how `@redmine-ts/mcp` builds on it. The SDK's design came from a three-way design bakeoff, with the candidates in `.audit/arena/` and the outcome in [Synthesis decision](#synthesis-decision). The type contract lives in `packages/sdk/src/core/*.ts`.
 
 ## Problem
 
-We want a typed, zero-dependency, runtime-agnostic Redmine client that a later MCP server and agent toolkit can sit on. HTTP is not the hard part. These are:
+The goal is a typed Redmine client with no runtime dependencies, built only on web platform APIs, that the MCP server in `packages/mcp` and a future agent toolkit can sit on. HTTP is not the hard part. These are:
 
 1. The server never reports its version.
 2. The community OpenAPI spec (`spec/redmine-openapi/`, pinned tags) is the only structured source of truth.
@@ -71,7 +71,7 @@ The mechanics:
 - `createRedmine<const V>` captures a literal `version`. The generated `Resources<V>` intersects `Additions70` only when `AtLeast<V, "7.0">` holds. This is a lookup table (`Ladder`), not type arithmetic. A wide `RedmineVersion` (from `parseRedmineVersion(env)`) gets the full surface. The runtime guard still applies.
 - Patch-level quirks are fixed by symptom in `core/quirks.ts` and the pagination guards, never by version number.
 
-Adding Redmine 7.1 takes five steps. Run `spec/fetch.sh 7.1.0-r1`, then `vp run gen`, and read the drift report. Then add `redmine:7.1` to `docker/compose.yaml` and `scripts/redmine-env.ts`, and ship a minor release. No user changes an import. Dropping an EOL version is a major release.
+So adding a Redmine version is a minor release, and no user changes an import. [Add a Redmine version](../CONTRIBUTING.md#add-a-redmine-version) lists the steps. Dropping an EOL version is a major release.
 
 ### Data structures
 
@@ -82,7 +82,7 @@ The central type is `Op<Id, In, Ret>` (`core/op.ts`). It is plain data: method, 
 - Envelopes and the `{ errors: [...] }` body never reach the public API.
 - `repeat` (`k=a&k=b`) and the `value` body (any JSON value from `input[key]`, sent verbatim) exist only for `rm.request`. The generator never emits them, which is why they were added to the contract without touching generated code.
 
-Every method is `rm.<namespace>.<verb>(input, options?)`. The input is the same object a tool's JSON input will be, so the later toolkit needs no translation layer for JSON operations.
+Every method is `rm.<namespace>.<verb>(input, options?)`. The input is the same object as an MCP tool's JSON input, so the MCP server needs no translation layer for JSON operations.
 
 ### Generated versus hand-written
 
@@ -141,9 +141,16 @@ Some scoped variants have a global sibling that takes the same scope as a filter
 - **Outputs.** The schema of one item. Requiredness follows the generated types (the superset rule, sparse includes optional), and objects stay open, so a property a newer server adds never fails validation. An item that can answer 204 (`updateWikiPage`) is marked `optional`. A contract test validates every read method's real responses, and the results of the writes that seed them, against these schemas on all three servers.
 - **Shape.** Component schemas become shared constants in the generated file and are inlined by reference, so each schema is self-contained with no `$ref`. The generator fails on a recursive component. The binary `file` of `attachments.upload` has no JSON type: the tool layer owns that boundary. `inlineUploads` names the input whose entries may carry bytes, and its schema lists only the JSON form.
 
-### MCP server (later)
+### MCP server
 
-Tool annotations come from the catalog: a read gives `readOnlyHint`, DELETE gives `destructiveHint`, PUT gives `idempotentHint`. The MCP server also owns the JSON boundary for binary inputs and list paging, which the SDK surface does not have to share. Nothing in the SDK imports `@modelcontextprotocol/sdk`.
+`@redmine-ts/mcp` in `packages/mcp` turns the catalog into MCP tools. Nothing in the SDK imports MCP code, so the SDK keeps no runtime dependencies. The MCP package depends on the official MCP TypeScript SDK (`@modelcontextprotocol/server`), on `jose` to verify client assertion JWTs, and on `zod` to parse its settings, workflow tool inputs, and OAuth messages. The CLI reads its flags with `parseArgs` from `node:util`.
+
+- **Tools.** The server generates one tool per catalog entry, named `<namespace>_<verb>`, and adds seven hand-written workflow tools that run on the same path. Each tool's hints come from its HTTP method, as the [hints table](../packages/mcp/README.md#generated-tools) lists. The server owns the JSON boundary for binary inputs and for list paging, which the SDK does not share.
+- **Access.** The server hands its access mode and declared version to the SDK client, so the SDK refuses a call the mode or the version does not allow before any request, whatever the MCP client asks.
+- **Transports.** stdio serves a local client. `createRedmineMcpHandler` is a web-standard request handler for Streamable HTTP, and the CLI's `--http` serves it through `node:http`. On `SIGINT` or `SIGTERM` the CLI closes the HTTP server and lets the requests in flight finish. A second signal stops it at once.
+- **OAuth.** The server is its own authorization server for MCP clients and signs people in through Redmine's OAuth. It seals codes, tokens, states, and registrations with AES-GCM under keys that HKDF derives from one secret, so it needs no database. Single use, refresh token rotation, and ending a sign-in need shared state, which a `GrantStore` holds. The CLI keeps that store in memory. [Grant store](../packages/mcp/README.md#grant-store) lists the guarantees with and without a shared store.
+
+[MCP server package](roadmap.md#mcp-server-package) in the roadmap records the decisions behind the server.
 
 ## Synthesis decision
 

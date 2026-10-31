@@ -1,10 +1,12 @@
 # Roadmap
 
-This page lists work that is planned but not started, so it is not lost. Each item says why it matters and where the idea comes from. `docs/architecture.md` is the current design.
+This page lists what is planned, what is limited today, and what is done, so that no idea is lost. Each item says why it matters and where the idea comes from. [Architecture](architecture.md) describes the current design.
 
-Items marked **next** come after the first release. Items marked **later** wait for a need or for an upstream release.
+- **Next** items come first. **Later** items wait for a need or for an upstream release.
+- **Limitation** items describe what the packages do not do today. Each links to the page that explains it in full. A limitation is not a plan until an item under Next or Later covers it.
+- **Done** items record finished work and link to the decisions behind it.
 
-The table lists every item with its status. The details follow, grouped by status, with finished work last. The MCP items share the background in [MCP server package](#mcp-server-package).
+The MCP items share the background in [MCP server package](#mcp-server-package).
 
 ## Overview
 
@@ -17,11 +19,16 @@ The table lists every item with its status. The details follow, grouped by statu
 | Next                                    | [Issue fields upstream](#issue-fields-upstream)                                                     | SDK          | #65, d-yoshi/redmine-openapi#9 |
 | Next, partly done in MCP                | [Curated triage toolset](#curated-triage-toolset)                                                   | Toolkit      |                                |
 | Next                                    | [`gen` CLI for an instance config](#gen-cli-for-an-instance-config)                                 | SDK          |                                |
-| Open                                    | [Revocation in a real client](#revocation-in-a-real-client)                                         | MCP          |                                |
-| Open                                    | [After OAuth](#after-oauth)                                                                         | MCP          |                                |
-| Open                                    | [Bodies that keep growing](#bodies-that-keep-growing)                                               | MCP          |                                |
-| Follow-ups                              | [Follow-ups found while building](#follow-ups-found-while-building)                                 | MCP, SDK     |                                |
-| Done, include and exclude patterns open | [Read-only mode and tool hints](#read-only-mode-and-tool-hints)                                     | SDK, MCP     |                                |
+| Next                                    | [Follow-ups found while building](#follow-ups-found-while-building)                                 | MCP, SDK     |                                |
+| Limitation                              | [Revocation in a real client](#revocation-in-a-real-client)                                         | MCP          |                                |
+| Limitation                              | [Bodies that keep growing](#bodies-that-keep-growing)                                               | MCP          |                                |
+| Limitation                              | [Per-client revocation](#per-client-revocation)                                                     | MCP          |                                |
+| Limitation                              | [A list of connected clients](#a-list-of-connected-clients)                                         | MCP          |                                |
+| Limitation                              | [The CLI forgets used tokens on restart](#the-cli-forgets-used-tokens-on-restart)                   | MCP          |                                |
+| Limitation                              | [No deployment image](#no-deployment-image)                                                         | MCP          |                                |
+| Limitation                              | [Workers outside CI](#workers-outside-ci)                                                           | MCP          |                                |
+| Limitation                              | [No measure of agent success](#no-measure-of-agent-success)                                         | MCP          |                                |
+| Later                                   | [After OAuth](#after-oauth)                                                                         | MCP          |                                |
 | Later                                   | [A stale key set while the fetch slots are full](#a-stale-key-set-while-the-fetch-slots-are-full)   | MCP          |                                |
 | Later                                   | [Evals](#evals)                                                                                     | MCP          |                                |
 | Later                                   | [Write allowlists and MCP Registry listing](#write-allowlists-and-mcp-registry-listing)             | MCP          |                                |
@@ -34,6 +41,7 @@ The table lists every item with its status. The details follow, grouped by statu
 | Later                                   | [Effect entrypoint](#effect-entrypoint)                                                             | Effect       |                                |
 | Later                                   | [Text formatting as config](#text-formatting-as-config)                                             | SDK, toolkit |                                |
 | Later                                   | [Spec-diff bot](#spec-diff-bot)                                                                     | Tooling      |                                |
+| Done, include and exclude patterns open | [Read-only mode and tool hints](#read-only-mode-and-tool-hints)                                     | SDK, MCP     |                                |
 | Done                                    | [Phase 2: generated tools](#phase-2-generated-tools)                                                | MCP          |                                |
 | Done                                    | [Phase 3: workflow tools](#phase-3-workflow-tools)                                                  | MCP          |                                |
 | Done                                    | [Phase 4: Streamable HTTP](#phase-4-streamable-http)                                                | MCP          |                                |
@@ -89,35 +97,49 @@ Done in `@redmine-ts/mcp`: `issue_context`, name-to-id lookups in `reference_dat
 
 A command that reads an instance with an admin key and writes a config with literal types: custom field names mapped to `cf_<id>` with their formats and possible values, and the instance's statuses, trackers, and priorities. With that config, filters can read `cf.severity` instead of `cf_12`. Custom field definitions are visible only to admins, so the CLI also accepts a hand-written config of the same shape. Source: the owner's original research.
 
-## Open
+### Follow-ups found while building
+
+Expose filter value words (such as `open`) in the SDK catalog so the server does not infer them; resolve the SDK for tests with tsdown's dev exports instead of tsconfig paths; shorten the longest tool descriptions. The two SDK bugs phase 3 found, `assigned_to_id: null` not unassigning and id lists matching only their first id, are fixed in `@redmine-ts/sdk` (`overlay.clearAsEmpty` and `overlay.commaLists`).
+
+## Known limitations
+
+### Per-client revocation
+
+The OAuth server keeps no list of the tokens it issued, so it has no revocation endpoint and cannot end one client's sign-in. Revoking the application in Redmine ends every MCP client of that person, resetting an API key ends every use of that key, and changing the secret signs everyone out. [Sign out and revoke](../packages/mcp/README.md#sign-out-and-revoke) has the details. A revocation endpoint and per-client revocation are listed under [After OAuth](#after-oauth).
+
+### A list of connected clients
+
+Nobody can see which MCP clients hold tokens: neither the person who signed in nor an admin. Such a list needs a durable record of every sign-in, which the sealed, stateless design avoids. A shared grant store does not provide it, because a store keeps only markers of used tokens and ended sign-ins. Not planned.
+
+### The CLI forgets used tokens on restart
+
+The CLI keeps its grant store in memory, so a restart forgets which codes and refresh tokens were used and which sign-ins ended. [Grant store](../packages/mcp/README.md#grant-store) explains the effect. An embedded server can pass a shared store. The CLI has no option for one. Not planned.
+
+### No deployment image
+
+`docker/compose.yaml` runs Redmine servers for the contract tests, with known passwords and keys. The repository has no container image or Compose file that deploys the MCP server. [Redmine plugin: MCP at the tracker's own address](#redmine-plugin-mcp-at-the-trackers-own-address) lists the deployment recipes that are still open.
+
+### Workers outside CI
+
+`createRedmineMcpHandler` was checked by hand in workerd. CI runs it on Node and Bun only. A Workers run in CI is listed under [After OAuth](#after-oauth).
+
+### No measure of agent success
+
+The MCP server lists a tool for every operation, and the tests check each tool against real Redmine servers. Nothing measures yet whether a model picks the right tools and finishes a task. [Evals](#evals) are planned.
 
 ### Revocation in a real client
 
 Both clients refreshed after a forced 401, but nobody has revoked a sign-in in Redmine while connected. That check shows whether claude.ai and ChatGPT start a new sign-in when the refresh fails, and how ChatGPT handles a plain 403.
 
-### After OAuth
-
-Per-tool scope step-up, instead of hiding the tools a token's scope does not allow; a revocation endpoint and per-client revocation; Client ID Metadata Document URLs with a port, which the draft allows and the server refuses (Fable I1); a Workers run in CI; and Redmine plugin permissions in the requested scopes.
-
 ### Bodies that keep growing
 
 The budget does not tell users apart. About 10 bodies growing at 26 KiB/s each, just over the 25.6 KiB/s below which a body counts as stalled, hold the budget from one key at 2.1 Mbit/s, and other users' bodies over 64 KiB get 503 meanwhile: 8 and 11 of 15 uploads of 6.7 MiB in two five-minute tests. A proxy's per-client connection cap, such as nginx's `limit_conn`, bounds it today. A per-credential share of the budget would bound it in the server.
 
-### Follow-ups found while building
-
-Expose filter value words (such as `open`) in the SDK catalog so the server does not infer them; resolve the SDK for tests with tsdown's dev exports instead of tsconfig paths; shorten the longest tool descriptions. The two SDK bugs phase 3 found, `assigned_to_id: null` not unassigning and id lists matching only their first id, are fixed in `@redmine-ts/sdk` (`overlay.clearAsEmpty` and `overlay.commaLists`).
-
-### Read-only mode and tool hints
-
-Agents and scripts that should only read need a guarantee, not a convention. Two halves share the operation registry, which already classifies each operation as `read`, `idempotent`, or `write`:
-
-- **SDK, runtime: done.** `createRedmine({ access: "read-only" })` refuses every method but `GET`, and `"no-delete"` refuses `DELETE`, for generated methods, extras, listings and `rm.request`, before anything is sent, with the error kind `access_denied`.
-- **SDK, types: done.** A literal `access` narrows the client type. A read-only client has only the methods that send `GET`: reads, listings, `attachments.download` and `attachments.thumbnail`, and `rm.request` takes only `GET`. A no-delete client has no `DELETE` method. A write on a read-only client fails to compile, which guards scripts and dashboards that hold a powerful key at compile time too. An access read from config keeps the full type and the runtime refusal.
-- **MCP: done in `@redmine-ts/mcp`.** Every tool carries explicit annotations from its HTTP method: reads are `readOnlyHint`, updates and deletes are `destructiveHint`, `PUT` and `DELETE` are `idempotentHint`, and `openWorldHint` is false. Clients act on them: ChatGPT developer mode treats a tool without `readOnlyHint` as a write tool, and Codex CLI runs read-only tools concurrently. `--read-only` lists only read tools and `--no-delete` hides deletes; include and exclude patterns are still open.
-
-Sources: the owner's request, which named a client called devrelay as the model (its link is still to be added here), and onozaty/redmine-mcp-server, which marks tools with `readOnlyHint` and filters them with regex patterns. The owner's original research proposed read-only as the default policy, but the owner then chose full access by default with opt-in narrowing.
-
 ## Later
+
+### After OAuth
+
+Per-tool scope step-up, instead of hiding the tools a token's scope does not allow; a revocation endpoint and per-client revocation; Client ID Metadata Document URLs with a port, which the draft allows and the server refuses (Fable I1); a Workers run in CI; and Redmine plugin permissions in the requested scopes.
 
 ### A stale key set while the fetch slots are full
 
@@ -145,7 +167,7 @@ Redmine 7.0 sends outgoing webhooks for issues, wiki pages, time entries, news, 
 
 ### Redmine 7.1
 
-Add 7.1 when d-yoshi/redmine-openapi tags a 7.1 spec. The weekly `spec-watch` job opens an issue when that happens. 7.1 adds a Documents API. From 7.1 the server also ignores the `content_type` a client sends with an upload, so the `content_type` input of `attachments.upload` needs a note or a version guard. The steps are in "Add a Redmine version" in the root README. Source: the owner's original research.
+Add 7.1 when d-yoshi/redmine-openapi tags a 7.1 spec. The weekly `spec-watch` job opens an issue when that happens. 7.1 adds a Documents API. From 7.1 the server also ignores the `content_type` a client sends with an upload, so the `content_type` input of `attachments.upload` needs a note or a version guard. The steps are in [Add a Redmine version](../CONTRIBUTING.md#add-a-redmine-version). Source: the owner's original research.
 
 ### Redmine 6.0
 
@@ -181,6 +203,16 @@ The API does not say whether an instance uses Textile or CommonMark, so an agent
 When a new spec tag appears, a bot runs oasdiff between the vendored spec and the new tag, regenerates `src/generated/`, and opens a pull request with the drift report. The weekly `spec-watch` job, which opens a tracking issue, is the first step. Source: the owner's original research.
 
 ## Done
+
+### Read-only mode and tool hints
+
+Agents and scripts that should only read need a guarantee, not a convention. Two halves share the operation registry, which already classifies each operation as `read`, `idempotent`, or `write`:
+
+- **SDK, runtime: done.** `createRedmine({ access: "read-only" })` refuses every method but `GET`, and `"no-delete"` refuses `DELETE`, for generated methods, extras, listings and `rm.request`, before anything is sent, with the error kind `access_denied`.
+- **SDK, types: done.** A literal `access` narrows the client type. A read-only client has only the methods that send `GET`: reads, listings, `attachments.download` and `attachments.thumbnail`, and `rm.request` takes only `GET`. A no-delete client has no `DELETE` method. A write on a read-only client fails to compile, which guards scripts and dashboards that hold a powerful key at compile time too. An access read from config keeps the full type and the runtime refusal.
+- **MCP: done in `@redmine-ts/mcp`.** Every tool carries explicit annotations from its HTTP method: reads are `readOnlyHint`, updates and deletes are `destructiveHint`, `PUT` and `DELETE` are `idempotentHint`, and `openWorldHint` is false. Clients act on them: ChatGPT developer mode treats a tool without `readOnlyHint` as a write tool, and Codex CLI runs read-only tools concurrently. `--read-only` lists only read tools and `--no-delete` hides deletes; include and exclude patterns are still open.
+
+Sources: the owner's request, which named a client called devrelay as the model (its link is still to be added here), and onozaty/redmine-mcp-server, which marks tools with `readOnlyHint` and filters them with regex patterns. The owner's original research proposed read-only as the default policy, but the owner then chose full access by default with opt-in narrowing.
 
 ### Phase 2: generated tools
 

@@ -529,7 +529,7 @@ Redmine checks a token's permissions on most requests, but not on issue edits, n
 ### Sign out and revoke
 
 - An access token lasts at most an hour, and never longer than the Redmine token inside it. A refresh token lasts 30 days, and each refresh brings a new one. Without a grant store, an API-key sign-in ends 30 days after consent, refreshed or not.
-- People revoke the application in Redmine, under Authorized applications (`/oauth/authorized_applications`). Redmine then refuses its tokens at once. The next typed tool call, or any call to a `.json` or `.xml` path through `raw_request`, gets HTTP 401 `invalid_token`, the client's refresh fails, and the client asks them to sign in again.
+- People revoke the application in Redmine, under Authorized applications (`/oauth/authorized_applications`). Redmine then refuses its tokens at once. Every MCP client a person signed in through this server uses the same Redmine application, so revoking it ends all of them, not only one. The next typed tool call, or any call to a `.json` or `.xml` path through `raw_request`, gets HTTP 401 `invalid_token`, the client's refresh fails, and the client asks them to sign in again.
 - An admin who deletes the Redmine application ends every session the same way.
 - With a grant store, a refresh token or a code that comes back more than 30 seconds after its first use ends every token of that sign-in.
 - Changing `REDMINE_MCP_AUTH_SECRET` without keeping the old one signs every client out.
@@ -555,7 +555,7 @@ With a store:
 - A code or refresh token is checked before the server asks Redmine and marked after Redmine answers, so a Redmine outage spends nothing and the client can retry.
 - A store that fails, by throwing or rejecting, fails closed: the token endpoint answers 503 `temporarily_unavailable`, the consent page and Redmine's return show an error page to retry from, the MCP endpoint answers 503, and `onError` gets the cause.
 
-The CLI is one process, so it keeps the store in its memory. An embedded server passes `oauth.store`: `memoryGrantStore()` for a single process, or an adapter for something shared. The memory store grows with use: each refresh leaves a marker that lives 30 days, as long as the token it marks, so a client that refreshes every hour adds about 720 entries a month, and an ended sign-in adds one more. That suits the CLI; for a busy server, use a store that keeps its keys elsewhere. On Workers that is a Durable Object, one per key, which runs its storage calls one at a time; Workers KV is eventually consistent, so two isolates could both consume one key.
+The CLI is one process, so it keeps the store in its memory. A restart empties it. Tokens sealed before the restart still open with the same secret, so a refresh token used before the restart works once more, and a sign-in that the server ended because a token came back works again. An embedded server passes `oauth.store`: `memoryGrantStore()` for a single process, or an adapter for something shared. The memory store grows with use: each refresh leaves a marker that lives 30 days, as long as the token it marks, so a client that refreshes every hour adds about 720 entries a month, and an ended sign-in adds one more. That suits the CLI; for a busy server, use a store that keeps its keys elsewhere. On Workers that is a Durable Object, one per key, which runs its storage calls one at a time; Workers KV is eventually consistent, so two isolates could both consume one key.
 
 ```ts
 import { DurableObject } from "cloudflare:workers";

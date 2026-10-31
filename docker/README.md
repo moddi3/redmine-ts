@@ -1,15 +1,19 @@
 # Contract-test Redmine servers
 
-Real Redmine servers in Docker for SDK contract tests. Each uses the image's built-in SQLite, so there is no database container. `DATABASE_URL` in `docker/compose.yaml` gives SQLite a 5-second busy timeout, which the image's `database.yml` lacks. Without it, parallel test files that write at once get 500s with `database is locked`.
+`docker/compose.yaml` runs real Redmine servers for the contract tests of both packages. It is a test fixture that seeds known passwords and API keys. It does not deploy Redmine or the MCP server for real use. [Run a shared server](../packages/mcp/README.md#serve-over-http) covers deploying the MCP server.
+
+Each server uses the image's built-in SQLite, so there is no database container. `DATABASE_URL` in `docker/compose.yaml` gives SQLite a 5-second busy timeout, which the image's `database.yml` lacks. Without it, parallel test files that write at once get 500s with `database is locked`.
 
 ## Commands
 
 From the repo root:
 
-- `pnpm redmine:up` starts the servers, seeds them, and writes `.redmine/env.json`. Safe to rerun.
-- `pnpm redmine:smoke` runs a REST sanity check against every server and exits non-zero on failure.
-- `pnpm redmine:down` removes the containers and volumes, which wipes all data.
+- `node scripts/redmine-env.ts up` starts the servers, seeds them, and writes `.redmine/env.json`. Safe to rerun.
+- `node scripts/redmine-env.ts smoke` runs a REST sanity check against every server and exits non-zero on failure.
+- `node scripts/redmine-env.ts down` removes the containers and volumes, which wipes all data.
 - `node scripts/redmine-env.ts env` prints `.redmine/env.json`.
+
+The root `package.json` also has `redmine:up`, `redmine:smoke`, and `redmine:down` scripts. Run the script directly instead of through `vp run`. Docker state is not an input of the `vp run` cache, so after Docker restarts, `vp run redmine:up` can replay an old success and start nothing. [Run the contract tests](../CONTRIBUTING.md#run-the-contract-tests) shows the whole sequence.
 
 ## Servers
 
