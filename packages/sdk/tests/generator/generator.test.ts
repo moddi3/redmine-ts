@@ -130,6 +130,22 @@ describe("canonical inputs", () => {
 });
 
 describe("operation descriptors", () => {
+  test("overlay.descriptions replaces a description only while the spec says what it replaces", async () => {
+    const journal = CATALOG.find((entry) => entry.id === "updateJournal");
+    expect(journal?.description).toBe(overlay.descriptions.updateJournal?.text);
+
+    const changed = withSpecs((v) => {
+      v["7.0"]!.paths["/journals/{journal_id}.{format}"]!.put!.description = "Fixed upstream.";
+    });
+    await expect(generate(changed)).rejects.toThrow(
+      "updateJournal: the spec's description is not what overlay.descriptions replaces",
+    );
+    const descriptions = { updateJurnal: overlay.descriptions.updateJournal! };
+    await expect(generate(specs, { ...overlay, descriptions })).rejects.toThrow(
+      "overlay.descriptions names unknown operation updateJurnal",
+    );
+  });
+
   test("stability comes from overlay.stableTags, which must name real tags", async () => {
     expect(ops.getIssues.stability).toBe("stable");
     expect(ops.getVersionsByProject.stability).toBe("alpha");

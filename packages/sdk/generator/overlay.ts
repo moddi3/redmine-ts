@@ -62,6 +62,7 @@ export interface Overlay {
    */
   sparseIncludes: readonly string[];
   safety: Readonly<Record<string, Safety>>;
+  descriptions: Readonly<Record<string, { replaces: string; text: string; reason: string }>>;
   /**
    * Tags whose operations are stable; the rest are alpha. The spec's tag descriptions marked these Stable
    * through 7.0.1-r1, after the status column of https://www.redmine.org/projects/redmine/wiki/Rest_api,
@@ -185,6 +186,15 @@ export const overlay: Overlay = {
     "auth_source",
   ],
   safety: {},
+  descriptions: {
+    updateJournal: {
+      replaces:
+        "A journal left with empty `notes` and no property changes (`details`) is kept and can still be updated, but is omitted from the issue's `include=journals` response until it has notes again.",
+      text: "On Redmine 6.1.0 to 6.1.3 and on 7.0.0, a journal left with empty `notes` and no property changes (`details`) is deleted. On 6.1.4, 7.0.1 and later it is kept and can still be updated, but the issue's `include=journals` response leaves it out until it has notes again.",
+      reason:
+        "JournalsController#update destroyed such a journal until Redmine #44258, fixed in 6.1.4 and 7.0.1. The 6.1.3-r1 spec says it is deleted and the 7.0.2-r1 spec says it is kept, and the client cannot tell 6.1.3 from 6.1.4.",
+    },
+  },
   stableTags: ["Issues", "Projects", "Users", "Time Entries", "News"],
   resolved: {
     "#/components/schemas/issue/properties/children/items": ISSUE_CHILD,
