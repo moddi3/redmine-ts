@@ -1,5 +1,20 @@
 # @redmine-ts/mcp
 
+## 0.8.0
+
+### Minor Changes
+
+- c843bab: `reference_data` now returns a custom field's possible value as `{value, label}` when Redmine shows a label other than the value, and as the plain string as before when the two are equal. For an `enumeration` field, `value` is the id to send and `label` is its name, so the agent no longer sees ids such as `"3"` with no name. A client that reads `possible_values` as strings only must now accept the object form too.
+- 55c6d9b: A `no-delete` server now refuses the updates that make Redmine delete records, before sending: `journals_update` with blank `notes`, `issues_update` or `wiki_update` with `deleted_attachment_ids`, `memberships_update` with `role_ids` that name none of the membership's current roles, and the same requests through `raw_request`. A membership update with roles in `role_ids` reads the membership first, and its refusal says how to swap roles in two updates. The error reads `The "no-delete" access mode refused <tool>, because <what Redmine would delete>. Nothing was changed.` Over OAuth, a token limited to `redmine:write` that makes such a call is asked for `redmine:delete`. The instructions and the `raw_request` description say that updates that delete are refused.
+- 613804e: The MCP now sends `User-Agent: redmine-ts-mcp/<version> (+https://github.com/moddi3/redmine-ts)` on its requests to Redmine: tool calls, the API key check, and the OAuth token exchange. Redmine and proxy admins can tell these requests apart in their access logs. A `fetch` passed in the config receives each request with that header and can replace it. The SDK sends no User-Agent of its own, as before.
+- a729e72: `title`, `summary` and `content` now count as text written by Redmine users. A `news_list` or `search_list` page, whose items keep a news title or an issue's subject in `title`, now carries the untrusted-text warning first, as an issue list does. The warning and the server instructions name the new fields. `attachments_download` now carries the warning on every result, because its `content` field names what follows, such as the uploaded image.
+
+### Patch Changes
+
+- Updated dependencies [829396f]
+- Updated dependencies [da27f53]
+  - @redmine-ts/sdk@0.7.1
+
 ## 0.7.0
 
 ### Minor Changes
