@@ -146,6 +146,14 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
   const fail = (msg: string): never => {
     throw new Error(`${id}: ${msg}`);
   };
+  const description = (): string | undefined => {
+    const replaced = overlay.descriptions[id];
+    if (replaced === undefined) return op.description;
+    if (op.description?.trim() !== replaced.replaces) {
+      fail("the spec's description is not what overlay.descriptions replaces; re-read it");
+    }
+    return replaced.text;
+  };
   const params = op.parameters as Param[];
   const fields: Member[] = [];
   const field = (p: Param, key: string, type: string, schema: Schema = p.schema) =>
@@ -330,7 +338,7 @@ function analyze(m: MergedOp, doc: OpenApi, overlay: Overlay, includeMisses: str
     ),
     maybeEmpty,
     summary: op.summary,
-    description: op.description,
+    description: description(),
     docsUrl: op.externalDocs?.url,
   };
 }
@@ -544,6 +552,7 @@ function checkOverlay(ops: OpModel[], doc: OpenApi, overlay: Overlay): void {
     }
   }
   for (const id of Object.keys(overlay.safety)) need("safety", id);
+  for (const id of Object.keys(overlay.descriptions)) need("descriptions", id);
   for (const inc of overlay.sparseIncludes) {
     if (!ops.some((o) => o.descriptor.includes.includes(inc)))
       throw new Error(`overlay.sparseIncludes names ${inc}, which no operation includes`);

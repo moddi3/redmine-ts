@@ -481,6 +481,45 @@ describe("tools/call", () => {
     expect(seen).toEqual([]);
   });
 
+  it.each([
+    ["journals_update", { journal_id: 1, notes: "" }],
+    ["issues_update", { issue_id: 1, deleted_attachment_ids: [5] }],
+    [
+      "raw_request",
+      { method: "PATCH", path: "memberships/1.json", body: { membership: { role_ids: [] } } },
+    ],
+  ])(
+    "refuses %s with input that deletes on a no-delete server, saying what, before sending",
+    async (name, args) => {
+      const { client, seen } = await server({ access: "no-delete" });
+      const result = await client.callTool({ name, arguments: args });
+      expect(result.isError).toBe(true);
+      expect(texts(result)[0]).toMatch(
+        new RegExp(
+          `^The "no-delete" access mode refused ${name}, because .+\\. Nothing was changed\\.$`,
+        ),
+      );
+      expect(lastJson(result)).toMatchObject({
+        kind: "access_denied",
+        access: "no-delete",
+        deletes: expect.any(String),
+      });
+      expect(seen).toEqual([]);
+    },
+  );
+
+  it("sends an update that deletes nothing on a no-delete server", async () => {
+    const { client, seen } = await server({ access: "no-delete" });
+    const result = await client.callTool({
+      name: "issues_update",
+      arguments: { issue_id: 1, deleted_attachment_ids: [] },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(seen.map(({ method, url }) => `${method} ${url.pathname}`)).toEqual([
+      "PUT /issues/1.json",
+    ]);
+  });
+
   it("refuses a tool the declared version lacks, naming the version it needs", async () => {
     const { client, seen } = await server({ version: "6.1" });
     const result = await client.callTool({

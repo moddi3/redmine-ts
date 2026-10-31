@@ -5063,7 +5063,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     verb: "update",
     title: "Update journal",
     description:
-      "A journal left with empty `notes` and no property changes (`details`) is kept and can still be updated, but is omitted from the issue's `include=journals` response until it has notes again.",
+      "On Redmine 6.1.0 to 6.1.3 and on 7.0.0, a journal left with empty `notes` and no property changes (`details`) is deleted. On 6.1.4, 7.0.1 and later it is kept and can still be updated, but the issue's `include=journals` response leaves it out until it has notes again.",
     docsUrl: "https://www.redmine.org/projects/redmine/wiki/Rest_Journals#Updating-a-journal",
     method: "PUT",
     safety: "write",
