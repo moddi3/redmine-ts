@@ -180,6 +180,27 @@ describeServers("issue filters", (server) => {
     ).toEqual([a, b, c, d]);
   });
 
+  it("updated_on { gte: a UTC time } compares the time, not only the day, and refuses a fraction of a second or an offset", async () => {
+    const issues = await admin.issues
+      .list({ where: { project_id: projectId, status_id: "any" } })
+      .all();
+    const newest = issues.reduce((x, y) => (y.updated_on > x.updated_on ? y : x));
+    // Redmine sends gte T as "> T - 1 s" and may keep fractional seconds, so one second later can still match.
+    const later = new Date(Date.parse(newest.updated_on) + 2000)
+      .toISOString()
+      .replace(".000Z", "Z");
+    expect(await found({ status_id: "any", updated_on: { gte: newest.updated_on } })).toContain(
+      newest.id,
+    );
+    expect(await found({ status_id: "any", updated_on: { gte: later } })).toEqual([]);
+    for (const time of ["2026-10-31T08:00:00.500Z", "2026-10-31T11:00:00+03:00"]) {
+      const error = await found({ status_id: "any", updated_on: { gte: time } }).catch(
+        (e: unknown) => e,
+      );
+      expect(RedmineError.is(error, "validation"), time).toBe(true);
+    }
+  });
+
   it("filters combine with AND", async () => {
     expect(
       await found({

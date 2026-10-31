@@ -17,6 +17,8 @@ export const OPERATORS: readonly { name: string; code: string; value: string; fo
 
 const RAW = '{raw: "..."} in Redmine\'s own syntax, such as a relative date';
 
+const TIMESTAMPS = new Set(["created_on", "updated_on", "closed_on", "last_login_on"]);
+
 const ID_CONTAINS = "{contains: id}";
 
 export type Kind = "id" | "date" | "number" | "text";
@@ -101,13 +103,14 @@ function prose(
 }
 
 export function whereLegend(
-  where: readonly { spec: FilterSpec; prose: FilterProse }[],
+  where: readonly { name: string; spec: FilterSpec; prose: FilterProse }[],
   customFields: boolean,
 ): string {
   const filters = customFields
     ? [...where, { spec: CUSTOM_FIELD, prose: CUSTOM_FIELD_PROSE }]
     : where;
   const used = new Set(filters.flatMap((f) => operatorsOf(f.spec)));
+  const times = where.map((f) => f.name).filter((name) => TIMESTAMPS.has(name));
   return [
     "Filters keyed by Redmine filter name. A value or an array means equals any of them.",
     `An object with one operator picks another comparison: ${OPERATORS.filter((o) => used.has(o))
@@ -115,6 +118,11 @@ export function whereLegend(
       .join(", ")}.`,
     `Every filter also takes ${RAW}.`,
     ...(filters.some((f) => f.prose.kind === "date") ? ["Dates are YYYY-MM-DD."] : []),
+    ...(times.length > 0
+      ? [
+          `A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for ${new Intl.ListFormat("en").format(times)}.`,
+        ]
+      : []),
     "Unknown filters and operators are refused before anything is sent.",
   ].join(" ");
 }
