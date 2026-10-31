@@ -66,6 +66,22 @@ const GLOBAL: Record<string, Route> = {
             { value: "S2", label: "S2" },
           ],
         },
+        {
+          id: 4,
+          name: "Platform",
+          customized_type: "issue",
+          field_format: "enumeration",
+          is_required: false,
+          is_filter: true,
+          searchable: false,
+          multiple: false,
+          default_value: null,
+          visible: true,
+          possible_values: [
+            { value: "7", label: "Linux" },
+            { value: "8", label: "macOS" },
+          ],
+        },
       ],
     }),
 };
@@ -238,7 +254,7 @@ describe("reference_data", () => {
     vi.useRealTimers();
   });
 
-  it("returns the global lists and the current user without its API key", async () => {
+  it("returns the global lists, custom field values with their labels, and the current user without its API key", async () => {
     const { client } = await serve({ ...GLOBAL, "GET /users/current.json": user(true) });
     const result = await callOk(client, "reference_data", {});
     expect(result.structuredContent).toEqual({
@@ -256,6 +272,18 @@ describe("reference_data", () => {
           is_required: false,
           multiple: false,
           possible_values: ["S1", "S2"],
+        },
+        {
+          id: 4,
+          name: "Platform",
+          customized_type: "issue",
+          field_format: "enumeration",
+          is_required: false,
+          multiple: false,
+          possible_values: [
+            { value: "7", label: "Linux" },
+            { value: "8", label: "macOS" },
+          ],
         },
       ],
     });

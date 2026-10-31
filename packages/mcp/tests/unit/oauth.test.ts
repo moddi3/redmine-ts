@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/client";
 import type { OAuthClientProvider } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import pkg from "../../package.json" with { type: "json" };
 import { createRedmineMcpHandler, memoryGrantStore } from "../../src/index.ts";
 import type { GrantStore, RedmineMcpHandlerOptions } from "../../src/index.ts";
 import {
@@ -377,6 +378,9 @@ describe("built-in authorization server", () => {
       client_id: CLAUDE,
     });
     expect(await replayed.json()).toMatchObject({ error: "invalid_grant" });
+    expect([...redmine.agents]).toEqual([
+      `redmine-ts-mcp/${pkg.version} (+https://github.com/moddi3/redmine-ts)`,
+    ]);
     // A public client's tokens never send the server back to its document.
     expect(fetched).toEqual([CLAUDE]);
   });

@@ -119,7 +119,10 @@ describe("the filter table in where", () => {
     const { tools } = await listed();
     const { legend, rows } = table(where(tools, "issues_list").description!);
     const row = (name: string) => rows.get(name)?.[0];
-    expect(legend).toContain("Dates are YYYY-MM-DD.");
+    expect(legend).toContain(
+      "Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on, updated_on, and closed_on.",
+    );
+    expect(table(where(tools, "time_entries_list").description!).legend).not.toContain("UTC time");
     expect(legend).toContain('{between: [from, to]}, {contains: "text"}');
     expect(row("status_id")).toBe("status_id | id, `open`, `closed`, `any` alone | issue status");
     expect(row("tracker_id")).toBe("tracker_id | id");

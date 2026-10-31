@@ -31,7 +31,12 @@ const ReferenceDataSchema = z.object({
         field_format: z.string(),
         is_required: z.boolean(),
         multiple: z.boolean(),
-        possible_values: z.array(z.string()).optional(),
+        possible_values: z
+          .array(z.union([z.string(), z.object({ value: z.string(), label: z.string() })]))
+          .optional()
+          .describe(
+            "The value to send, or {value, label} where Redmine shows another label, such as an enumeration field's id and name.",
+          ),
       }),
     )
     .nullable()
@@ -149,8 +154,8 @@ async function customFields(
 }
 
 function customField(field: CustomField): NonNullable<Output["custom_fields"]>[number] {
-  const values = field.possible_values?.flatMap(({ value }) =>
-    value === undefined ? [] : [value],
+  const values = field.possible_values?.flatMap(({ value, label }) =>
+    value === undefined ? [] : [label === undefined || label === value ? value : { value, label }],
   );
   return {
     id: field.id,
