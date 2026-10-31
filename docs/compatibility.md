@@ -13,7 +13,7 @@ This page lists the Redmine versions, runtimes, and MCP clients that each packag
 
 CI pulls the `redmine:6.1` and `redmine:7.0` images, which move to each new patch release, so CI tests the latest patch of each version. The weekly workflow pulls them again every Monday, so a patch that changes API behavior fails CI within a week even when nobody pushed. Some behavior still differs between patch releases. For example, an update that leaves a journal with empty notes and no property changes deletes it on Redmine 6.1.0 to 6.1.3 and on 7.0.0, and keeps it on 6.1.4, 7.0.1, and later.
 
-Which version you declare decides what the client offers. [Declare the server version](../packages/sdk/README.md#declare-the-server-version) explains the SDK side, and [Version handling](mcp/tools.md#version-handling) the MCP side.
+Which version you declare decides what the client offers. [Declare the server version](sdk/configuration.md#declare-the-server-version) explains the SDK side, and [Version handling](mcp/tools.md#version-handling) the MCP side.
 
 ### OAuth sign-in
 
@@ -30,7 +30,7 @@ The MCP server signs people in through a Redmine OAuth application, which Redmin
 | Browsers           | Through a proxy, untested | No                     | No                                     | Not checked                                                                                            |
 | Deno               | Not a target              | Not a target           | Not a target                           | Not checked                                                                                            |
 
-Both packages are ESM only. The SDK has no runtime dependencies and no `node:` imports. The MCP package depends on the official MCP TypeScript SDK (`@modelcontextprotocol/server`), `jose`, `zod`, and the SDK. Its main entry imports no `node:` modules. The `@redmine-ts/mcp/node` entry and the CLI need Node.
+Both packages are ESM only. The SDK has no runtime dependencies and no `node:` imports. It uses only web platform APIs, such as `fetch`, `URL`, `AbortSignal.any`, and web streams. The MCP package depends on the official MCP TypeScript SDK (`@modelcontextprotocol/server`), `jose`, `zod`, and the SDK. Its main entry imports no `node:` modules. The `@redmine-ts/mcp/node` entry and the CLI need Node.
 
 ## MCP clients
 

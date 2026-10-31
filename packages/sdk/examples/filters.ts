@@ -18,3 +18,17 @@ const rm = createRedmine({
 
 const stale = await rm.issues.list({ where: untriaged, sort: "priority:desc" }).all({ max: 200 });
 console.log(`${stale.length} untriaged issues older than a month`);
+
+const pair = await rm.issues.list({ where: { issue_id: [4, 9], status_id: "any" } }).all();
+console.log(pair.map((issue) => issue.id));
+
+const twoProjects = await rm.issues.list({ where: { project_id: [1, 2] } }).count();
+console.log(`${twoProjects} open issues in projects 1 and 2, not counting their subprojects`);
+
+const allStatuses = await rm.issues
+  .list({ where: { project_id: "web", status_id: "any" } })
+  .count();
+console.log(`${allStatuses} issues in web, open and closed`);
+
+const belowEpic = await rm.issues.list({ where: { parent_id: { contains: 42 } } }).all();
+console.log(`${belowEpic.length} open issues below #42`);

@@ -179,7 +179,7 @@ The SDK does not validate responses today. An opt-in hook that accepts any [Stan
 
 ### `/testing` entrypoint
 
-A fake transport and fixtures recorded from the Docker Redmine servers, so users can test code built on the SDK without a server. Today users write their own fake `fetch`, as the SDK README shows. Source: the owner's original research.
+A fake transport and fixtures recorded from the Docker Redmine servers, so users can test code built on the SDK without a server. Today users write their own fake `fetch`, as [Bring your own fetch](sdk/configuration.md#bring-your-own-fetch) shows. Source: the owner's original research.
 
 ### Effect entrypoint
 

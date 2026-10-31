@@ -5,11 +5,11 @@ Pick the task you have. Each page links on to the details.
 ## Call Redmine from code with the SDK
 
 - [Install and make a first call](../packages/sdk/README.md#quickstart)
-- [Filter lists, embed related data, and walk pages](../packages/sdk/README.md#call-an-operation)
-- [Create and update records, and attach files](../packages/sdk/README.md#create-update-and-attach-files)
-- [Configure versions, auth, access, retries, and `fetch`](../packages/sdk/README.md#declare-the-server-version)
-- [Handle errors](../packages/sdk/README.md#handle-errors)
-- [Look up namespaces, raw requests, and the catalog](../packages/sdk/README.md#namespaces)
+- [Get records, filter lists, and walk pages](sdk/queries.md)
+- [Create and update records, and attach files](sdk/writes.md)
+- [Set credentials, the server version, access, retries, and `fetch`](sdk/configuration.md)
+- [Tell failures apart and recover from them](sdk/errors.md)
+- [Look up namespaces, types, raw requests, and the catalog](sdk/reference.md)
 
 ## Let an AI client work in Redmine with the MCP server
 

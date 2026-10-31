@@ -32,7 +32,7 @@ const issue = await rm.issues.get({ issue_id: 42, include: ["journals"] });
 console.log(issue.subject, `${issue.journals.length} journal entries`);
 ```
 
-Copy the API key from Redmine, under **My account**, **API access key**. The [SDK README](packages/sdk/README.md) continues from here.
+Copy the API key from Redmine, under **My account**, **API access key**. [Read data](docs/sdk/queries.md) continues from here, and the [SDK README](packages/sdk/README.md) lists every guide.
 
 ## Connect an AI client
 

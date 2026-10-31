@@ -10,15 +10,23 @@ const examples = readdirSync(resolve(sdk, "examples"))
   .filter((name) => name.endsWith(".ts"))
   .map((name) => readFileSync(resolve(sdk, "examples", name), "utf8"));
 
+const guides = readdirSync(resolve(repo, "docs/sdk"))
+  .filter((name) => name.endsWith(".md"))
+  .map((name) => `docs/sdk/${name}`);
+
 /** Pages with SDK code, relative to the repository root. Each must hold at least one ts block. */
-const pages = ["packages/sdk/README.md", "README.md"];
-const namespaceTable = "packages/sdk/README.md";
+const pages = ["packages/sdk/README.md", "README.md", ...guides];
+const namespaceTable = "docs/sdk/reference.md";
 
 const read = (page: string) => readFileSync(resolve(repo, page), "utf8");
 
 describe("SDK documentation", () => {
   test("reads typechecked examples", () => {
     expect(examples.length).toBeGreaterThan(0);
+  });
+
+  test("finds the SDK guides in docs/sdk", () => {
+    expect(guides).toContain(namespaceTable);
   });
 
   test.each(pages)(

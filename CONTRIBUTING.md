@@ -85,7 +85,7 @@ CI lints `.github/workflows/` with [jactionlint](https://github.com/jdx/jactionl
 
 ## Change the documentation
 
-`packages/sdk/tests/unit/readme.test.ts` requires every `ts` block in the SDK README to be an exact excerpt of a file in `packages/sdk/examples/`, which `vp check` typechecks. To change an example, change the example file first, then copy the lines into the page.
+`packages/sdk/tests/unit/readme.test.ts` requires every `ts` block in the root README, the SDK README, and each page in `docs/sdk/` to be an exact excerpt of a file in `packages/sdk/examples/`, which `vp check` typechecks. It also requires the namespace table in `docs/sdk/reference.md` to match the client. To change an example, change the example file first, then copy the lines into the page.
 
 ## Find the design record
 
