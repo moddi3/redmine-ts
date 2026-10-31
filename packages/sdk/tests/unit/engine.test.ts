@@ -690,6 +690,20 @@ describe("timeouts and cancellation", () => {
     expect(error.data).toEqual({ kind: "timeout", after_ms: 10 });
   });
 
+  test.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["zero", 0],
+    ["a negative number", -1],
+    ["2 ** 31", 2 ** 31],
+  ])("a per-call timeout of %s is refused before anything is sent", async (_name, timeoutMs) => {
+    const { call, requests } = testEngine(keyOf("admin", ok));
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }, { as: "jsmith", timeoutMs }));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
   test("timeouts retry a GET and never a PUT", async () => {
     const get = testEngine(hang, { timeoutMs: 10 });
     const put = testEngine(hang, { timeoutMs: 10 });

@@ -398,7 +398,7 @@ At runtime the client refuses any other request with `access_denied` before it s
 
 | Option           | Default | Meaning                                                               |
 | ---------------- | ------- | --------------------------------------------------------------------- |
-| `timeoutMs`      | 30000   | Time limit for each attempt.                                          |
+| `timeoutMs`      | 30000   | Time limit for each attempt in ms, at most 2147483647.                |
 | `maxConcurrent`  | 4       | Requests in flight per client, shared with clients derived by `with`. |
 | `retry.attempts` | 2       | Extra attempts after the first.                                       |
 | `retry.baseMs`   | 250     | Base of the exponential backoff with full jitter.                     |

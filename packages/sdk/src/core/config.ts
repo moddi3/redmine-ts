@@ -214,7 +214,7 @@ export function resolveConfig(config: RedmineConfig): ResolvedConfig {
     access,
     // Called through a wrapper: a bare `globalThis.fetch` throws "Illegal invocation" when called as a method.
     fetch: custom ?? ((input, init) => globalThis.fetch(input, init)),
-    timeoutMs: positive("timeoutMs", config.timeoutMs ?? 30_000),
+    timeoutMs: timerMs("timeoutMs", config.timeoutMs ?? 30_000),
     maxConcurrent: positiveInteger("maxConcurrent", config.maxConcurrent ?? 4),
     retry: resolveRetry(config.retry ?? {}),
     normalize: config.normalize ?? true,
@@ -251,9 +251,16 @@ function parseBase(raw: string | URL): URL {
   return url;
 }
 
-function positive(name: string, value: number): number {
-  if (!Number.isFinite(value) || value <= 0)
-    throw invalidInput(`${name} must be a positive number`);
+/** setTimeout keeps a delay in a signed 32-bit integer and fires a longer one after 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+export function timerMs(name: string, value: number, op?: string): number {
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_TIMER_MS) {
+    throw invalidInput(
+      `${name} must be a positive number of milliseconds up to ${MAX_TIMER_MS}`,
+      op,
+    );
+  }
   return value;
 }
 

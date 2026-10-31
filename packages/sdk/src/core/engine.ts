@@ -2,7 +2,7 @@
 // decision and reads everything about an operation off the Op, so it works with any registry.
 
 import { VERSIONS } from "../generated/versions.ts";
-import { ACCESS_METHODS, DEFAULT_RETRY, resolveRetry } from "./config.ts";
+import { ACCESS_METHODS, DEFAULT_RETRY, resolveRetry, timerMs } from "./config.ts";
 import type { CallOptions, ResolvedConfig, RetryPolicy, SdkEvent } from "./config.ts";
 import { RedmineError } from "./errors.ts";
 import { markSent, toDownload } from "./files.ts";
@@ -172,6 +172,10 @@ export function createEngine(config: ResolvedConfig): Engine {
       query,
       ...(options.as === undefined ? {} : { as: options.as }),
     });
+    const timeoutMs =
+      options.timeoutMs === undefined
+        ? config.timeoutMs
+        : timerMs("timeoutMs", options.timeoutMs, op.id);
     const deleting = await checkDeletion(op, plan, options);
     if (deleting) throw deleting;
     if (
@@ -187,7 +191,6 @@ export function createEngine(config: ResolvedConfig): Engine {
       );
     }
     const policy = callPolicy(options);
-    const timeoutMs = options.timeoutMs ?? config.timeoutMs;
     let retries = 0;
     let attemptNo = 0;
     let replayed = false;
