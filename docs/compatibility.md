@@ -1,6 +1,6 @@
 # Compatibility
 
-This page lists the Redmine versions, runtimes, and MCP clients that each package supports, and how each one is checked. "CI" means `.github/workflows/ci.yml`, which runs on every push and pull request. "By hand" means a person checked it once, on the date given.
+This page lists the Redmine versions, runtimes, and MCP clients that each package supports, and how each one is checked. "CI" means `.github/workflows/ci.yml`, which runs on pull requests, on pushes to `main`, and every Monday from the weekly workflow. "By hand" means a person checked it once, on the date given.
 
 ## Redmine versions
 
@@ -11,7 +11,9 @@ This page lists the Redmine versions, runtimes, and MCP clients that each packag
 | 6.0 and older | Not supported                            | Not supported           | Not checked. The vendored spec has no 6.0 tag.      |
 | 7.1           | Planned                                  | Planned                 | [Roadmap](roadmap.md#redmine-71)                    |
 
-CI pulls the `redmine:6.1` and `redmine:7.0` images, which move to each new patch release, so CI tests the latest patch of each version. The weekly workflow pulls them again every Monday, so a patch that changes API behavior fails CI within a week even when nobody pushed. Some behavior still differs between patch releases. For example, an update that leaves a journal with empty notes and no property changes deletes it on Redmine 6.1.0 to 6.1.3 and on 7.0.0, and keeps it on 6.1.4, 7.0.1, and later.
+CI pulls the `redmine:6.1` and `redmine:7.0` images, which move to each new patch release, so CI tests the latest patch of each version. The weekly workflow pulls them again every Monday, so a patch that breaks behavior the contract tests cover fails CI within a week even when nobody pushed. A change in behavior that no contract test covers can pass. Some behavior still differs between patch releases. For example, an update that leaves a journal with empty notes and no property changes deletes it on Redmine 6.1.0 to 6.1.3 and on 7.0.0, and keeps it on 6.1.4, 7.0.1, and later.
+
+The tool counts are for `full` mode with an admin key, no files directory, and the server version declared. A key that is not an admin's, a sign-in through a Redmine OAuth application, another access mode, or an OAuth token with fewer scopes lists fewer tools. [Which tools the server lists](mcp/tools.md#which-tools-the-server-lists) has the rules.
 
 Which version you declare decides what the client offers. [Declare the server version](sdk/configuration.md#declare-the-server-version) explains the SDK side, and [Version handling](mcp/tools.md#version-handling) the MCP side.
 
@@ -36,7 +38,7 @@ Both packages are ESM only. The SDK has no runtime dependencies and no `node:` i
 
 | Client                              | Transport                   | Checked by                                                                                      |
 | ----------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------- |
-| MCP Inspector 2.10.1                | HTTP with the API key       | CI lists the tools with `--strict` and calls `users_current` on every push                      |
+| MCP Inspector 2.10.1                | HTTP with the API key       | CI lists the tools with `--strict` and calls `users_current` in every run                       |
 | claude.ai                           | HTTP with OAuth             | By hand on 2026-10-26: signed in, ran tool calls, and refreshed its tokens                      |
 | ChatGPT                             | HTTP with OAuth             | By hand on 2026-10-26: signed in, ran tool calls, and refreshed its tokens                      |
 | MCP Inspector                       | HTTP with OAuth             | By hand, recorded in [the sign-in walkthrough](mcp/http-and-oauth.md#what-a-sign-in-looks-like) |

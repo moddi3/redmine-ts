@@ -1,10 +1,10 @@
 # HTTP server reference
 
-This page lists how `redmine-mcp --http` and `createRedmineMcpHandler` answer requests, the limits they apply, and how browser clients reach them. They share the code, so everything here applies to both. [Run a shared server for claude.ai and ChatGPT](http-and-oauth.md) is the setup guide.
+This page lists how `redmine-mcp --http` and `createRedmineMcpHandler` answer requests, the limits they apply, and how browser clients reach them. They share the request handling, so the answers, the body limits, and CORS work the same in both. The CLI also owns the process and the socket. It picks the listening address, sets up the `Host` check, and stops on a signal. A program that embeds the handler does those itself, with the options in [Embed the server](embedding.md#serve-many-users-over-http). [Run a shared server for claude.ai and ChatGPT](http-and-oauth.md) is the setup guide.
 
 ## Protocol and answers
 
-The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisions without sessions: each request stands alone, and `GET` and `DELETE` on `/mcp` answer 405. The access mode and `REDMINE_VERSION` apply to every request, as they do over stdio. `SIGINT` or `SIGTERM` lets requests in flight finish and then stops the server; a second signal stops it at once.
+The server speaks the 2026-07-28 protocol, and serves clients on the 2025 revisions without sessions: each request stands alone, and `GET` and `DELETE` on `/mcp` answer 405. The access mode and the declared version apply to every request, as they do over stdio. In the CLI, `SIGINT` or `SIGTERM` lets requests in flight finish and then stops the server. A second signal stops it at once.
 
 | Request                                                                                           | Answer                                                                                                              |
 | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -26,9 +26,9 @@ The 401 for a missing key and the 403s for `Origin` and `Host` are JSON-RPC erro
 
 ## Security defaults
 
-- The server listens on `127.0.0.1`. To listen anywhere else, pass the address with `--host`.
-- On a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, the address itself, the host of `REDMINE_MCP_PUBLIC_URL`, or a hostname that `--allow-host` lists. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it. On any other address, such as `0.0.0.0` in a container, the server cannot know every name its clients use, so it checks `Host` only when `--allow-host` is given.
-- A request with an `Origin` header gets 403 unless `--allow-origin` lists it. Browsers send `Origin`. Command-line and desktop clients do not, so they pass. See [Browser clients and CORS](#browser-clients-and-cors).
+- The CLI listens on `127.0.0.1`. To listen anywhere else, pass the address with `--host`.
+- In the CLI on a loopback address, the `Host` header must name `localhost`, `127.0.0.1`, `[::1]`, the address itself, the host of `REDMINE_MCP_PUBLIC_URL`, or a hostname that `--allow-host` lists. A web page that rebinds its own domain to your machine sends its domain as `Host`, so the server refuses it. On any other address, such as `0.0.0.0` in a container, the server cannot know every name its clients use, so it checks `Host` only when `--allow-host` is given. The handler checks `Host` only against its `allowedHosts` option.
+- A request with an `Origin` header gets 403 unless `--allow-origin`, or `allowedOrigins` in the handler, lists it. Browsers send `Origin`. Command-line and desktop clients do not, so they pass. See [Browser clients and CORS](#browser-clients-and-cors).
 - Before Redmine accepts a key, the server reads at most 64 KiB of the body and waits at most a second for it. Past either, it checks the key with one `GET /users/current.json` and reads nothing more until Redmine answers. A key Redmine refuses gets 401. When Redmine does not answer the check within 8 seconds, or answers with an error other than 401, the request gets 503, even a `tools/list`. Most tool calls are smaller and arrive at once, so they cost no extra call. `initialize` and `tools/list` ask Redmine about the key once to leave out the [tools that need an admin key](tools.md#tools-that-need-an-admin-key), and list every tool when Redmine refuses the key or does not answer.
 - A key that Redmine accepts, or a valid OAuth token, may send a body of up to about 6.7 MiB, enough for a 5 MiB `attachments_upload` in base64.
 - Bodies that are still arriving share a budget of 32 MiB, which the `maxBodyBytesInFlight` option of `createRedmineMcpHandler` changes. The default lets four bodies at the limit arrive at once. A body that needs room takes it from bodies that have not grown by 128 KiB in the last 5 seconds, and those get 408. When every other body is still growing, the request gets 503 with `Retry-After: 5`.
@@ -36,13 +36,13 @@ The 401 for a missing key and the 403s for `Origin` and `Host` are JSON-RPC erro
 - The budget does not tell users apart, and it does not cover the first 64 KiB of each body or the connections themselves. On a server with open registration or OAuth sign-ins, cap the connections of one client address in a proxy, such as with nginx's `limit_conn`.
 - On Cloudflare Workers, one isolate has 128 MB. Keep large uploads to about three at a time per isolate.
 - A client whose JSON encoder escapes `/`, as PHP's `json_encode` does by default, makes a 5 MB base64 upload about 109 KB longer, which goes over the limit and gets 413. Send such files a little smaller, or turn the escaping off.
-- The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so for remote use put a proxy that terminates TLS in front of the server and keep the server on loopback, as [Put TLS in front of the server](http-and-oauth.md#put-tls-in-front-of-the-server) shows.
+- The CLI speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so for remote use put a proxy that terminates TLS in front of the server and keep the server on loopback, as [Put TLS in front of the server](http-and-oauth.md#put-tls-in-front-of-the-server) shows.
 
 [HTTP server limits and the measurements behind them](../../packages/mcp/docs/limits.md) explains why each limit exists and what it costs, with the memory under stalled uploads, the connection after a refusal, and the peaks measured on Workers.
 
 ## Browser clients and CORS
 
-A page in a browser can call the server only when the server answers its CORS preflight. `--allow-origin` enables that: a request from a listed origin gets 204 for its `OPTIONS` preflight and CORS headers on every response, so a web inspector or a web app can call `/mcp` directly.
+A page in a browser can call the server only when the server answers its CORS preflight. `--allow-origin` enables that. A request from a listed origin gets 204 for its `OPTIONS` preflight and CORS headers on every response, so a web inspector or a web app can call `/mcp` directly.
 
 ```sh
 redmine-mcp --http --allow-origin https://app.example.com --allow-origin localhost
@@ -52,4 +52,4 @@ The flag takes a hostname or an origin. `localhost` admits `http://localhost:627
 
 The preflight allows `POST`, the only method `/mcp` serves, and the headers the 2026-07-28 transport sends (`Content-Type`, `Accept`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) plus `Authorization` and `X-Redmine-API-Key`. Responses expose `WWW-Authenticate`, so a page can follow an OAuth challenge. The server issues no session id. The `Host` check on loopback applies to preflights too. The OAuth metadata, token and registration endpoints answer any origin, as they carry no cookie and no key.
 
-CORS means that a page on an allowed origin holds the user's Redmine API key and acts as that user. Allow only origins whose code you trust, and prefer an origin to a hostname. CORS does not open the port: the server still listens on `127.0.0.1` by default, and the `Host` check still refuses a rebound domain.
+CORS means that a page on an allowed origin holds the user's Redmine API key and acts as that user. Allow only origins whose code you trust, and prefer an origin to a hostname. CORS does not open the port. The CLI still listens on `127.0.0.1` by default, and the `Host` check still refuses a rebound domain.

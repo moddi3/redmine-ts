@@ -35,4 +35,4 @@ The subpath server catches clients that build URLs with `new URL('/issues.json',
 
 ## Timing
 
-The images must already be pulled (`docker pull redmine:7.0 redmine:6.1`). A cold `up` from no containers takes about 25 seconds, mostly Rails boot and `db:migrate`. A rerun on running servers takes under 10 seconds.
+The images must already be pulled. From the repository root, `docker compose -f docker/compose.yaml pull` pulls them. A cold `up` from no containers takes about 25 seconds, mostly Rails boot and `db:migrate`. A rerun on running servers takes under 10 seconds.

@@ -84,7 +84,7 @@ export default {
 };
 ```
 
-`oauth.fetchClientMetadata` is required: it fetches the metadata documents clients name by URL, and the key sets those documents name, so it must not reach the server's own network. On Node, pass `publicFetch` from `@redmine-ts/mcp/node`, which refuses private and special-use addresses; the CLI does. Workers cannot reach private addresses, so pass the global fetch there, and turn on the `global_fetch_strictly_public` compatibility flag: without it, a metadata URL on the Worker's own zone is fetched straight from the zone's origin, past Cloudflare's security settings such as Access; with it, the request goes through Cloudflare's front door like any other. Create the handler on the first request, where the secrets are bound.
+`oauth.fetchClientMetadata` is required. It fetches the metadata documents clients name by URL, and the key sets those documents name, so it must not reach the server's own network. On Node, pass `publicFetch` from `@redmine-ts/mcp/node`, which refuses private and special-use addresses, as the CLI does. Workers cannot reach private addresses, so pass the global fetch there, and turn on the `global_fetch_strictly_public` compatibility flag. Without it, a metadata URL on the Worker's own zone is fetched straight from the zone's origin, past Cloudflare's security settings such as Access. With it, the request goes through Cloudflare's front door like any other. Create the handler on the first request, where the secrets are bound.
 
 ## Share the grant store on Workers
 

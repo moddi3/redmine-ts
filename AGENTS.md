@@ -5,7 +5,7 @@ This repository holds two npm packages. `@redmine-ts/sdk` in `packages/sdk` is a
 ## Rules
 
 - Commit messages follow Conventional Commits (`type(scope): subject`, such as `feat(sdk): add conflict kind` or `chore(audit): log decisions`). `.vite-hooks/commit-msg` rejects anything else.
-- A user-facing change to a published package needs a changeset: `vp run changeset`. A package README counts, because npm shows the README of the last release.
+- A user-facing change to a published package needs a changeset, written with `vp run changeset`. A change to a package README needs a `patch` changeset, because npm shows the README of the last release. A change only to tests, CI, or other documentation needs none. [docs/releasing.md](docs/releasing.md#add-a-changeset-to-your-change) holds the rule.
 - Never edit `packages/sdk/src/generated/` by hand. Change `packages/sdk/generator/` and run `vp run gen` in `packages/sdk`.
 - Every `ts` block in `README.md`, `packages/sdk/README.md`, and `docs/sdk/` is an exact excerpt of a file in `packages/sdk/examples/`. Change the example first, then copy the lines.
 - Write documentation as [docs/style-guide.md](docs/style-guide.md) describes.

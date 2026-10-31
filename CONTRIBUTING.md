@@ -29,7 +29,7 @@ Run these from the repository root:
 
 ## Run the contract tests
 
-Contract tests run both packages against real Redmine servers in Docker: Redmine 7.0, Redmine 6.1, and Redmine 7.0 under a `/redmine` subpath. Pull the images once with `docker pull redmine:7.0 redmine:6.1`.
+Contract tests run both packages against real Redmine servers in Docker: Redmine 7.0, Redmine 6.1, and Redmine 7.0 under a `/redmine` subpath. Pull the images once with `docker compose -f docker/compose.yaml pull`, as CI does.
 
 1. From the repository root, start and seed the servers:
 
@@ -77,7 +77,7 @@ Dropping a version that reached end of life is a major release.
 ## Write commits and changesets
 
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): subject`, for example `fix(sdk): retry 503 on GET only`. The `commit-msg` hook in `.vite-hooks/` rejects any other first line.
-- A user-facing change to a published package needs a changeset. Run `vp run changeset` and commit the file it writes. A change to tests, CI, or docs needs none. [docs/releasing.md](docs/releasing.md#add-a-changeset-to-your-change) explains how to pick the bump.
+- A user-facing change to a published package needs a changeset. Run `vp run changeset` and commit the file it writes. A change to a package README needs a `patch` changeset, because npm shows the README of the last release. A change only to tests, CI, or other documentation needs none. [docs/releasing.md](docs/releasing.md#add-a-changeset-to-your-change) explains how to pick the bump.
 
 ## Lint the workflows
 

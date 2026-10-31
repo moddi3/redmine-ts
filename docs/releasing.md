@@ -14,7 +14,7 @@ Pick the packages, the bump type, and write one or two sentences for the changel
 
 Pick the bump from the user's side. While a package is on `0.x`, a breaking change is a `minor` bump and everything else is a `patch` bump. Adding a supported Redmine version is a `minor` bump. Dropping one is breaking.
 
-A change to tests, CI, or docs needs no changeset.
+A change only to tests, CI, or documentation outside the package READMEs needs no changeset. npm shows the README of each package's last release, so a change to `packages/sdk/README.md` or `packages/mcp/README.md` needs a `patch` changeset to reach npm.
 
 Run `vp run changeset status` to see which packages the pending changesets bump.
 
