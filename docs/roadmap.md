@@ -105,7 +105,7 @@ Expose filter value words (such as `open`) in the SDK catalog so the server does
 
 ### Per-client revocation
 
-The OAuth server keeps no list of the tokens it issued, so it has no revocation endpoint and cannot end one client's sign-in. Revoking the application in Redmine ends every MCP client of that person, resetting an API key ends every use of that key, and changing the secret signs everyone out. [Sign out and revoke](../packages/mcp/README.md#sign-out-and-revoke) has the details. A revocation endpoint and per-client revocation are listed under [After OAuth](#after-oauth).
+The OAuth server keeps no list of the tokens it issued, so it has no revocation endpoint and cannot end one client's sign-in. Revoking the application in Redmine ends every MCP client of that person, resetting an API key ends every use of that key, and changing the secret signs everyone out. [Sign out and revoke](mcp/authentication.md#sign-out-and-revoke) has the details. A revocation endpoint and per-client revocation are listed under [After OAuth](#after-oauth).
 
 ### A list of connected clients
 
@@ -113,7 +113,7 @@ Nobody can see which MCP clients hold tokens: neither the person who signed in n
 
 ### The CLI forgets used tokens on restart
 
-The CLI keeps its grant store in memory, so a restart forgets which codes and refresh tokens were used and which sign-ins ended. [Grant store](../packages/mcp/README.md#grant-store) explains the effect. An embedded server can pass a shared store. The CLI has no option for one. Not planned.
+The CLI keeps its grant store in memory, so a restart forgets which codes and refresh tokens were used and which sign-ins ended. [Grant store](mcp/authentication.md#grant-store) explains the effect. An embedded server can pass a shared store. The CLI has no option for one. Not planned.
 
 ### No deployment image
 
@@ -155,7 +155,7 @@ Prompts, project, tracker and field allowlists for writes, and a listing in the 
 
 ### Redmine plugin: MCP at the tracker's own address
 
-An organization may want MCP at `https://redmine.company.com/mcp` instead of on a second host. A reverse-proxy rule in front of the standalone server already gives them that address, so the first step is a deployment recipe (nginx, Caddy, Apache, a Docker Compose sidecar, and Redmine under a subpath), not a plugin. For the recipe, the OAuth work mounts every endpoint under the MCP endpoint's path, takes a public URL apart from `REDMINE_URL`, serves its metadata at each discovery path a client may try, and never reads Redmine's `_redmine_session` cookie. The standalone server stays the supported product, because hosted Redmine services install third-party plugins only on top plans or on request. The MCP README already has the Caddy and nginx recipes and the subpath case; Apache and a Compose sidecar are open.
+An organization may want MCP at `https://redmine.company.com/mcp` instead of on a second host. A reverse-proxy rule in front of the standalone server already gives them that address, so the first step is a deployment recipe (nginx, Caddy, Apache, a Docker Compose sidecar, and Redmine under a subpath), not a plugin. For the recipe, the OAuth work mounts every endpoint under the MCP endpoint's path, takes a public URL apart from `REDMINE_URL`, serves its metadata at each discovery path a client may try, and never reads Redmine's `_redmine_session` cookie. The standalone server stays the supported product, because hosted Redmine services install third-party plugins only on top plans or on request. [Serve on Redmine's origin](mcp/http-and-oauth.md#serve-on-redmines-origin) already has the Caddy and nginx recipes and the subpath case; Apache and a Compose sidecar are open.
 
 A plugin would have to beat that recipe, and the obvious designs do not yet. Five dedicated Ruby plugins and an AI suite already serve MCP from inside Redmine, and the closest, `joaoperfig/redmine_mcp_plugin`, has OAuth, dynamic registration and 16 hand-written tools, so a native Ruby tool layer would copy our tools into a crowded niche. A plugin that makes Redmine the authorization server would rebuild in Ruby, on the Doorkeeper 5.8 that Redmine 6.1 and 7.0 pin, the metadata, `resource` audiences, `iss` and Client ID Metadata Documents that Doorkeeper 6 adds. It would not fix Redmine's #44271 either: issue edits ignore token scopes inside Redmine's `Issue` model, so the access modes stay the write guard.
 
@@ -244,7 +244,7 @@ With `REDMINE_MCP_AUTH_SECRET` (or `oauth`), the server is its own OAuth authori
 
 ### OAuth walkthrough
 
-"What a sign-in looks like" in the MCP README shows MCP Inspector signing in to the Docker Redmine 7.0, as an animation and six screenshots in `packages/mcp/docs/oauth/`. `scripts/oauth-walkthrough/record.sh` records them again. It keeps the Inspector's state in a temporary directory, and it tells the browser to bypass CSP over CDP, because the consent page's CSP blocks the recorder's pointer overlay.
+[What a sign-in looks like](mcp/http-and-oauth.md#what-a-sign-in-looks-like) shows MCP Inspector signing in to the Docker Redmine 7.0, as an animation and six screenshots in `packages/mcp/docs/oauth/`. `scripts/oauth-walkthrough/record.sh` records them again. It keeps the Inspector's state in a temporary directory, and it tells the browser to bypass CSP over CDP, because the consent page's CSP blocks the recorder's pointer overlay.
 
 ### Real clients
 

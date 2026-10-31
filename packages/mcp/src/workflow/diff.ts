@@ -228,7 +228,7 @@ function whole(lines: readonly Line[]): string {
     .join("\n");
 }
 
-/** The Changes, by line, of the block of changes from `start`, with its long lines paired as the README says. */
+/** The Changes, by line, of the block of changes from `start`, with its long lines paired as docs/mcp/workflow-tools.md says. */
 function blockChanges(lines: readonly Line[], start: number, room: number): Map<number, Changes> {
   let end = start;
   while (end < lines.length && lines[end]!.sign !== " ") end++;

@@ -1,6 +1,6 @@
 # HTTP server limits and the measurements behind them
 
-The [MCP README](../README.md#security-defaults) lists the rules the HTTP server applies to request bodies and client fetches. This page explains why each rule exists, what it costs, and what it was measured against. It covers `redmine-mcp --http` and `createRedmineMcpHandler`, which share the code.
+[Security defaults](../../../docs/mcp/http-server.md#security-defaults) lists the rules the HTTP server applies to request bodies and client fetches. This page explains why each rule exists, what it costs, and what it was measured against. It covers `redmine-mcp --http` and `createRedmineMcpHandler`, which share the code.
 
 ## The key check before large or slow bodies
 
@@ -61,7 +61,7 @@ One isolate has 128 MB. In workerd, three concurrent 5 MB uploads peaked at 56 t
 
 ## Metadata document and key set fetches
 
-With OAuth on, a sign-in can make the server fetch a Client ID Metadata Document, and a token request of a client with keys can make it fetch a key set. The [OAuth section](../README.md#run-the-server) of the README lists the bounds. A fetch goes only to a public address, follows no redirect, and stops after 5 seconds, or after 5 KB for a document and 16 KiB for a key set. One process or isolate runs at most 8 document fetches and 4 key set fetches at once.
+With OAuth on, a sign-in can make the server fetch a Client ID Metadata Document, and a token request of a client with keys can make it fetch a key set. [How the server bounds metadata fetches](../../../docs/mcp/authentication.md#how-the-server-bounds-metadata-fetches) lists the bounds. A fetch goes only to a public address, follows no redirect, and stops after 5 seconds, or after 5 KB for a document and 16 KiB for a key set. One process or isolate runs at most 8 document fetches and 4 key set fetches at once.
 
 A caller can still keep the 8 document fetches busy. A client the server has not fetched within the hour then gets the 503 page until they stop. Meanwhile a redirect URI that a client removed from its document can still start a sign-in for up to an hour after the server last fetched that document, instead of 5 minutes. Section 8.4 of the draft asks servers to consider such changes.
 

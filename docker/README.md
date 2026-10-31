@@ -1,6 +1,6 @@
 # Contract-test Redmine servers
 
-`docker/compose.yaml` runs real Redmine servers for the contract tests of both packages. It is a test fixture that seeds known passwords and API keys. It does not deploy Redmine or the MCP server for real use. [Run a shared server](../packages/mcp/README.md#serve-over-http) covers deploying the MCP server.
+`docker/compose.yaml` runs real Redmine servers for the contract tests of both packages. It is a test fixture that seeds known passwords and API keys. It does not deploy Redmine or the MCP server for real use. [Run a shared server for claude.ai and ChatGPT](../docs/mcp/http-and-oauth.md) covers deploying the MCP server.
 
 Each server uses the image's built-in SQLite, so there is no database container. `DATABASE_URL` in `docker/compose.yaml` gives SQLite a 5-second busy timeout, which the image's `database.yml` lacks. Without it, parallel test files that write at once get 500s with `database is locked`.
 

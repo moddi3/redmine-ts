@@ -13,12 +13,15 @@ Pick the task you have. Each page links on to the details.
 
 ## Let an AI client work in Redmine with the MCP server
 
-- [Add the server to Claude Code, Codex, or Cursor](../packages/mcp/README.md#add-the-server-to-a-client)
-- [Run a shared server for claude.ai and ChatGPT](../packages/mcp/README.md#serve-over-http)
-- [Look up the tools, filters, pages, and results](../packages/mcp/README.md#workflow-tools)
-- [Set flags and environment variables](../packages/mcp/README.md#settings)
-- [Understand OAuth scopes, revocation, and the grant store](../packages/mcp/README.md#oauth)
-- [Embed the server in Node, Bun, or Cloudflare Workers](../packages/mcp/README.md#embed-the-server)
+- [Add the server to Claude Code, Codex, or Cursor](mcp/clients.md)
+- [Run a shared server for claude.ai and ChatGPT](mcp/http-and-oauth.md)
+- [Look up the tools, filters, pages, results, and errors](mcp/tools.md)
+- [Page through journals, find people, and attach files](mcp/workflow-tools.md)
+- [Set flags and environment variables](mcp/configuration.md)
+- [Understand OAuth scopes, revocation, and the grant store](mcp/authentication.md)
+- [Look up HTTP answers, limits, and CORS](mcp/http-server.md)
+- [Understand what limits an agent, and how keys stay hidden](mcp/security.md)
+- [Embed the server in Node, Bun, or Cloudflare Workers](mcp/embedding.md)
 - [HTTP server limits and the measurements behind them](../packages/mcp/docs/limits.md)
 
 ## Check what is supported

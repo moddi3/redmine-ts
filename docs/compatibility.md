@@ -13,7 +13,7 @@ This page lists the Redmine versions, runtimes, and MCP clients that each packag
 
 CI pulls the `redmine:6.1` and `redmine:7.0` images, which move to each new patch release, so CI tests the latest patch of each version. The weekly workflow pulls them again every Monday, so a patch that changes API behavior fails CI within a week even when nobody pushed. Some behavior still differs between patch releases. For example, an update that leaves a journal with empty notes and no property changes deletes it on Redmine 6.1.0 to 6.1.3 and on 7.0.0, and keeps it on 6.1.4, 7.0.1, and later.
 
-Which version you declare decides what the client offers. [Declare the server version](../packages/sdk/README.md#declare-the-server-version) explains the SDK side, and [Version handling](../packages/mcp/README.md#version-handling) the MCP side.
+Which version you declare decides what the client offers. [Declare the server version](../packages/sdk/README.md#declare-the-server-version) explains the SDK side, and [Version handling](mcp/tools.md#version-handling) the MCP side.
 
 ### OAuth sign-in
 
@@ -34,13 +34,13 @@ Both packages are ESM only. The SDK has no runtime dependencies and no `node:` i
 
 ## MCP clients
 
-| Client                              | Transport                   | Checked by                                                                                          |
-| ----------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------- |
-| MCP Inspector 2.10.1                | HTTP with the API key       | CI lists the tools with `--strict` and calls `users_current` on every push                          |
-| claude.ai                           | HTTP with OAuth             | By hand on 2026-10-26: signed in, ran tool calls, and refreshed its tokens                          |
-| ChatGPT                             | HTTP with OAuth             | By hand on 2026-10-26: signed in, ran tool calls, and refreshed its tokens                          |
-| MCP Inspector                       | HTTP with OAuth             | By hand, recorded in [the sign-in walkthrough](../packages/mcp/README.md#what-a-sign-in-looks-like) |
-| Claude Code, Codex, Cursor, VS Code | stdio, or HTTP with the key | Configuration documented. No automated check.                                                       |
+| Client                              | Transport                   | Checked by                                                                                      |
+| ----------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------- |
+| MCP Inspector 2.10.1                | HTTP with the API key       | CI lists the tools with `--strict` and calls `users_current` on every push                      |
+| claude.ai                           | HTTP with OAuth             | By hand on 2026-10-26: signed in, ran tool calls, and refreshed its tokens                      |
+| ChatGPT                             | HTTP with OAuth             | By hand on 2026-10-26: signed in, ran tool calls, and refreshed its tokens                      |
+| MCP Inspector                       | HTTP with OAuth             | By hand, recorded in [the sign-in walkthrough](mcp/http-and-oauth.md#what-a-sign-in-looks-like) |
+| Claude Code, Codex, Cursor, VS Code | stdio, or HTTP with the key | Configuration documented. No automated check.                                                   |
 
 The server speaks the 2026-07-28 MCP protocol and serves clients on the 2025 revisions without sessions. Its tool schemas use one `type` per schema, so clients that read a single-type dialect, such as Gemini's function declarations, can read them. CI fails on any schema finding of the MCP Inspector's `--strict` check.
 

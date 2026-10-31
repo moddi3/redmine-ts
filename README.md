@@ -47,8 +47,8 @@ claude mcp add redmine \
 
 Then ask Claude what is assigned to you in Redmine. `--no-delete` hides every tool that deletes.
 
-- Codex, Cursor, and other local clients: [MCP README](packages/mcp/README.md).
-- claude.ai and ChatGPT, which sign in with OAuth: [Run a shared server](packages/mcp/README.md#serve-over-http).
+- Codex, Cursor, and other local clients connect as [Connect a client](docs/mcp/clients.md) shows.
+- claude.ai and ChatGPT sign in with OAuth, so they need a shared server. [Run a shared server for claude.ai and ChatGPT](docs/mcp/http-and-oauth.md) walks through the setup.
 
 ## Compatibility
 
