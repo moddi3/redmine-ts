@@ -81,8 +81,15 @@ jobs:
             tar -tzf "$tarball"
           done
 
+  ci:
+    needs: select-mode
+    if: needs.select-mode.outputs.mode == 'publish' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   publish:
-    needs: [select-mode, pack]
+    needs: [select-mode, pack, ci]
     if: needs.select-mode.outputs.mode == 'publish' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
