@@ -395,6 +395,8 @@ describe("rm.request", () => {
     ["a body on GET", { method: "GET", path: "x.json", body: { a: 1 } }],
     ["a body on GET even when it is null", { method: "GET", path: "x.json", body: null }],
     ["an unknown arrayFormat", { method: "GET", path: "x.json", arrayFormat: "semicolon" }],
+    ["NaN in the query", { method: "GET", path: "x.json", query: { limit: Number.NaN } }],
+    ["Infinity in a query array", { method: "GET", path: "x.json", query: { ids: [1, Infinity] } }],
   ])("refuses %s before any request", async (_name, raw) => {
     const { rm, requests } = client(() => json({}));
 

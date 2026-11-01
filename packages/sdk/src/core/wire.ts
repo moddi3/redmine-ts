@@ -7,7 +7,7 @@ import { RedmineError, type RedmineErrorData } from "./errors.ts";
 import { checkScope, type Compiled, compileWhere, longForm, type Page } from "./listing.ts";
 import type { AnyOp, QueryStyle } from "./op.ts";
 import { normalizeResponse } from "./quirks.ts";
-import { invalidInput, isRecord } from "./util.ts";
+import { invalidInput, isRecord, unsendable } from "./util.ts";
 
 /** A request with everything decided except credentials, signal and the concurrency slot. */
 export interface Plan {
@@ -120,7 +120,7 @@ export function planRequest(
     method: op.method,
     url,
     headers,
-    body: JSON.stringify(payload),
+    body: jsonText(op, payload),
     replayable: true,
     lockVersion: carriesLockVersion(payload),
   };
@@ -234,18 +234,20 @@ export function deletedBy(base: URL, plan: Plan): Deletion | undefined {
   return deletes === true ? { effect } : { effect, unless: deletes };
 }
 
-/** JSON.stringify would silently drop a function and turn NaN into null, so those are refused instead. */
+/** JSON.stringify would silently drop a function or a symbol, and write an undefined array item as null. */
 function jsonText(op: AnyOp, value: unknown): string {
   let text: string | undefined;
   try {
-    text = JSON.stringify(value, (_key, v: unknown) => {
+    text = JSON.stringify(value, function (this: unknown, _key, v: unknown) {
+      if (v === undefined && Array.isArray(this)) {
+        throw new TypeError("undefined in an array cannot be sent as JSON");
+      }
       const kind = typeof v;
       if (kind === "function" || kind === "symbol" || kind === "bigint") {
         throw new TypeError(`a ${kind} cannot be sent as JSON`);
       }
-      if (typeof v === "number" && !Number.isFinite(v)) {
-        throw new TypeError(`${String(v)} cannot be sent as JSON`);
-      }
+      const refused = unsendable(v instanceof Number ? v.valueOf() : v);
+      if (refused !== undefined) throw new TypeError(refused);
       return v;
     });
   } catch (cause) {
@@ -263,6 +265,8 @@ function fillPath(op: AnyOp, input: Readonly<Record<string, unknown>>): string {
     if (typeof value !== "string" && typeof value !== "number") {
       throw invalidInput(`path parameter \`${key}\` is required (string or number)`, op.id);
     }
+    const refused = unsendable(value);
+    if (refused !== undefined) throw invalidInput(`path parameter \`${key}\`: ${refused}`, op.id);
     const text = String(value);
     if (text === "" || text === "." || text === "..") {
       throw invalidInput(`path parameter \`${key}\` is not a valid path segment`, op.id);
@@ -302,6 +306,8 @@ function appendQuery(
 
 function queryText(op: AnyOp, key: string, value: unknown): string {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const refused = unsendable(value);
+    if (refused !== undefined) throw invalidInput(`query parameter \`${key}\`: ${refused}`, op.id);
     return String(value);
   }
   throw invalidInput(`query parameter \`${key}\` takes strings, numbers or booleans`, op.id);

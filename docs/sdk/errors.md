@@ -59,7 +59,7 @@ An issue carries a `lock_version` that Redmine checks. The API never returns it,
 | `not_acceptable`         | 406.                                                                                                                                                    |
 | `http`                   | Any other status. `data.body` holds up to 2 KiB of the response.                                                                                        |
 | `protocol`               | The response does not match the operation, such as a body that is not JSON or a page that repeats. `data.hint` names the cause.                         |
-| `network`                | `fetch` threw.                                                                                                                                          |
+| `network`                | `fetch` threw, or a bearer `token()` threw or rejected. `cause` holds the error.                                                                        |
 | `timeout`                | An attempt ran longer than `timeoutMs`.                                                                                                                 |
 | `aborted`                | Your `signal` aborted the call.                                                                                                                         |
 | `unsupported_version`    | The declared `version` lacks the operation. The client sent nothing.                                                                                    |

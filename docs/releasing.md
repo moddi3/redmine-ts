@@ -25,9 +25,11 @@ Run `vp run changeset status` to see which packages the pending changesets bump.
 1. The `select-mode` job reads `.changeset/`. If it finds changesets, the mode is `version`. If it finds none, it asks npm which package versions are unpublished, and the mode is `publish` when there are some. Otherwise the mode is `none` and the run stops.
 2. In `version` mode, the `version` job runs `vp run version-packages` (`changeset version`). That command deletes the changesets, bumps `package.json` versions, and writes each `CHANGELOG.md`. The job then opens a pull request named "Version Packages", or updates it if it is already open.
 3. The owner reviews and merges that pull request.
-4. The merge is another push to `main`, now with no changesets and an unpublished version, so the mode is `publish`. The `pack` job builds with `vp run -r build`, which runs publint and Are the Types Wrong. Then the job packs the tarballs. The `publish` job publishes those exact tarballs to npm, pushes a git tag such as `@redmine-ts/sdk@0.1.0`, and creates a GitHub release.
+4. The merge is another push to `main`, now with no changesets and an unpublished version, so the mode is `publish`. The `pack` job builds with `vp run -r build`, which runs publint and Are the Types Wrong. Then the job packs the tarballs. At the same time, the `ci` job runs all of `.github/workflows/ci.yml` on that commit. The `publish` job waits for both, then publishes those exact tarballs to npm, pushes a git tag such as `@redmine-ts/sdk@0.1.0`, and creates a GitHub release.
 
-The workflow opens the Version Packages pull request with its own token, so GitHub does not run CI on that pull request. It changes only versions and changelogs, and CI runs on `main` after the merge.
+The workflow opens the Version Packages pull request with its own token, so GitHub holds the CI runs of that pull request until someone approves them. The pull request changes only versions and changelogs, so nobody needs to approve them. The `ci` job of the Release run is the check that counts. If it fails, nothing is published.
+
+When the `ci` job fails on a flaky test, rerun the whole Release run with `gh run rerun <run-id>`. The `select-mode` job asks npm again, and the run publishes once CI passes.
 
 The `publish` job is the only job with `id-token: write`. It sets `PNPM_CONFIG_PROVENANCE=true`, so every published version carries an npm provenance statement that links it to the workflow run.
 
@@ -118,9 +120,9 @@ This way needs no token in GitHub. It is one of the two ways to publish the firs
 
 ## What CI and the weekly workflow check
 
-`.github/workflows/ci.yml` runs on every push and pull request:
+`.github/workflows/ci.yml` runs on pushes to `main`, on pull requests, and inside every Release run that publishes:
 
-- `checks` runs on Node 22 and 24. It runs `vp check`, the unit and generator tests, `vp run -r build`, and `vp run gen:check` in `packages/sdk`.
+- `checks` runs on Node 22 and 24. It runs `vp check`, `vp run docs:check`, the unit and generator tests, `vp run -r build`, and `vp run gen:check` in `packages/sdk`.
 - `contract` starts the Docker Redmine servers from `docker/compose.yaml`, runs `vp run test:contract` against them, then runs `scripts/runtime-smoke.mjs` on the built package under Node 24 and under Bun.
 
 `.github/workflows/weekly.yml` runs every Monday at 04:23 UTC, and by hand with `gh workflow run weekly.yml`:

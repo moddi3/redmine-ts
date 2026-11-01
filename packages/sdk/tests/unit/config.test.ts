@@ -52,6 +52,7 @@ describe("options", () => {
   test.each([
     ["an unsupported version", { version: "5.1" as never }],
     ["a zero timeout", { timeoutMs: 0 }],
+    ["a timeout a timer cannot hold", { timeoutMs: 2 ** 31 }],
     ["a fractional concurrency", { maxConcurrent: 1.5 }],
     ["zero concurrency", { maxConcurrent: 0 }],
     ["a negative retry count", { retry: { attempts: -1 } }],
@@ -60,6 +61,12 @@ describe("options", () => {
     ["a basic login with a colon", { auth: { basic: { login: "a:b", password: "x" } } }],
   ])("refuses %s", (_name, options) => {
     expect(refusal({ baseUrl: "https://h.example", ...options }).kind).toBe("invalid_input");
+  });
+
+  test("the longest timeout a timer holds is kept", () => {
+    expect(resolveConfig({ baseUrl: "https://h.example", timeoutMs: 2 ** 31 - 1 }).timeoutMs).toBe(
+      2 ** 31 - 1,
+    );
   });
 
   test("defaults", () => {

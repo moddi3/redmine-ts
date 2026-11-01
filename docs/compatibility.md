@@ -1,6 +1,6 @@
 # Compatibility
 
-This page lists the Redmine versions, runtimes, and MCP clients that each package supports, and the check behind each one. "CI" means `.github/workflows/ci.yml`, which runs on pull requests, on pushes to `main`, and every Monday from the weekly workflow. "By hand" means a person checked it once, on the date given.
+This page lists the Redmine versions, runtimes, and MCP clients that each package supports, and the check behind each one. "CI" means `.github/workflows/ci.yml`, which runs on pull requests, on pushes to `main`, inside every Release run that publishes, and every Monday from the weekly workflow. "By hand" means a person checked it once, on the date given.
 
 ## Redmine versions
 

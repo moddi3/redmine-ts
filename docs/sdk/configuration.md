@@ -45,6 +45,8 @@ console.log((await withOAuth.users.current()).login);
 
 After a 401, the client calls `refresh()`, when `bearer` has one, and sends the request once more with the new token. Requests that fail at the same time share one `refresh()` call. A `ReadableStream` body can be read only once, so after a 401 on such a request the client neither calls `refresh()` nor sends the request again. If `refresh()` throws, the call fails with `unauthorized`, and the error's `cause` is what `refresh()` threw.
 
+The wait for `token()` counts against `timeoutMs`. An abort or a timeout stops the call's wait, but it does not cancel the promise that `token()` returned, so one promise can serve many calls. If `token()` throws or rejects, the call fails with `network`, and the error's `cause` is what `token()` threw.
+
 ## Declare the server version
 
 Redmine does not report its version over the API. Declaring it with `version` is optional:
@@ -170,7 +172,7 @@ That check is one extra request per client. Clients derived through `with` share
 
 | Option           | Default | Meaning                                                               |
 | ---------------- | ------- | --------------------------------------------------------------------- |
-| `timeoutMs`      | 30000   | Time limit for each attempt.                                          |
+| `timeoutMs`      | 30000   | Time limit for each attempt in ms, at most 2147483647.                |
 | `maxConcurrent`  | 4       | Requests in flight per client, shared with clients derived by `with`. |
 | `retry.attempts` | 2       | Extra attempts after the first.                                       |
 | `retry.baseMs`   | 250     | Base of the exponential backoff with full jitter.                     |
