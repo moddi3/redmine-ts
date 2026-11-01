@@ -16,6 +16,7 @@ The MCP items share the background in [MCP server package](#mcp-server-package).
 | Next                                    | [A stricter `aud`](#a-stricter-aud)                                                                 | MCP          |                                |
 | Next                                    | [Big single results](#big-single-results)                                                           | MCP          | #78                            |
 | Next                                    | [Smaller tool schemas](#smaller-tool-schemas)                                                       | MCP          |                                |
+| Next                                    | [Spec gaps the generator covers](#spec-gaps-the-generator-covers)                                   | SDK, MCP     |                                |
 | Next, partly done in MCP                | [Curated triage toolset](#curated-triage-toolset)                                                   | Toolkit      |                                |
 | Next                                    | [`gen` CLI for an instance config](#gen-cli-for-an-instance-config)                                 | SDK          |                                |
 | Next                                    | [Follow-ups found while building](#follow-ups-found-while-building)                                 | MCP, SDK     |                                |
@@ -82,6 +83,17 @@ The [result budget](#result-budget) trims list pages, `issues_get` journals, and
 ### Smaller tool schemas
 
 In a full-access listing of 200K characters, output schemas take 80K and descriptions take 27K. Clients without tool search pay that cost in every session. A tool profile would help clients that load every tool. One profile could hold the workflow tools and the REST tools that agents use most. The evals below would then check that tool choice does not get worse.
+
+### Spec gaps the generator covers
+
+The SDK vendors the spec tags `6.1.3-r2` and `7.0.2-r2`. Where those specs are wrong or silent, the generator covers the gap. Each entry below should go once upstream fixes it.
+
+- **The wiki page's `project` on 6.1.** `7.0.2-r2` requires it. `6.1.3-r2` declares it, though Redmine 6.1 never renders it (`wiki/show.api.rsb` in 6.1.3, 6.1.5 and `6.1-stable`). `overlay.optional` keeps it optional. The fix belongs in the upstream maintenance branch `6.1.3-r2`, in `src/components/schemas/wiki_page.yaml`. Generation fails once the entry stops changing the merged spec.
+- **Issue children on 6.1.** `6.1.3-r2` still describes them inline, and `7.0.2-r2` uses the recursive `issue_child`. `overlay.resolved` takes the 7.0 shape, because Redmine 6.1 renders the same fields.
+- **Stable operations.** The tag descriptions in `7.0.2-r2` no longer mark operations as stable. `overlay.stableTags` keeps the list from `7.0.1-r1`.
+- **`updateJournal` on older releases.** `7.0.2-r2` says that a journal left with empty notes is kept, which is true only from 6.1.4 and 7.0.1. `overlay.descriptions` gives text that holds for both versions.
+- **Timestamps in user and project filters.** The specs document UTC timestamps only for the issue filters `created_on`, `updated_on` and `closed_on`. `TIMESTAMPS` in `packages/sdk/generator/filters.ts` names `created_on`, `updated_on` and `last_login_on` for the user and project lists too.
+- **The second before a timestamp in MCP.** A timestamp lower bound also matches the second before it (`Query#date_clause`). The SDK's types carry the spec's sentence. The `where` legend of `issues_list` leaves it out, because its input schema is at 4,970 of 5,000 bytes. Adding it needs about 30 bytes from elsewhere in that schema.
 
 ### Curated triage toolset
 

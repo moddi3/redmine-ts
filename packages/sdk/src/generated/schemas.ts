@@ -387,7 +387,7 @@ export interface WikiPage {
   version: number;
   author?: IdName;
   comments: string | null;
-  project: IdName;
+  project?: IdName;
   created_on: string;
   updated_on: string;
   attachments?: Attachment[];

@@ -7,7 +7,13 @@ import { loadSpecs, type SpecFile } from "../../generator/spec.ts";
 import { uploadKey } from "../../src/core/op.ts";
 import { CATALOG } from "../../src/generated/catalog.ts";
 import { ops } from "../../src/generated/ops.ts";
-import type { CustomField, IdName, Issue, IssueSummary } from "../../src/generated/schemas.ts";
+import type {
+  CustomField,
+  IdName,
+  Issue,
+  IssueSummary,
+  WikiPage,
+} from "../../src/generated/schemas.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const specs = loadSpecs(resolve(root, "../../spec/redmine-openapi"));
@@ -419,6 +425,27 @@ describe("requiredness across versions", () => {
       details: Detail[];
     }>();
     expectTypeOf<Pick<Detail, "old_value">>().toEqualTypeOf<{ old_value: string | null }>();
+  });
+});
+
+describe("overlay.optional", () => {
+  const project = "#/components/schemas/wiki_page/properties/project";
+
+  test("keeps a property optional that an older Redmine never sends", () => {
+    expectTypeOf<WikiPage["project"]>().toEqualTypeOf<IdName | undefined>();
+  });
+
+  test("an entry fails generation once the older spec drops the property", async () => {
+    const fixed = withSpecs((v) => {
+      delete v["6.1"]!.components.schemas.wiki_page!.properties!.project;
+    });
+    await expect(generate(fixed)).rejects.toThrow(`overlay.optional: ${project} no longer changes`);
+  });
+
+  test("an entry that names no property fails generation", async () => {
+    await expect(
+      generate(specs, { ...overlay, optional: { "#/components/schemas/wiki_page": "test" } }),
+    ).rejects.toThrow("does not name a schema property");
   });
 });
 

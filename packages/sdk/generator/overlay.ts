@@ -70,6 +70,13 @@ export interface Overlay {
   stableTags: readonly string[];
   /** JSON pointer of a non-additive change -> why the latest shape is right. */
   resolved: Readonly<Record<string, string>>;
+  /**
+   * JSON pointer of a property -> why it stays optional. Each entry covers a property that the latest spec
+   * requires and an older spec still declares, although that older Redmine never sends it. Until upstream
+   * fixes the older spec, the generator drops the property from every `required` list before the merge, and
+   * it fails once an entry no longer changes the merged spec.
+   */
+  optional: Readonly<Record<string, string>>;
 }
 
 const ISSUE_CHILD =
@@ -181,5 +188,9 @@ export const overlay: Overlay = {
     "#/components/schemas/issue/properties/children/items/properties/id": ISSUE_CHILD,
     "#/components/schemas/issue/properties/children/items/properties/tracker": ISSUE_CHILD,
     "#/components/schemas/issue/properties/children/items/properties/subject": ISSUE_CHILD,
+  },
+  optional: {
+    "#/components/schemas/wiki_page/properties/project":
+      "The 6.1.3-r2 spec declares it, but Redmine 6.1 never renders it: wiki/show.api.rsb in 6.1.3, 6.1.5 and 6.1-stable has no project. Observed on 6.1: tests/contract/catalog.test.ts.",
   },
 };

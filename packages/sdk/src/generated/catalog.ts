@@ -716,7 +716,7 @@ const outWikiPage: JsonSchema = {
     updated_on: { type: "string", format: "date-time" },
     attachments: { type: "array", items: outAttachment },
   },
-  required: ["title", "text", "version", "comments", "project", "created_on", "updated_on"],
+  required: ["title", "text", "version", "comments", "created_on", "updated_on"],
 };
 
 const outQuery: JsonSchema = {

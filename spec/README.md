@@ -7,7 +7,7 @@
 | `6.1.3-r2.yaml` | `6.1.3-r2`   | 6.1                          |
 | `7.0.2-r2.yaml` | `7.0.2-r2`   | 7.0                          |
 
-The files are byte-for-byte copies of the upstream tags. The generator in `packages/sdk/generator/` reads every file here, takes the Redmine version from the file name, and merges them into one superset. Edit nothing in `redmine-openapi/` by hand: a fix belongs upstream, and a decision about this SDK's surface belongs in `packages/sdk/generator/overlay.ts`.
+The files are byte-for-byte copies of the upstream tags. The generator in `packages/sdk/generator/` reads every file here, takes the Redmine version from the file name, and merges them into one superset. Edit nothing in `redmine-openapi/` by hand: a fix belongs upstream, and a decision about this SDK's surface belongs in `packages/sdk/generator/overlay.ts`. The one exception is `optional` in that file, which keeps a property optional while an older spec wrongly declares it.
 
 ## Updating
 
@@ -15,5 +15,5 @@ Upstream revisions can contain breaking fixes, so always pin an exact tag, never
 
 1. Run `spec/fetch.sh <tag>`, for example `spec/fetch.sh 7.1.0-r1`. To replace a revision of a version already vendored, delete the old file in the same change.
 2. Refresh the license if upstream changed it: `curl -sfL -o spec/redmine-openapi/LICENSE https://raw.githubusercontent.com/d-yoshi/redmine-openapi/<tag>/LICENSE`.
-3. In `packages/sdk`, run `vp run gen` and read the drift report it prints.
+3. In `packages/sdk`, run `vp run gen` and read the drift report it prints. If generation fails because an `overlay.optional` entry no longer changes the merged spec, upstream fixed that property: remove the entry.
 4. Update the table above.
