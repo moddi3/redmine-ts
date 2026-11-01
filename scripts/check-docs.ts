@@ -3,15 +3,19 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 // Checks the repository's Markdown, except the records under .audit/:
-// - every relative link, and every link to this repository's main branch on GitHub, names a file
-//   that exists, and a heading on that page when it has an anchor;
+// - every relative link, and every link to this repository on GitHub, names a file that exists,
+//   and a heading on that page when it has an anchor. Inline links, reference definitions, and
+//   HTML href and src attributes count. A GitHub link names main or a commit, not another branch;
 // - a package README links to other files by absolute URL, because npm ships it without docs/;
-// - every code fence names its language, and TypeScript sits in `ts` fences, the label the
-//   example tests read.
+// - every code fence names its language. TypeScript sits in a bare ```ts fence, on a page that a
+//   docs test reads, because the tests read only that form.
 
 const root = resolve(import.meta.dirname, "..");
 const repoUrl =
-  /^https:\/\/(?:github\.com\/moddi3\/redmine-ts\/(?:blob|tree)\/main|raw\.githubusercontent\.com\/moddi3\/redmine-ts\/main)\/([^#]*)(?:#(.*))?$/;
+  /^https:\/\/(?:github\.com\/moddi3\/redmine-ts\/(?:blob|tree)|raw\.githubusercontent\.com\/moddi3\/redmine-ts)\/([^/#]+)\/([^#]*)(?:#(.*))?$/;
+/** Pages whose ts blocks packages/sdk/tests/unit/readme.test.ts or packages/mcp/tests/unit/docs.test.ts read. */
+const testedPages =
+  /^(?:README\.md|docs\/architecture\.md|packages\/(?:sdk|mcp)\/README\.md|docs\/(?:sdk|mcp)\/[^/]+\.md)$/;
 const hiddenTypeScript = new Set([
   "js",
   "javascript",
@@ -69,19 +73,29 @@ function checkLinks(file: string, text: string): string[] {
   const problems: string[] = [];
   const path = join(root, file);
   const packageReadme = /^packages\/[^/]+\/README\.md$/.test(file);
-  for (const [, target] of withoutCode(text).matchAll(
-    /\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g,
-  )) {
+  const prose = withoutCode(text);
+  const targets = [
+    ...prose.matchAll(/\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g),
+    ...prose.matchAll(/^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?/gm),
+    ...prose.matchAll(/<[a-z][^>]*\s(?:href|src)="([^"]+)"/gi),
+  ].map(([, target]) => target!);
+  for (const target of targets) {
     let targetPath: string;
     let anchor: string | undefined;
-    const ours = repoUrl.exec(target!);
+    const ours = repoUrl.exec(target);
     if (ours) {
-      targetPath = join(root, decodeURIComponent(ours[1]!));
-      anchor = ours[2];
-    } else if (/^[a-z][a-z0-9+.-]*:/i.test(target!)) {
+      const [, ref, repoPath, repoAnchor] = ours;
+      if (/^[0-9a-f]{40}$/.test(ref!)) continue;
+      if (ref !== "main") {
+        problems.push(`${file}: ${target} names the branch ${ref}, link to main or a commit`);
+        continue;
+      }
+      targetPath = join(root, decodeURIComponent(repoPath!));
+      anchor = repoAnchor;
+    } else if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
       continue;
     } else {
-      const [pathPart, anchorPart] = target!.split("#");
+      const [pathPart, anchorPart] = target.split("#");
       if (packageReadme && pathPart) {
         problems.push(`${file}: relative link ${target} breaks on npm, use a GitHub URL`);
         continue;
@@ -104,17 +118,32 @@ function checkLinks(file: string, text: string): string[] {
 function checkFences(file: string, text: string): string[] {
   const problems: string[] = [];
   let open: string | undefined;
+  let closeTs = false;
+  // Changesets writes each CHANGELOG entry once, quoting code as it was at that release.
+  const changelog = /(?:^|\/)CHANGELOG\.md$/.test(file);
   for (const [index, line] of text.split("\n").entries()) {
     const fence = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)/.exec(line);
     if (!fence) continue;
     if (open === undefined) {
       open = fence[1]!;
       const label = fence[2]!.toLowerCase();
-      if (label === "") problems.push(`${file}:${index + 1}: code fence without a language`);
+      const at = `${file}:${index + 1}:`;
+      if (label === "") problems.push(`${at} code fence without a language`);
       if (hiddenTypeScript.has(label)) {
-        problems.push(`${file}:${index + 1}: \`${label}\` fence, put TypeScript in a \`ts\` fence`);
+        problems.push(`${at} \`${label}\` fence, put TypeScript in a \`ts\` fence`);
       }
+      const tsBlock = label === "ts" && !changelog;
+      if (tsBlock && line !== "```ts") {
+        problems.push(`${at} write the fence as \`\`\`ts alone at the start of the line`);
+      }
+      if (tsBlock && !testedPages.test(file)) {
+        problems.push(`${at} no docs test reads ts blocks on this page, add it to one`);
+      }
+      closeTs = tsBlock;
     } else if (fence[1]!.startsWith(open) && fence[2] === "") {
+      if (closeTs && line !== "```") {
+        problems.push(`${file}:${index + 1}: close a ts block with \`\`\` alone on the line`);
+      }
       open = undefined;
     }
   }
