@@ -6,4 +6,4 @@ updates:
       interval: weekly
     # A compromised release is usually found and pulled within days; wait before proposing it.
     cooldown:
-      default-days: 7
+      default-days: 3
