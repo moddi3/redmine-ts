@@ -1019,7 +1019,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. Unknown filters and operators are refused before anything is sent.',
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. A lower bound on a time also matches the second before it.',
           type: "object",
           properties: {
             issue_id: {
@@ -2052,7 +2052,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and updated_on. Unknown filters and operators are refused before anything is sent.',
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and updated_on. A lower bound on a time also matches the second before it.',
           type: "object",
           properties: {
             status: {
@@ -2648,7 +2648,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and last_login_on. Unknown filters and operators are refused before anything is sent.',
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and last_login_on. A lower bound on a time also matches the second before it.',
           type: "object",
           properties: {
             status: {
@@ -3096,7 +3096,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.',
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD.',
           type: "object",
           properties: {
             user_id: {

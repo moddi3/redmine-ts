@@ -129,7 +129,7 @@ import type {
 export type GetIssuesByProjectInclude = "attachments" | "relations";
 
 /**
- * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. Unknown filters and operators are refused before anything is sent.
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. A lower bound on a time also matches the second before it.
  */
 export interface GetIssuesByProjectWhere {
   /**
@@ -696,7 +696,7 @@ export interface CreateIssueUnderProjectInput {
 }
 
 /**
- * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD.
  */
 export interface GetTimeEntriesByProjectWhere {
   /**

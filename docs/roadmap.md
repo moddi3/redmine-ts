@@ -93,7 +93,6 @@ The SDK vendors the spec tags `6.1.3-r2` and `7.0.2-r2`. Where those specs are w
 - **Stable operations.** The tag descriptions in `7.0.2-r2` no longer mark operations as stable. `overlay.stableTags` keeps the list from `7.0.1-r1`.
 - **`updateJournal` on older releases.** `7.0.2-r2` says that a journal left with empty notes is kept, which is true only from 6.1.4 and 7.0.1. `overlay.descriptions` gives text that holds for both versions.
 - **Timestamps in user and project filters.** The specs document UTC timestamps only for the issue filters `created_on`, `updated_on` and `closed_on`. `TIMESTAMPS` in `packages/sdk/generator/filters.ts` names `created_on`, `updated_on` and `last_login_on` for the user and project lists too.
-- **The second before a timestamp in MCP.** A timestamp lower bound also matches the second before it (`Query#date_clause`). The SDK's types carry the spec's sentence. The `where` legend of `issues_list` leaves it out, because its input schema is at 4,970 of 5,000 bytes. Adding it needs about 30 bytes from elsewhere in that schema.
 
 ### Curated triage toolset
 

@@ -7,7 +7,7 @@ import type { CustomFieldValues, CustomFields, Pref } from "./schemas.ts";
 export type GetIssuesInclude = "attachments" | "relations";
 
 /**
- * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. Unknown filters and operators are refused before anything is sent.
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. A lower bound on a time also matches the second before it.
  */
 export interface GetIssuesWhere {
   /**
@@ -661,7 +661,7 @@ export type GetProjectsInclude =
   | "issue_custom_fields";
 
 /**
- * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and updated_on. Unknown filters and operators are refused before anything is sent.
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and updated_on. A lower bound on a time also matches the second before it.
  */
 export interface GetProjectsWhere {
   /**
@@ -915,7 +915,7 @@ export interface ReopenProjectInput {
 export type GetUsersInclude = "auth_source";
 
 /**
- * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and last_login_on. Unknown filters and operators are refused before anything is sent.
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and last_login_on. A lower bound on a time also matches the second before it.
  */
 export interface GetUsersWhere {
   /**
@@ -1181,7 +1181,7 @@ export interface GetCurrentUserInput<I extends GetCurrentUserInclude = GetCurren
 }
 
 /**
- * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD.
  */
 export interface GetTimeEntriesWhere {
   /**

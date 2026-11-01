@@ -120,7 +120,7 @@ describe("the filter table in where", () => {
     const { legend, rows } = table(where(tools, "issues_list").description!);
     const row = (name: string) => rows.get(name)?.[0];
     expect(legend).toContain(
-      "Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z.",
+      "Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. A lower bound on a time also matches the second before it.",
     );
     expect(table(where(tools, "time_entries_list").description!).legend).not.toContain("UTC");
     expect(legend).toContain('{between: [from, to]}, {contains: "text"}');

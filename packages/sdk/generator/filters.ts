@@ -19,6 +19,9 @@ const RAW = '{raw: "..."} in Redmine\'s own syntax, such as a relative date';
 
 const TIMESTAMPS = new Set(["created_on", "updated_on", "closed_on", "last_login_on"]);
 
+// Query#date_clause compares with `>` against the bound minus one second.
+const LOWER_BOUND = "A lower bound on a time also matches the second before it.";
+
 const ID_CONTAINS = "{contains: id}";
 
 export type Kind = "id" | "date" | "number" | "text";
@@ -122,11 +125,10 @@ export function whereLegend(
     ...(times.length > 0
       ? [
           unsaid.length > 0
-            ? `A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for ${new Intl.ListFormat("en").format(unsaid)}.`
-            : "Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z.",
+            ? `A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for ${new Intl.ListFormat("en").format(unsaid)}. ${LOWER_BOUND}`
+            : `Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. ${LOWER_BOUND}`,
         ]
       : []),
-    "Unknown filters and operators are refused before anything is sent.",
   ].join(" ");
 }
 
