@@ -38,6 +38,8 @@ export type RedmineErrorData =
       hint: string;
     }
   | { kind: "network"; message: string }
+  /** Nothing was sent: a bearer `token()` threw or rejected. `cause` holds the error. Never retried. */
+  | { kind: "credentials"; message: string }
   | { kind: "timeout"; after_ms: number }
   | { kind: "aborted" }
   /** Refused before the network: the declared server version lacks this operation. */
@@ -144,6 +146,8 @@ function describe(data: RedmineErrorData, op: string | undefined): string {
       return `Unexpected response${where} (${data.reason}): ${data.hint}`;
     case "network":
       return `Network error${where}: ${data.message}`;
+    case "credentials":
+      return `The bearer token() failed${where}: ${data.message}`;
     case "timeout":
       return `Timed out after ${data.after_ms} ms${where}`;
     case "aborted":

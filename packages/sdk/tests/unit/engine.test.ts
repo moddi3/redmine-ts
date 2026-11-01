@@ -1003,18 +1003,27 @@ describe("authentication", () => {
     ],
     ["rejects", () => Promise.reject(new Error("vault down"))],
   ])(
-    "a token() that %s fails the call as network, with the error as its cause",
+    "a token() that %s fails a GET once as credentials, with the error as its cause",
     async (_name, token) => {
-      const { call, requests } = testEngine(ok, { retry: false, auth: { bearer: { token } } });
+      let asked = 0;
+      const counted = (): string | Promise<string> => {
+        asked++;
+        return token();
+      };
+      const { call, requests } = testEngine(ok, {
+        retry: { attempts: 2, baseMs: 1, maxMs: 1 },
+        auth: { bearer: { token: counted } },
+      });
       const error = await failure(call(ops.getIssue, { issue_id: 1 }));
 
-      expect(error.kind).toBe("network");
+      expect(error.data).toEqual({ kind: "credentials", message: "vault down" });
       expect(error.cause).toEqual(new Error("vault down"));
+      expect(asked).toBe(1);
       expect(requests).toHaveLength(0);
     },
   );
 
-  test("a token() that throws an unauthorized RedmineError is network and starts no refresh", async () => {
+  test("a token() that throws an unauthorized RedmineError is credentials and starts no refresh", async () => {
     const thrown = new RedmineError({ kind: "unauthorized", status: 401 }, {});
     let refreshes = 0;
     const token = (): string => {
@@ -1030,7 +1039,7 @@ describe("authentication", () => {
     });
     const error = await failure(call(ops.getIssue, { issue_id: 1 }));
 
-    expect(error.kind).toBe("network");
+    expect(error.kind).toBe("credentials");
     expect(error.cause).toBe(thrown);
     expect(refreshes).toBe(0);
     expect(requests).toHaveLength(0);
