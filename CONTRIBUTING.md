@@ -84,7 +84,24 @@ Dropping a version that reached end of life is a major release.
 
 CI lints `.github/workflows/` with [jactionlint](https://github.com/jdx/jactionlint), which runs actionlint's checks plus security and pinning rules. Every action is pinned to a commit SHA, and Dependabot updates the pins after a 7-day cooldown. To run it locally, use `docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/jdx/jactionlint:2.2.0`, or `mise use jactionlint` and then `jactionlint`. `jactionlint --online --fix` pins a newly added action.
 
-## Change the documentation
+## Update the docs with your change
+
+A pull request that changes what users see also updates the pages that describe it. That covers behavior, defaults, limits, flags, environment variables, errors, tools, and public types.
+
+1. Find the pages. [AGENTS.md](AGENTS.md#find-where-a-task-starts) maps each source area to the pages that describe it. Then search the docs for each name and number you changed:
+
+   ```sh
+   rg -n '<name>' README.md packages/*/README.md packages/mcp/docs docs
+   ```
+
+2. Update every page that states the old behavior. Each fact has one home, and other pages link to it, as [the style guide](docs/style-guide.md#keep-one-home-for-each-fact) describes.
+3. If a package README changed, add a `patch` changeset, as [Write commits and changesets](#write-commits-and-changesets) describes.
+4. Run `vp run docs:check` and `vp test readme.test docs.test`.
+5. In the pull request description, list the pages you changed, or say why no page needed a change.
+
+The docs are done when both checks pass and the search finds no page that still states the old behavior.
+
+## Keep the code on the pages compiling
 
 Two tests keep the code on the pages compiling, and `vp check` typechecks the examples they read:
 
