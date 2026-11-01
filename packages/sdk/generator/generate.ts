@@ -1,11 +1,11 @@
 import { format } from "vite-plus/fmt";
 import { uploadKey } from "../src/core/op.ts";
 import { catalogFile } from "./catalog.ts";
-import { mergeCorrected } from "./corrections.ts";
 import type { Drift, Merged } from "./merge.ts";
+import { mergeWithOptional } from "./optional.ts";
 import { CUSTOM_FIELD_PROSE, whereLegend } from "./filters.ts";
 import { analyzeOperations, filterDoc, type OpModel } from "./operations.ts";
-import { overlay as defaultOverlay, type Correction, type Overlay } from "./overlay.ts";
+import { overlay as defaultOverlay, type Overlay } from "./overlay.ts";
 import {
   deref,
   isRef,
@@ -37,7 +37,6 @@ export interface Report {
   namespaces: Record<string, [string, string][]>;
   includeMisses: string[];
   inlineUploads: string[];
-  corrections: readonly Correction[];
 }
 
 export interface Generated {
@@ -50,7 +49,7 @@ export async function generate(
   specs: SpecFile[],
   overlay: Overlay = defaultOverlay,
 ): Promise<Generated> {
-  const merged = mergeCorrected(specs, overlay.corrections, overlay.resolved);
+  const merged = mergeWithOptional(specs, overlay.optional, overlay.resolved);
   const { ops, includeMisses } = analyzeOperations(merged, overlay);
   const schemas = schemaTypes(merged, ops);
   const raw: Record<string, string> = {
@@ -82,7 +81,6 @@ export async function generate(
       namespaces,
       includeMisses,
       inlineUploads: ops.flatMap((o) => (uploadKey(o.descriptor) ? [o.descriptor.id] : [])),
-      corrections: overlay.corrections,
     },
   };
 }

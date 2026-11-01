@@ -143,8 +143,34 @@ const outAttachment: JsonSchema = {
     "content_type",
     "description",
     "content_url",
+    "author",
     "created_on",
   ],
+};
+
+const outIssueRelation: JsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "integer" },
+    issue_id: { type: "integer" },
+    issue_to_id: { type: "integer" },
+    relation_type: {
+      type: "string",
+      enum: [
+        "relates",
+        "duplicates",
+        "duplicated",
+        "blocks",
+        "blocked",
+        "precedes",
+        "follows",
+        "copied_to",
+        "copied_from",
+      ],
+    },
+    delay: { type: ["integer", "null"] },
+  },
+  required: ["id", "issue_id", "issue_to_id", "relation_type", "delay"],
 };
 
 const outIssueSummary: JsonSchema = {
@@ -175,35 +201,15 @@ const outIssueSummary: JsonSchema = {
     updated_on: { type: "string", format: "date-time" },
     closed_on: { type: ["string", "null"], format: "date-time" },
     attachments: { type: "array", items: outAttachment },
-    relations: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "integer" },
-          issue_id: { type: "integer" },
-          issue_to_id: { type: "integer" },
-          relation_type: {
-            type: "string",
-            enum: [
-              "relates",
-              "duplicates",
-              "duplicated",
-              "blocks",
-              "blocked",
-              "precedes",
-              "follows",
-              "copied_to",
-              "copied_from",
-            ],
-          },
-          delay: { type: ["integer", "null"] },
-        },
-      },
-    },
+    relations: { type: "array", items: outIssueRelation },
   },
   required: [
     "id",
+    "project",
+    "tracker",
+    "status",
+    "priority",
+    "author",
     "subject",
     "description",
     "start_date",
@@ -215,11 +221,6 @@ const outIssueSummary: JsonSchema = {
     "created_on",
     "updated_on",
     "closed_on",
-    "project",
-    "tracker",
-    "status",
-    "priority",
-    "author",
   ],
 };
 
@@ -270,7 +271,7 @@ const outIssueChild: JsonSchema = {
       items: { type: "object", description: "Same shape as the enclosing issue_child." },
     },
   },
-  required: ["id", "subject"],
+  required: ["id", "tracker", "subject"],
 };
 
 const outIssue: JsonSchema = {
@@ -310,36 +311,12 @@ const outIssue: JsonSchema = {
           comments: { type: "string" },
           committed_on: { type: "string", format: "date-time" },
         },
+        required: ["revision", "comments", "committed_on"],
       },
     },
     children: { type: "array", items: outIssueChild },
     attachments: { type: "array", items: outAttachment },
-    relations: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "integer" },
-          issue_id: { type: "integer" },
-          issue_to_id: { type: "integer" },
-          relation_type: {
-            type: "string",
-            enum: [
-              "relates",
-              "duplicates",
-              "duplicated",
-              "blocks",
-              "blocked",
-              "precedes",
-              "follows",
-              "copied_to",
-              "copied_from",
-            ],
-          },
-          delay: { type: ["integer", "null"] },
-        },
-      },
-    },
+    relations: { type: "array", items: outIssueRelation },
     journals: {
       type: "array",
       items: {
@@ -374,6 +351,11 @@ const outIssue: JsonSchema = {
   },
   required: [
     "id",
+    "project",
+    "tracker",
+    "status",
+    "priority",
+    "author",
     "subject",
     "description",
     "start_date",
@@ -385,11 +367,6 @@ const outIssue: JsonSchema = {
     "created_on",
     "updated_on",
     "closed_on",
-    "project",
-    "tracker",
-    "status",
-    "priority",
-    "author",
   ],
 };
 
@@ -617,13 +594,23 @@ const outTimeEntry: JsonSchema = {
     updated_on: { type: "string", format: "date-time" },
     custom_fields: { type: "array", items: outCustomFieldValue },
   },
-  required: ["id", "hours", "comments", "spent_on", "created_on", "updated_on"],
+  required: [
+    "id",
+    "project",
+    "user",
+    "activity",
+    "hours",
+    "comments",
+    "spent_on",
+    "created_on",
+    "updated_on",
+  ],
 };
 
 const outNewsComment: JsonSchema = {
   type: "object",
   properties: { id: { type: "integer" }, author: outIdName, content: { type: "string" } },
-  required: ["id", "content"],
+  required: ["id", "author", "content"],
 };
 
 const outNews: JsonSchema = {
@@ -639,32 +626,7 @@ const outNews: JsonSchema = {
     attachments: { type: "array", items: outAttachment },
     comments: { type: "array", items: outNewsComment },
   },
-  required: ["id", "title", "description", "created_on"],
-};
-
-const outIssueRelation: JsonSchema = {
-  type: "object",
-  properties: {
-    id: { type: "integer" },
-    issue_id: { type: "integer" },
-    issue_to_id: { type: "integer" },
-    relation_type: {
-      type: "string",
-      enum: [
-        "relates",
-        "duplicates",
-        "duplicated",
-        "blocks",
-        "blocked",
-        "precedes",
-        "follows",
-        "copied_to",
-        "copied_from",
-      ],
-    },
-    delay: { type: ["integer", "null"] },
-  },
-  required: ["id", "issue_id", "issue_to_id", "relation_type", "delay"],
+  required: ["id", "project", "title", "description", "created_on"],
 };
 
 const outVersionSummary: JsonSchema = {
@@ -684,6 +646,7 @@ const outVersionSummary: JsonSchema = {
   },
   required: [
     "id",
+    "project",
     "name",
     "description",
     "status",
@@ -714,6 +677,7 @@ const outVersion: JsonSchema = {
   },
   required: [
     "id",
+    "project",
     "name",
     "description",
     "status",
@@ -786,7 +750,7 @@ const outTracker: JsonSchema = {
     description: { type: ["string", "null"] },
     enabled_standard_fields: { type: "array", items: { type: "string" } },
   },
-  required: ["id", "name", "description", "enabled_standard_fields"],
+  required: ["id", "name", "default_status", "description", "enabled_standard_fields"],
 };
 
 const outIssueCategory: JsonSchema = {
@@ -797,7 +761,7 @@ const outIssueCategory: JsonSchema = {
     name: { type: "string" },
     assigned_to: outIdName,
   },
-  required: ["id", "name"],
+  required: ["id", "project", "name"],
 };
 
 const outIssuePriority: JsonSchema = {
@@ -959,6 +923,7 @@ const outCustomField: JsonSchema = {
       items: {
         type: "object",
         properties: { value: { type: "string" }, label: { type: "string" } },
+        required: ["value", "label"],
       },
     },
   },
@@ -1016,6 +981,7 @@ const outFile: JsonSchema = {
     "content_type",
     "description",
     "content_url",
+    "author",
     "created_on",
     "digest",
     "downloads",
@@ -1053,7 +1019,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on, updated_on, and closed_on. Unknown filters and operators are refused before anything is sent.',
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. A lower bound on a time also matches the second before it.',
           type: "object",
           properties: {
             issue_id: {
@@ -1392,14 +1358,14 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             created_on: {
               description:
-                'Filter by creation date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+                'Filter by creation date or timestamp.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
                 {
                   ...opRaw,
                   description:
-                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nTimestamp filters with a lower bound may also return issues from the preceding second.\nExamples: `>=2024-01-01`, `>=2024-01-01T08:00:00Z`, `t`, `>t-7`, `lm`",
                 },
                 opGte,
                 opLte,
@@ -1410,14 +1376,14 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             updated_on: {
               description:
-                'Filter by last updated date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+                'Filter by last updated date or timestamp.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
                 {
                   ...opRaw,
                   description:
-                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nTimestamp filters with a lower bound may also return issues from the preceding second.\nExamples: `>=2024-01-01`, `>=2024-01-01T08:00:00Z`, `t`, `>t-7`, `lm`",
                 },
                 opGte,
                 opLte,
@@ -1428,14 +1394,14 @@ export const CATALOG: readonly CatalogEntry[] = [
             },
             closed_on: {
               description:
-                'Filter by closed date.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
+                'Filter by closed date or timestamp.\nValue: date.\nAccepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine\'s own syntax, such as a relative date.',
               anyOf: [
                 scalar,
                 scalars,
                 {
                   ...opRaw,
                   description:
-                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nExamples: `>=2024-01-01`, `t`, `>t-7`, `lm`",
+                    "Format: `<operator>[value]`\nOperators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)\nTimestamp filters with a lower bound may also return issues from the preceding second.\nExamples: `>=2024-01-01`, `>=2024-01-01T08:00:00Z`, `t`, `>t-7`, `lm`",
                 },
                 opGte,
                 opLte,
@@ -2086,7 +2052,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and updated_on. Unknown filters and operators are refused before anything is sent.',
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and updated_on. A lower bound on a time also matches the second before it.',
           type: "object",
           properties: {
             status: {
@@ -2682,7 +2648,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and last_login_on. Unknown filters and operators are refused before anything is sent.',
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on and last_login_on. A lower bound on a time also matches the second before it.',
           type: "object",
           properties: {
             status: {
@@ -3130,7 +3096,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         },
         where: {
           description:
-            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD. Unknown filters and operators are refused before anything is sent.',
+            'Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine\'s own syntax, such as a relative date. Dates are YYYY-MM-DD.',
           type: "object",
           properties: {
             user_id: {
@@ -4545,6 +4511,7 @@ export const CATALOG: readonly CatalogEntry[] = [
         custom_fields: inCustomFields,
         custom_field_values: inCustomFieldValues,
       },
+      required: ["name"],
       additionalProperties: false,
     },
     inlineUploads: null,

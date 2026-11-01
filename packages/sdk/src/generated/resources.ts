@@ -749,7 +749,7 @@ export interface GroupsNamespace {
    * @see https://www.redmine.org/projects/redmine/wiki/Rest_Groups#POST
    * @stability alpha
    */
-  create(input?: CreateGroupInput, options?: CallOptions): Promise<Group>;
+  create(input: CreateGroupInput, options?: CallOptions): Promise<Group>;
 
   /**
    * Show group

@@ -19,6 +19,9 @@ const RAW = '{raw: "..."} in Redmine\'s own syntax, such as a relative date';
 
 const TIMESTAMPS = new Set(["created_on", "updated_on", "closed_on", "last_login_on"]);
 
+// Query#date_clause compares with `>` against the bound minus one second.
+const LOWER_BOUND = "A lower bound on a time also matches the second before it.";
+
 const ID_CONTAINS = "{contains: id}";
 
 export type Kind = "id" | "date" | "number" | "text";
@@ -110,7 +113,8 @@ export function whereLegend(
     ? [...where, { spec: CUSTOM_FIELD, prose: CUSTOM_FIELD_PROSE }]
     : where;
   const used = new Set(filters.flatMap((f) => operatorsOf(f.spec)));
-  const times = where.map((f) => f.name).filter((name) => TIMESTAMPS.has(name));
+  const times = where.filter((f) => TIMESTAMPS.has(f.name));
+  const unsaid = times.filter((f) => !f.prose.description.includes("timestamp")).map((f) => f.name);
   return [
     "Filters keyed by Redmine filter name. A value or an array means equals any of them.",
     `An object with one operator picks another comparison: ${OPERATORS.filter((o) => used.has(o))
@@ -120,10 +124,11 @@ export function whereLegend(
     ...(filters.some((f) => f.prose.kind === "date") ? ["Dates are YYYY-MM-DD."] : []),
     ...(times.length > 0
       ? [
-          `A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for ${new Intl.ListFormat("en").format(times)}.`,
+          unsaid.length > 0
+            ? `A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for ${new Intl.ListFormat("en").format(unsaid)}. ${LOWER_BOUND}`
+            : `Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. ${LOWER_BOUND}`,
         ]
       : []),
-    "Unknown filters and operators are refused before anything is sent.",
   ].join(" ");
 }
 

@@ -2,7 +2,7 @@ import { expect, it } from "vite-plus/test";
 import { RedmineError } from "../../src/index.ts";
 import { clientFor, cleanups, describeServers, freshProject, sorted, unique } from "./helpers.ts";
 
-/** The spec leaves these optional, and overlay.corrections makes them required. */
+/** Redmine always sends these, and the spec requires them. */
 const ALWAYS_SET = ["project", "tracker", "status", "priority", "author"] as const;
 
 describeServers("issues", (server) => {

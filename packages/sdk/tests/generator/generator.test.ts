@@ -7,7 +7,13 @@ import { loadSpecs, type SpecFile } from "../../generator/spec.ts";
 import { uploadKey } from "../../src/core/op.ts";
 import { CATALOG } from "../../src/generated/catalog.ts";
 import { ops } from "../../src/generated/ops.ts";
-import type { CustomField, IdName, Issue, IssueSummary } from "../../src/generated/schemas.ts";
+import type {
+  CustomField,
+  IdName,
+  Issue,
+  IssueSummary,
+  WikiPage,
+} from "../../src/generated/schemas.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const specs = loadSpecs(resolve(root, "../../spec/redmine-openapi"));
@@ -422,74 +428,36 @@ describe("requiredness across versions", () => {
   });
 });
 
-describe("spec corrections", () => {
+describe("overlay.optional", () => {
+  const project = "#/components/schemas/wiki_page/properties/project";
+
+  test("keeps a property optional that an older Redmine never sends", () => {
+    expectTypeOf<WikiPage["project"]>().toEqualTypeOf<IdName | undefined>();
+  });
+
+  test("an entry fails generation once the older spec drops the property", async () => {
+    const fixed = withSpecs((v) => {
+      delete v["6.1"]!.components.schemas.wiki_page!.properties!.project;
+    });
+    await expect(generate(fixed)).rejects.toThrow(`overlay.optional: ${project} no longer changes`);
+  });
+
+  test("an entry that names no property fails generation", async () => {
+    await expect(
+      generate(specs, { ...overlay, optional: { "#/components/schemas/wiki_page": "test" } }),
+    ).rejects.toThrow("does not name a schema property");
+  });
+});
+
+describe("issue fields Redmine always sends", () => {
   const always = ["project", "tracker", "status", "priority", "author"] as const;
   type AlwaysSet = Pick<Issue, (typeof always)[number]>;
 
-  test("make the issue fields Redmine always sends required, in both issue schemas", () => {
+  test("are required in both issue schemas", () => {
     expectTypeOf<AlwaysSet>().toEqualTypeOf<Required<AlwaysSet>>();
     expectTypeOf<Pick<IssueSummary, keyof AlwaysSet>>().toEqualTypeOf<AlwaysSet>();
     expectTypeOf<AlwaysSet["project"]>().toEqualTypeOf<IdName>();
     expectTypeOf<NonNullable<Issue["parent"]>>().toEqualTypeOf<{ id: number }>();
     expectTypeOf<NonNullable<IssueSummary["parent"]>>().toEqualTypeOf<{ id: number }>();
-  });
-
-  test("leave the loaded specs as they are", () => {
-    for (const { doc } of specs) {
-      expect(doc.components.schemas.issue!.required).not.toContain("project");
-      expect(doc.components.schemas.issue!.properties!.parent!.required).toBeUndefined();
-    }
-  });
-
-  // The merge takes `required` from the latest spec, so once that spec has the fix, the correction does nothing.
-  test("a property the latest spec already requires fails generation, while an older spec lacks it", async () => {
-    const latestFixed = withSpecs((v) => {
-      v["7.0"]!.components.schemas.issue!.required!.push("author", "project");
-    });
-    await expect(generate(latestFixed)).rejects.toThrow(
-      "requiring project at #/components/schemas/issue, author at #/components/schemas/issue no longer changes the merged spec",
-    );
-  });
-
-  test("a property every vendored spec already requires fails generation", async () => {
-    const fixed = withSpecs((v) => {
-      for (const doc of Object.values(v)) {
-        doc.components.schemas["issue.summary"]!.properties!.parent!.required = ["id"];
-      }
-    });
-    await expect(generate(fixed)).rejects.toThrow(
-      "requiring id at #/components/schemas/issue.summary/properties/parent no longer changes the merged spec",
-    );
-  });
-
-  test("an older spec that already has the fix changes nothing", async () => {
-    const olderFixed = withSpecs((v) => {
-      v["6.1"]!.components.schemas.issue!.required!.push(...always);
-    });
-    expect((await generate(olderFixed)).files).toEqual(generated.files);
-  });
-
-  test("a correction naming a missing schema or property, or listing none or one twice, fails generation", async () => {
-    const correct = (...corrections: { pointer: string; required: string[] }[]) =>
-      generate(specs, {
-        ...overlay,
-        corrections: corrections.map((c) => ({ ...c, reason: "test" })),
-      });
-    const issue = "#/components/schemas/issue";
-    await expect(
-      correct({ pointer: "#/components/schemas/isue", required: ["project"] }),
-    ).rejects.toThrow("#/components/schemas/isue is not an object schema in 6.1.3-r1.yaml");
-    await expect(correct({ pointer: issue, required: ["projects"] })).rejects.toThrow(
-      `${issue} has no property projects in 6.1.3-r1.yaml`,
-    );
-    await expect(correct({ pointer: issue, required: ["constructor"] })).rejects.toThrow(
-      `${issue} has no property constructor in 6.1.3-r1.yaml`,
-    );
-    await expect(correct({ pointer: issue, required: [] })).rejects.toThrow(
-      `${issue} lists no property`,
-    );
-    await expect(
-      correct({ pointer: issue, required: ["project"] }, { pointer: issue, required: ["project"] }),
-    ).rejects.toThrow(`project at ${issue} is listed twice`);
   });
 });

@@ -60,7 +60,7 @@ The generator in `packages/sdk/generator/` reads the vendored spec in `spec/redm
 | `vp run gen`       | Regenerates `src/generated/` from `spec/redmine-openapi/*.yaml` and prints the drift report. |
 | `vp run gen:check` | Regenerates in memory and fails if the committed `src/generated/` differs. CI runs it.       |
 
-`packages/sdk/generator/overlay.ts` holds every decision this SDK makes about the spec: names, hidden operations, and fixes. The overlay is the one place that patches the spec. `corrections` marks six issue fields as required, because Redmine always sends them and the spec leaves them optional. Each correction states its reason. Generation fails once a corrected field no longer changes the merged spec. An upstream fix therefore forces you to remove the correction. Report any other wrong field or operation upstream, at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues). [spec/README.md](spec/README.md) explains how to update the vendored copy.
+`packages/sdk/generator/overlay.ts` holds every decision this SDK makes about the spec: names, hidden operations, and descriptions that are wrong for an older supported release. The one change it makes to the vendored specs is `optional`, which keeps a property optional while an older spec wrongly declares it. Generation fails once an entry no longer changes the merged spec. Report a wrong field or operation upstream, at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues). [spec/README.md](spec/README.md) explains how to update the vendored copy.
 
 ## Add a Redmine version
 

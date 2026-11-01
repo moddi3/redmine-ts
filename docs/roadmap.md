@@ -16,7 +16,7 @@ The MCP items share the background in [MCP server package](#mcp-server-package).
 | Next                                    | [A stricter `aud`](#a-stricter-aud)                                                                 | MCP          |                                |
 | Next                                    | [Big single results](#big-single-results)                                                           | MCP          | #78                            |
 | Next                                    | [Smaller tool schemas](#smaller-tool-schemas)                                                       | MCP          |                                |
-| Next                                    | [Issue fields upstream](#issue-fields-upstream)                                                     | SDK          | #65, d-yoshi/redmine-openapi#9 |
+| Next                                    | [Spec gaps the generator covers](#spec-gaps-the-generator-covers)                                   | SDK, MCP     |                                |
 | Next, partly done in MCP                | [Curated triage toolset](#curated-triage-toolset)                                                   | Toolkit      |                                |
 | Next                                    | [`gen` CLI for an instance config](#gen-cli-for-an-instance-config)                                 | SDK          |                                |
 | Next                                    | [Follow-ups found while building](#follow-ups-found-while-building)                                 | MCP, SDK     |                                |
@@ -64,6 +64,7 @@ The MCP items share the background in [MCP server package](#mcp-server-package).
 | Done                                    | [Authenticated stalls](#authenticated-stalls)                                                       | MCP          |                                |
 | Done in MCP                             | [Journal details as a readable diff](#journal-details-as-a-readable-diff)                           | MCP          |                                |
 | Done                                    | [Inline uploads in create and update](#inline-uploads-in-create-and-update)                         | SDK          |                                |
+| Done                                    | [Issue fields upstream](#issue-fields-upstream)                                                     | SDK          | #65, d-yoshi/redmine-openapi#9 |
 
 ## Next
 
@@ -83,9 +84,15 @@ The [result budget](#result-budget) trims list pages, `issues_get` journals, and
 
 In a full-access listing of 200K characters, output schemas take 80K and descriptions take 27K. Clients without tool search pay that cost in every session. A tool profile would help clients that load every tool. One profile could hold the workflow tools and the REST tools that agents use most. The evals below would then check that tool choice does not get worse.
 
-### Issue fields upstream
+### Spec gaps the generator covers
 
-The vendored spec leaves an issue's `project`, `tracker`, `status`, `priority`, `author`, and `parent.id` optional. `@redmine-ts/sdk` 0.6.0 marks them as always set through `overlay.corrections`. Generation fails once a correction stops changing the merged spec, so an upstream fix forces the correction's removal. The report is filed upstream as d-yoshi/redmine-openapi#9, with the change in d-yoshi/redmine-openapi#10. The corrections go once the repository vendors a release with that change.
+The SDK vendors the spec tags `6.1.3-r2` and `7.0.2-r2`. Where those specs are wrong or silent, the generator covers the gap. Each entry below should go once upstream fixes it.
+
+- **The wiki page's `project` on 6.1.** `7.0.2-r2` requires it. `6.1.3-r2` declares it, though Redmine 6.1 never renders it (`wiki/show.api.rsb` in 6.1.3, 6.1.5 and `6.1-stable`). `overlay.optional` keeps it optional. The fix belongs in the upstream maintenance branch `6.1.3-r2`, in `src/components/schemas/wiki_page.yaml`, and [d-yoshi/redmine-openapi#14](https://github.com/d-yoshi/redmine-openapi/issues/14) tracks it. Generation fails once the entry stops changing the merged spec.
+- **Issue children on 6.1.** `6.1.3-r2` still describes them inline, and `7.0.2-r2` uses the recursive `issue_child`. `overlay.resolved` takes the 7.0 shape, because Redmine 6.1 renders the same fields.
+- **Stable operations.** The tag descriptions in `7.0.2-r2` no longer mark operations as stable. `overlay.stableTags` keeps the list from `7.0.1-r1`.
+- **`updateJournal` on older releases.** `7.0.2-r2` says that a journal left with empty notes is kept, which is true only from 6.1.4 and 7.0.1. `overlay.descriptions` gives text that holds for both versions.
+- **Timestamps in user and project filters.** The specs document UTC timestamps only for the issue filters `created_on`, `updated_on` and `closed_on`. `TIMESTAMPS` in `packages/sdk/generator/filters.ts` names `created_on`, `updated_on` and `last_login_on` for the user and project lists too.
 
 ### Curated triage toolset
 
@@ -318,6 +325,10 @@ The MCP part is done. For now, the normalizer lives in `packages/mcp/src/workflo
 ### Inline uploads in create and update
 
 `issues.create`, `issues.update`, `news.create`, `news.update`, and `wiki.update` take `{ file, filename }` entries in `uploads` next to references. Inside the call, they upload those entries in order and then send the record. A failed call carries `error.uploads`, so a retry reuses what Redmine acknowledged. The generator finds these operations through the spec's `uploads` component, and the catalog marks them with `inlineUploads`. `attachments.upload` stays, for a reference you keep and for `files.create`. The MCP server keeps the two-step path. An inline form would add about 4K characters to its most-used tool schemas, and over HTTP all files would share one request body. Revisit that choice if agent evals show agents failing the two-step attach. The design came from an arena of two candidates, judged by Sonnet and Sol (`.audit/decisions.tsv`, phase `sdk-inline-uploads`).
+
+### Issue fields upstream
+
+The spec left an issue's `project`, `tracker`, `status`, `priority`, `author`, and `parent.id` optional, though Redmine always sends them. `@redmine-ts/sdk` 0.6.0 marked them as required through an overlay correction. The fix went upstream as d-yoshi/redmine-openapi#9 and d-yoshi/redmine-openapi#10, and shipped in the spec tags `6.1.3-r2` and `7.0.2-r2`. The SDK vendors those tags, and the corrections mechanism is gone.
 
 ## MCP server package
 
