@@ -1,6 +1,6 @@
 # Documentation
 
-Pick the task you have. Each page links on to the details.
+Pick the task you have. Each page links to more detail.
 
 ## Call Redmine from code with the SDK
 
@@ -26,7 +26,7 @@ Pick the task you have. Each page links on to the details.
 
 ## Check what is supported
 
-- [Compatibility](compatibility.md) lists the Redmine versions, runtimes, and MCP clients, and how each is checked.
+- [Compatibility](compatibility.md) lists the supported Redmine versions, runtimes, and MCP clients, and how each one is checked.
 - [Roadmap](roadmap.md) lists what is done, what is limited today, and what is planned.
 
 ## Understand the design
@@ -38,5 +38,5 @@ Pick the task you have. Each page links on to the details.
 - [Contributing](../CONTRIBUTING.md) covers the setup, the checks, code generation, and adding a Redmine version.
 - [Releasing](releasing.md) covers changesets, the Version Packages pull request, and publishing to npm.
 - [Contract-test servers](../docker/README.md) lists the Docker Redmine servers, their seeded data, and their ports.
-- [Vendored spec](../spec/README.md) explains how the OpenAPI spec is pinned and updated.
+- [Vendored spec](../spec/README.md) explains how to pin and update the OpenAPI spec.
 - [Style guide](style-guide.md) covers how to write and check these pages.

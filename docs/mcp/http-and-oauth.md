@@ -11,7 +11,7 @@ One server at a public https URL can serve everyone in a team. Each person signs
 
 ## Start the server
 
-With `--http`, one server serves Streamable HTTP at `/mcp` for many users. Each request carries its user's API key in the `X-Redmine-API-Key` header, and the server answers it with a fresh MCP server for that key. `REDMINE_URL` is fixed at startup, so a client cannot point the server at another host. The server does not read `REDMINE_API_KEY` in this mode. When it is set, the server says once on stderr that it ignores it.
+With `--http`, one server serves Streamable HTTP at `/mcp` for many users. Each request carries its user's API key in the `X-Redmine-API-Key` header, and the server answers it with a fresh MCP server for that key. `REDMINE_URL` is fixed at startup, so a client cannot point the server at another host. The server does not read `REDMINE_API_KEY` in this mode. When that variable is set, the server says once on stderr that it ignores it.
 
 ```sh
 REDMINE_URL=https://tracker.example.com npx -y @redmine-ts/mcp --http --no-delete
@@ -22,7 +22,7 @@ The line on stderr shows that the server is up. Clients that can send a header c
 
 ## Put TLS in front of the server
 
-The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text, so keep the server on loopback and put a proxy that terminates TLS in front of it. Caddy passes the client's `Host` to the server unless told otherwise. Rewrite it as below, or keep it and start the server with `--allow-host mcp.example.com`:
+The server speaks plain HTTP. Without TLS, the API key crosses the network in clear text. Keep the server on loopback, and put a proxy that terminates TLS in front of it. By default, Caddy passes the client's `Host` header to the server. Rewrite the header as below, or keep it and start the server with `--allow-host mcp.example.com`:
 
 ```caddy
 mcp.example.com {
@@ -38,12 +38,12 @@ To serve the endpoint on Redmine's own hostname instead, such as `https://tracke
 
 Sign in to Redmine as an admin and create one OAuth application:
 
-1. Administration, Applications, New application.
-2. Name: what people see on Redmine's consent page, such as `MCP`.
-3. Redirect URI: the public URL of the MCP endpoint followed by `/oauth/redmine/callback`, such as `https://mcp.example.com/mcp/oauth/redmine/callback`. The server prints it at startup. Redmine allows plain http only for `localhost` and `127.0.0.1`.
-4. Confidential: keep it checked. Redmine creates only confidential applications.
-5. Scopes: tick every permission. The server asks Redmine only for the permissions of the scopes a client was granted (see [Scopes and access modes](authentication.md#scopes-and-access-modes)), and Redmine refuses a request for one the application lacks. Leave Administration unticked; the server never asks for it.
-6. Save, and copy the UID into `REDMINE_OAUTH_CLIENT_ID` and the secret into `REDMINE_OAUTH_CLIENT_SECRET`. Redmine shows the secret once.
+1. Go to **Administration**, **Applications**, **New application**.
+2. In **Name**, enter what people see on Redmine's consent page, such as `MCP`.
+3. In **Redirect URI**, enter the public URL of the MCP endpoint followed by `/oauth/redmine/callback`, such as `https://mcp.example.com/mcp/oauth/redmine/callback`. The server prints this URI at startup. Redmine allows plain http only for `localhost` and `127.0.0.1`.
+4. Keep **Confidential** checked. Redmine creates only confidential applications.
+5. Under **Scopes**, check every permission. The server asks Redmine only for the permissions of the scopes it granted a client, as [Scopes and access modes](authentication.md#scopes-and-access-modes) shows. Redmine refuses a request for a permission the application lacks. Leave **Administration** unchecked, because the server never asks for it.
+6. Save the application. Copy the UID into `REDMINE_OAUTH_CLIENT_ID` and the secret into `REDMINE_OAUTH_CLIENT_SECRET`. Redmine shows the secret only once.
 
 ## Turn on OAuth
 
@@ -55,7 +55,7 @@ Sign in to Redmine as an admin and create one OAuth application:
 
    Keep the secret. A new one signs every client out. It must be random, not a passphrase, as [The secret](authentication.md#the-secret) explains.
 
-2. Restart the server with OAuth. `REDMINE_MCP_PUBLIC_URL` is the URL people give their client. `--allow-client` admits only the clients on the listed hosts, which a public server needs, as [Choose which clients may sign in](authentication.md#choose-which-clients-may-sign-in) explains:
+2. Restart the server with OAuth. `REDMINE_MCP_PUBLIC_URL` is the URL people give their client. `--allow-client` admits only the clients on the listed hosts. A public server needs it, as [Choose which clients may sign in](authentication.md#choose-which-clients-may-sign-in) explains:
 
    ```sh
    REDMINE_URL=https://tracker.example.com \
@@ -82,11 +82,11 @@ Each person then allows the client on the server's consent page, signs in to Red
 
 ## What a sign-in looks like
 
-Here MCP Inspector signs in to a Redmine 7.0. The server runs as in [Turn on OAuth](#turn-on-oauth), with `REDMINE_MCP_PUBLIC_URL=http://localhost:3737/mcp`, `--no-delete`, and `--allow-origin http://127.0.0.1:6274` for the Inspector's page, and without `--allow-client`:
+Here MCP Inspector signs in to a Redmine 7.0. The server runs as in [Turn on OAuth](#turn-on-oauth), without `--allow-client`. It runs with `REDMINE_MCP_PUBLIC_URL=http://localhost:3737/mcp`, `--no-delete`, and `--allow-origin http://127.0.0.1:6274` for the Inspector's page:
 
 <!-- Recorded by scripts/oauth-walkthrough/record.sh. Run it again after a change to these pages. -->
 
-![MCP Inspector adds the server by its URL; the person allows it on the server's consent page, signs in to Redmine and authorizes the application; a tool call then returns their user](../../packages/mcp/docs/oauth/sign-in.webp)
+![MCP Inspector adds the server by its URL. The person allows it on the server's consent page, signs in to Redmine, and authorizes the application. A tool call then returns their user.](../../packages/mcp/docs/oauth/sign-in.webp)
 
 <details>
 <summary>Step by step</summary>
@@ -95,7 +95,7 @@ Here MCP Inspector signs in to a Redmine 7.0. The server runs as in [Turn on OAu
 
    ![MCP Inspector's Add server dialog with the URL http://localhost:3737/mcp](../../packages/mcp/docs/oauth/1-add-server.webp)
 
-2. The server's consent page names the client, where it sends the person back, and the access it asks for: read and write, since the server runs with `--no-delete`.
+2. The server's consent page names the client, where it sends the person back, and the access it asks for. Here the access is read and write, because the server runs with `--no-delete`.
 
    ![The consent page: Allow MCP Inspector to use Redmine as you?](../../packages/mcp/docs/oauth/2-consent.webp)
 
@@ -103,11 +103,11 @@ Here MCP Inspector signs in to a Redmine 7.0. The server runs as in [Turn on OAu
 
    ![Redmine's login page](../../packages/mcp/docs/oauth/3-redmine-login.webp)
 
-4. Redmine asks the person to authorize the application the admin created, listing the permissions the server asked for. Redmine skips this page when the person has already authorized the application for the same permissions and has not revoked it; the server's consent page still comes first.
+4. Redmine asks the person to authorize the application that the admin created, and lists the permissions that the server asked for. Redmine skips this page when the person has already authorized the application for the same permissions and has not revoked it. The server's consent page still comes first.
 
    ![Redmine's Authorization required page for the application MCP](../../packages/mcp/docs/oauth/4-redmine-authorize.webp)
 
-5. Redmine sends the browser back through the server, and the client is connected.
+5. Redmine sends the browser back through the server, and the client connects.
 
    ![MCP Inspector connected to the server, with Authorization complete](../../packages/mcp/docs/oauth/5-connected.webp)
 
@@ -119,16 +119,16 @@ Here MCP Inspector signs in to a Redmine 7.0. The server runs as in [Turn on OAu
 
 ## Serve on Redmine's origin
 
-The server can share an origin with Redmine, such as `https://tracker.example.com/mcp` next to Redmine at `https://tracker.example.com`, or `https://example.com/redmine/mcp` next to Redmine at `https://example.com/redmine`. Run it on loopback, set `REDMINE_MCP_PUBLIC_URL` to that URL, `REDMINE_URL` to Redmine's internal address and `REDMINE_PUBLIC_URL` to Redmine's public one, and forward these paths unchanged, here for `/mcp`:
+The server can share an origin with Redmine, such as `https://tracker.example.com/mcp` next to Redmine at `https://tracker.example.com`, or `https://example.com/redmine/mcp` next to Redmine at `https://example.com/redmine`. Run the server on loopback. Set `REDMINE_MCP_PUBLIC_URL` to that URL, `REDMINE_URL` to Redmine's internal address, and `REDMINE_PUBLIC_URL` to Redmine's public address. Then forward these paths unchanged, shown here for `/mcp`:
 
 - `/mcp` and everything under `/mcp/`
 - `/.well-known/oauth-protected-resource/mcp`
 - `/.well-known/oauth-authorization-server/mcp`
 - `/.well-known/openid-configuration/mcp`
 
-Nothing else at the origin's root belongs to the server. Forward the request body unbuffered and the response as it streams, since tool results arrive as server-sent events.
+Nothing else at the origin's root belongs to the server. Forward the request body unbuffered, and forward the response as it streams, because tool results arrive as server-sent events.
 
-The browser sends the server Redmine's cookies too, since they share the origin. The server reads only its own cookie, `__Host-redmine-mcp-oauth`, and never passes cookies on, but the proxy can keep Redmine's session cookie from reaching it at all. nginx:
+Because the server and Redmine share the origin, the browser sends the server Redmine's cookies too. The server reads only its own cookie, `__Host-redmine-mcp-oauth`, and never passes cookies on. The proxy can also keep Redmine's session cookie from reaching the server at all. In nginx:
 
 ```nginx
 # Only the MCP server's own cookie; an empty value drops the header.
@@ -153,9 +153,9 @@ server {
 }
 ```
 
-nginx refuses a body over 1 MB with 413 unless `client_max_body_size` raises it, and the server takes up to about 6.7 MiB, enough for a 5 MB upload in base64. `client_body_timeout` ends a request whose body stops arriving for that long, 60 seconds by default, with 408. It applies to every client, including one whose key Redmine accepts. The server itself ends any body still arriving 300 seconds after it began reading it, and a stalled body sooner when another request needs the room it holds in the body budget (see [Security defaults](http-server.md#security-defaults)).
+nginx refuses a body over 1 MB with 413 unless `client_max_body_size` raises that limit. The server takes up to about 6.7 MiB, enough for a 5 MiB upload in base64. `client_body_timeout` ends a request with 408 when its body stops arriving for that long, 60 seconds by default. That timeout applies to every client, including one whose key Redmine accepts. The server itself ends any body still arriving 300 seconds after the server began reading it. It ends a stalled body sooner when another request needs the room that body holds in the body budget, as [Security defaults](http-server.md#security-defaults) explains.
 
-Caddy:
+In Caddy:
 
 ```caddy
 tracker.example.com {
@@ -173,7 +173,7 @@ tracker.example.com {
 
 For a subpath, replace `/mcp` with the whole path, such as `/redmine/mcp` and `/.well-known/oauth-protected-resource/redmine/mcp`. The OAuth paths never collide with Redmine's own `/oauth/...` routes, because they all live under the MCP endpoint's path.
 
-Pages on the public origin, the consent page and, on a shared origin, Redmine's own, may call `/mcp` without `--allow-origin`; they still need a key or a token. The consent form is refused when a browser says it was posted from any other origin.
+Pages on the public origin may call `/mcp` without `--allow-origin`. Those pages are the consent page and, on a shared origin, Redmine's own pages. They still need a key or a token. The server refuses the consent form when a browser says that a page on any other origin posted it.
 
 ## Related pages
 

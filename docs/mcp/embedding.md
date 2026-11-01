@@ -1,10 +1,10 @@
 # Embed the server
 
-Two functions in `@redmine-ts/mcp` run the same server inside your own program. `createRedmineMcpServer` returns an MCP `Server` for one Redmine credential, which you connect to any transport. `createRedmineMcpHandler` returns a web-standard request handler that serves Streamable HTTP to many users, which is the HTTP server of `--http` without the port. The main entry imports no `node:` modules.
+Two functions in `@redmine-ts/mcp` run the same server inside your own program. `createRedmineMcpServer` returns an MCP `Server` for one Redmine credential, which you connect to any transport. `createRedmineMcpHandler` returns a web-standard request handler that serves Streamable HTTP to many users. The handler is the HTTP server of `--http` without the port. The main entry imports no `node:` modules.
 
 ## Serve one user over any transport
 
-`createRedmineMcpServer` takes the same config as `createRedmine` from `@redmine-ts/sdk`, and optionally a second object of server options, and returns an MCP `Server`. Connect it to any transport:
+`createRedmineMcpServer` takes the same config as `createRedmine` from `@redmine-ts/sdk`, and an optional second object of server options. It returns an MCP `Server`. Connect it to any transport:
 
 ```ts
 import { createRedmineMcpServer } from "@redmine-ts/mcp";
@@ -20,21 +20,21 @@ serveStdio(() =>
 );
 ```
 
-`access` and `version` choose the tools exactly as the [settings](configuration.md) do. The other config options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client, except `normalize`. The server keeps it on, whatever the config says, because the tools rely on the SDK's response fixes, such as journals oldest first.
+`access` and `version` choose the tools exactly as the [settings](configuration.md) do. The other config options, such as `fetch`, `timeoutMs`, and `onEvent`, go to the SDK client, except `normalize`. The server keeps `normalize` on, whatever the config says, because the tools rely on the SDK's response fixes, such as journals in oldest-first order.
 
 The second argument takes these options:
 
 | Option                     | What it does                                                                                                                                                                                                                                                                                                                                                                                               |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `files`                    | Enables `path` uploads and `attachments_save`. Pass a files directory from the Node-only `@redmine-ts/mcp/node` entry: `createRedmineMcpServer(config, { files: localFiles("/srv/redmine-files") })`. `localFiles` resolves the directory's symlinks once and throws if the directory does not exist. The main entry never imports file system code, so a server without `files` cannot touch local files. |
-| `maxResultBytes`           | Sets the [result budget](tools.md#result-size), as `REDMINE_MCP_MAX_RESULT_BYTES` does. A value under 1,000, over 499,000 or not a whole number throws a `TypeError`.                                                                                                                                                                                                                                      |
-| `observe`                  | Gets each request the server sends to Redmine, with its `method`, its `url`, and a `status` that is set once Redmine answers, and each call that the access mode refuses. `createRedmineMcpHandler` uses it to pick the status of an OAuth request.                                                                                                                                                        |
+| `maxResultBytes`           | Sets the [result budget](tools.md#result-size), as `REDMINE_MCP_MAX_RESULT_BYTES` does. A value under 1,000, over 499,000, or not a whole number throws a `TypeError`.                                                                                                                                                                                                                                     |
+| `observe`                  | Gets each request the server sends to Redmine, with its `method`, its `url`, and a `status` that the server sets once Redmine answers. Also gets each call that the access mode refuses. `createRedmineMcpHandler` uses it to pick the status of an OAuth request.                                                                                                                                         |
 | `dangerouslyRevealApiKeys` | `true` does what `--dangerously-reveal-api-keys` does. The server replaces the credential only when `auth` holds it as a string, as `apiKey` or `bearer`.                                                                                                                                                                                                                                                  |
-| `admin`                    | `false` leaves the [tools that need an admin key](tools.md#tools-that-need-an-admin-key) out of `tools/list` and the instructions. Without it, every tool is listed. The CLI and `createRedmineMcpHandler` set it from Redmine's answer.                                                                                                                                                                   |
+| `admin`                    | `false` leaves the [tools that need an admin key](tools.md#tools-that-need-an-admin-key) out of `tools/list` and the instructions. Without it, the server lists every tool. The CLI and `createRedmineMcpHandler` set it from Redmine's answer.                                                                                                                                                            |
 
 ## Serve many users over HTTP
 
-`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`. It reads the key from each request's `X-Redmine-API-Key` header, uses no Node APIs, and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. On Bun:
+`createRedmineMcpHandler` takes the same config without `auth` and returns a web-standard `(request: Request) => Promise<Response>`. It reads the key from each request's `X-Redmine-API-Key` header. It uses no Node APIs and runs unchanged on Node, Bun, and Cloudflare Workers, without the `nodejs_compat` flag. It serves every path it receives, so route `/mcp` to it. On Bun:
 
 ```ts
 import { createRedmineMcpHandler } from "@redmine-ts/mcp";
@@ -51,18 +51,18 @@ Bun.serve({ hostname: "127.0.0.1", port: 3737, routes: { "/mcp": handler } });
 
 The handler takes these options next to the SDK config:
 
-| Option                                  | What it does                                                                                                                                                                                                                                                     |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `allowedHosts`                          | Hostnames the `Host` header may name, as `--allow-host` does. Set it when you listen on loopback, or when you know every name clients reach the handler by. Without it the handler does not check `Host`.                                                        |
-| `allowedOrigins`                        | Hostnames and origins that browser pages may call from, as `--allow-origin` takes them.                                                                                                                                                                          |
-| `publicUrl`                             | The public URL of the endpoint. With it, the handler routes the endpoint and the [OAuth paths](authentication.md#endpoints) itself, so give it every request.                                                                                                    |
-| `oauth`                                 | Turns OAuth on. Takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, `store` (see [Grant store](authentication.md#grant-store)), and the required `fetchClientMetadata`. |
-| `verifier`                              | Accepts tokens from another authorization server instead: `{ issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource and expiry of a token, or undefined.                                                                      |
-| `maxBodyBytesInFlight`, `bodyTimeoutMs` | Set the body budget and the body deadline of [Security defaults](http-server.md#security-defaults).                                                                                                                                                              |
-| `maxResultBytes`                        | Sets the [result budget](tools.md#result-size) of every request's server.                                                                                                                                                                                        |
-| `onError`                               | Gets the requests that the MCP SDK rejects and the failures outside a tool result, such as an unanswered key check. None of them carries the key.                                                                                                                |
+| Option                                  | What it does                                                                                                                                                                                                                                                                  |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allowedHosts`                          | Hostnames the `Host` header may name, as `--allow-host` does. Set it when you listen on loopback, or when you know every name clients reach the handler by. Without it, the handler does not check `Host`.                                                                    |
+| `allowedOrigins`                        | Hostnames and origins that browser pages may call from, as `--allow-origin` takes them.                                                                                                                                                                                       |
+| `publicUrl`                             | The public URL of the endpoint. With it, the handler routes the endpoint and the [OAuth paths](authentication.md#endpoints) itself, so give it every request.                                                                                                                 |
+| `oauth`                                 | Turns OAuth on. Takes `secret`, `previousSecret`, `redmineApp: { clientId, clientSecret }` or `apiKeyLogin: true`, `redminePublicUrl`, `allowedClientHosts`, `store`, and the required `fetchClientMetadata`. [Grant store](authentication.md#grant-store) describes `store`. |
+| `verifier`                              | Accepts tokens from another authorization server instead: `{ issuer, verify(token) }`, where `verify` returns the Redmine credential, scopes, resource, and expiry of a token, or `undefined`.                                                                                |
+| `maxBodyBytesInFlight`, `bodyTimeoutMs` | Set the body budget and the body deadline of [Security defaults](http-server.md#security-defaults).                                                                                                                                                                           |
+| `maxResultBytes`                        | Sets the [result budget](tools.md#result-size) of every request's server.                                                                                                                                                                                                     |
+| `onError`                               | Gets the requests that the MCP SDK rejects and the failures outside a tool result, such as an unanswered key check. None of them carries the key.                                                                                                                             |
 
-A bad origin entry, or an entry with `*` in `allowedOrigins`, `allowedHosts`, or `oauth.allowedClientHosts`, throws when the handler is created. The key check of [Security defaults](http-server.md#security-defaults) goes through the same `fetch` and `onEvent`, gives up after the shorter of `timeoutMs` and 8 seconds, and reports an unanswered check to `onError`.
+A bad origin entry, or an entry with `*` in `allowedOrigins`, `allowedHosts`, or `oauth.allowedClientHosts`, throws when you create the handler. The key check of [Security defaults](http-server.md#security-defaults) goes through the same `fetch` and `onEvent`, gives up after the shorter of `timeoutMs` and 8 seconds, and reports an unanswered check to `onError`.
 
 ## Run on Cloudflare Workers
 
@@ -84,11 +84,11 @@ export default {
 };
 ```
 
-`oauth.fetchClientMetadata` is required. It fetches the metadata documents clients name by URL, and the key sets those documents name, so it must not reach the server's own network. On Node, pass `publicFetch` from `@redmine-ts/mcp/node`, which refuses private and special-use addresses, as the CLI does. Workers cannot reach private addresses, so pass the global fetch there, and turn on the `global_fetch_strictly_public` compatibility flag. Without it, a metadata URL on the Worker's own zone is fetched straight from the zone's origin, past Cloudflare's security settings such as Access. With it, the request goes through Cloudflare's front door like any other. Create the handler on the first request, where the secrets are bound.
+The handler requires `oauth.fetchClientMetadata`. It fetches the metadata documents that clients name by URL, and the key sets that those documents name. So the function must not reach the server's own network. On Node, pass `publicFetch` from `@redmine-ts/mcp/node`, as the CLI does. `publicFetch` refuses private and special-use addresses. Workers cannot reach private addresses, so pass the global `fetch` there, and turn on the `global_fetch_strictly_public` compatibility flag. Without the flag, the Worker fetches a metadata URL on its own zone straight from the zone's origin, past Cloudflare's security settings such as Access. With the flag, that request goes through Cloudflare like any other request. Create the handler on the first request, where `env` holds the bound secrets.
 
 ## Share the grant store on Workers
 
-Every isolate builds its own handler, so give it a grant store that all isolates share. This adapter keeps one Durable Object per key. [Grant store](authentication.md#grant-store) explains what the store guarantees and why a Durable Object fits where Workers KV does not. Save it as `grant-store.ts`:
+Every isolate builds its own handler, so give each handler a grant store that all isolates share. The adapter below keeps one Durable Object per key. [Grant store](authentication.md#grant-store) explains what the store guarantees and why a Durable Object fits where Workers KV does not. Save the adapter as `grant-store.ts`:
 
 ```ts
 import { DurableObject } from "cloudflare:workers";

@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/@redmine-ts/sdk)](https://www.npmjs.com/package/@redmine-ts/sdk)
 
-A typed TypeScript client for the [Redmine](https://www.redmine.org) REST API, for Redmine 6.1 and 7.0, with no runtime dependencies. Use it to script a Redmine instance, sync it with another system, or build tools and agents on top of it.
+This package is a typed TypeScript client for the [Redmine](https://www.redmine.org) REST API. It supports Redmine 6.1 and 7.0 and has no runtime dependencies. Use it to script a Redmine instance, to sync Redmine with another system, or to build your own tools and agents with it.
 
 ## Install
 
@@ -12,8 +12,8 @@ npm install @redmine-ts/sdk
 
 You need:
 
-- Node 22 or later, or Bun. Browsers work through a proxy, untested.
-- `import`, not `require`. The package is ESM only.
+- Node 22 or later, or Bun. Browsers work through a proxy but are not tested.
+- `import`, not `require`, because the package is ESM only.
 - Redmine 6.1 or 7.0 with the REST API turned on, and credentials such as your API key from **My account**.
 
 [Compatibility](https://github.com/moddi3/redmine-ts/blob/main/docs/compatibility.md) lists the Redmine versions and runtimes that CI checks.
@@ -51,12 +51,12 @@ for await (const open of rm.issues.list({
 Redmine ignores a filter it does not know, so a typo in a filter name returns the unfiltered list. Redmine also ignores the switch-user header on a key that is not an admin's, and saves the write under the key's own user. This client refuses an unknown filter before any request, and checks that a key is an admin's before it acts as another user.
 
 - **Mistakes fail to compile.** A filter operator the field does not take is a type error. So are a method newer than the server version you declare and a write on a client you declare read-only. See [Filter lists with `where`](https://github.com/moddi3/redmine-ts/blob/main/docs/sdk/queries.md#filter-lists-with-where), [Declare the server version](https://github.com/moddi3/redmine-ts/blob/main/docs/sdk/configuration.md#declare-the-server-version), and [Restrict the client to reads](https://github.com/moddi3/redmine-ts/blob/main/docs/sdk/configuration.md#restrict-the-client-to-reads).
-- **No automatic retry of a write that may have landed.** The client retries `GET` and `DELETE` after a timeout, a network error, or a 502, 503, or 504. After those failures a `POST`, `PUT`, or `PATCH` may already have reached Redmine, so the client does not send it again, and a `PUT` with `notes` that timed out does not add its journal entry twice. It retries every method after a 429, unless the body is a `ReadableStream`, which can be read only once. See [Which failures the client retries](https://github.com/moddi3/redmine-ts/blob/main/docs/sdk/configuration.md#which-failures-the-client-retries).
-- **Keyset paging for issues.** `paging: "keyset"` walks issues by id, so issues created or deleted during the walk do not shift the pages. Any walk that gets the same page twice stops with an error instead of a loop.
-- **Uploads you can retry.** One call uploads the files in `uploads` and attaches them. When it fails after its checks, `error.uploads` holds the references Redmine already acknowledged, so a retry skips those files.
+- **No automatic retry of a write that may have reached Redmine.** The client retries `GET` and `DELETE` after a timeout, a network error, or a 502, 503, or 504. After those failures, a `POST`, `PUT`, or `PATCH` may already have reached Redmine, so the client does not send it again. A `PUT` with `notes` that timed out therefore does not add its journal entry twice. The client retries every method after a 429, unless the body is a `ReadableStream`, which can be read only once. See [Which failures the client retries](https://github.com/moddi3/redmine-ts/blob/main/docs/sdk/configuration.md#which-failures-the-client-retries).
+- **Keyset paging for issues.** `paging: "keyset"` walks issues by id, so issues created or deleted during the walk do not shift the pages. Any walk that gets the same page twice stops with an error instead of looping.
+- **Uploads you can retry.** One call uploads the files in `uploads` and attaches them. When the call fails after its checks, `error.uploads` holds the references Redmine already acknowledged, so a retry skips those files.
 - **A catalog for tool layers.** `@redmine-ts/sdk/catalog` describes every method as JSON Schema. [`@redmine-ts/mcp`](https://www.npmjs.com/package/@redmine-ts/mcp) builds its tools from it.
 
-The client also handles base URLs under a subpath, empty `PUT` and `DELETE` responses, localized `422` errors, offsets that drift while paging, and two-step uploads. Its types and operations are generated from the community [Redmine OpenAPI spec](https://github.com/d-yoshi/redmine-openapi), and CI runs contract tests against real Redmine 6.1 and 7.0 servers. The client talks to Redmine through the platform `fetch`.
+The client also handles base URLs under a subpath, empty `PUT` and `DELETE` responses, localized `422` errors, offsets that drift while paging, and two-step uploads. Its types and operations are generated from the community [Redmine OpenAPI spec](https://github.com/d-yoshi/redmine-openapi). CI runs contract tests against real Redmine 6.1 and 7.0 servers. The client sends its requests through the platform `fetch`.
 
 ## Documentation
 
@@ -71,9 +71,9 @@ The client also handles base URLs under a subpath, empty `PUT` and `DELETE` resp
 
 ## Acknowledgements
 
-The types and operations in this package are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi), an unofficial OpenAPI 3.0.3 description of the Redmine REST API released under the MIT license. This release uses its tags `6.1.3-r1` and `7.0.2-r1`.
+The types and operations in this package are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi). That spec is an unofficial OpenAPI 3.0.3 description of the Redmine REST API, released under the MIT license. This release uses the spec's tags `6.1.3-r1` and `7.0.2-r1`.
 
-If a field or operation looks wrong, the cause is most likely in the spec. Please report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues), and open an issue at [moddi3/redmine-ts/issues](https://github.com/moddi3/redmine-ts/issues) so the SDK picks up the fix.
+If a field or operation looks wrong, the cause is most likely in the spec. Report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues). Also open an issue at [moddi3/redmine-ts/issues](https://github.com/moddi3/redmine-ts/issues) so the SDK picks up the fix.
 
 ## License
 

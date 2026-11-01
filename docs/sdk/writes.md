@@ -33,7 +33,7 @@ await rm.issues.update({
 
 ## Clear a field
 
-To clear a field on update, set it to `null`. Redmine ignores a `null` `assigned_to_id` but clears it for `""`, so the client sends `""` for that one field. Every other nullable field clears with `null` as is:
+To clear a field on update, set it to `null`. Redmine ignores a `null` `assigned_to_id` but clears the field for `""`, so the client sends `""` for that one field. For every other nullable field, the client sends `null` as is:
 
 ```ts
 await rm.issues.update({ issue_id: created.id, assigned_to_id: null, due_date: null });
@@ -41,15 +41,15 @@ await rm.issues.update({ issue_id: created.id, assigned_to_id: null, due_date: n
 
 ## Attach files
 
-`file` takes a `Blob`, `Uint8Array`, `ArrayBuffer`, or `ReadableStream`. An entry also takes `filename` and, optionally, `content_type` and `description`. Redmine attaches files in two steps, and the call runs both. It uploads each file to `uploads.json`, one at a time in list order, and then sends the record with a reference to each file. A reference from `attachments.upload` can sit in the same list and goes to Redmine as it is.
+`file` takes a `Blob`, `Uint8Array`, `ArrayBuffer`, or `ReadableStream`. An entry also takes `filename` and, optionally, `content_type` and `description`. Redmine attaches files in two steps, and the call runs both. The call uploads each file to `uploads.json`, one at a time in list order, and then sends the record with a reference to each file. A reference from `attachments.upload` can go in the same list, and the client sends it to Redmine as is.
 
 - Each file is one more request under the same `access`, `as`, retry, and `timeoutMs` rules, so a call with three files can take four timeouts.
-- The client never retries a `ReadableStream`, because a stream can be read only once. It refuses a stream that is locked to a reader, that appears twice in the list, or that another upload already sent or is sending, with `invalid_input` before it sends anything.
+- The client never retries a `ReadableStream`, because a stream can be read only once. Before it sends anything, the client also refuses some streams with `invalid_input`. It refuses a stream that is locked to a reader, that appears twice in the list, or that another upload already sent or is sending.
 - Before the first request, the call checks `access` and the declared `version` for both steps, every file entry, and the record's own input. A call that fails these checks stores nothing.
 
 ## Retry a failed upload
 
-When a call fails after its checks, `error.uploads` holds your entries in order, with each file that Redmine acknowledged replaced by its reference. Pass it back as `uploads` to retry without sending those files again:
+When a call fails after its checks, `error.uploads` holds your entries in order, with each file that Redmine acknowledged replaced by its reference. To retry without sending those files again, pass `error.uploads` back as `uploads`:
 
 ```ts
 const report: CreateIssueInput = {
@@ -73,11 +73,11 @@ try {
 }
 ```
 
-- The client deletes nothing after a failure. Redmine keeps an upload that no record took until an admin runs `rake redmine:attachments:prune`, which deletes unattached uploads older than a day. The official Docker image does not schedule it.
-- An entry that still has `file` was not acknowledged. If its response was lost, Redmine may have stored it anyway, and a retry uploads it again.
+- The client deletes nothing after a failure. Redmine keeps an upload that no record took until an admin runs `rake redmine:attachments:prune`, which deletes unattached uploads older than a day. The official Docker image does not schedule that task.
+- Redmine did not acknowledge an entry that still has `file`. If the upload's response was lost, Redmine may have stored the file anyway, and a retry uploads it again.
 - `toJSON` and the enumerable properties leave `uploads` out, because a token lets any user who can edit a record attach the upload and read it.
-- After a `timeout` or a `network` error, the record may have reached Redmine. A retry of an issue create or update is then refused with `validation`, because its tokens are attached already, so Redmine does not add a second issue or note. `wiki.update` skips attached tokens and saves the page again, so pass `version` to make a retry fail with `conflict` after a later edit.
-- Redmine attaches files on `issues.update` only for a user who may edit the issue or add notes to it. A role that can update without either, such as one that may edit only its own issues, gets 204 on another author's issue while Redmine drops the files.
+- After a `timeout` or a `network` error, the record may have reached Redmine. Redmine then refuses a retry of an issue create or update with `validation`, because the retry's tokens are already attached. So Redmine does not add a second issue or note. `wiki.update` skips attached tokens and saves the page again. To make a retry fail with `conflict` after a later edit, pass `version`.
+- Redmine attaches files on `issues.update` only for a user who may edit the issue or add notes to it. A role that can update without either, such as one that may edit only its own issues, gets 204 on another author's issue, and Redmine drops the files.
 
 ## Upload a file without a record
 
@@ -104,4 +104,4 @@ for (const attachment of issue.attachments) {
 }
 ```
 
-`download` takes any object with `id` and `filename` and builds the URL from `baseUrl`. It ignores the attachment's `content_url`, which can name another host behind a proxy and would receive your API key. The result has `filename`, `content_type`, `size`, a `body` stream that you read once, and `bytes()`. `attachments.thumbnail` works the same way.
+`download` takes any object with `id` and `filename` and builds the URL from `baseUrl`. It ignores the attachment's `content_url`. Behind a proxy, `content_url` can name another host, which would then receive your API key. The result has `filename`, `content_type`, `size`, a `body` stream that you can read once, and `bytes()`. `attachments.thumbnail` works the same way.

@@ -8,7 +8,7 @@ Every operation is `rm.<namespace>.<verb>(input, options?)`. `input` is one flat
 
 ## Namespaces
 
-Methods marked 7.0+ exist since Redmine 7.0. A client declared as `version: "6.1"` does not offer them.
+Methods marked 7.0+ need Redmine 7.0 or later. A client declared with `version: "6.1"` does not offer them.
 
 | Namespace         | Methods                                                                                    |
 | ----------------- | ------------------------------------------------------------------------------------------ |
@@ -36,19 +36,19 @@ Methods marked 7.0+ exist since Redmine 7.0. A client declared as `version: "6.1
 | `journals`        | `update`                                                                                   |
 | `repositories`    | `addRelatedIssue`, `removeRelatedIssue`                                                    |
 
-Some Redmine endpoints have no method because another method does the same job. For example, `GET /projects/{id}/issues.json` is `issues.list({ where: { project_id } })`. `rm.request` reaches them if you need them.
+Some Redmine endpoints have no method because another method does the same job. For example, `GET /projects/{id}/issues.json` is `issues.list({ where: { project_id } })`. To call one of those endpoints anyway, use `rm.request`.
 
 ## Types
 
-The package exports a type for every input and every schema. Input types are named after the spec's operation id: `GetIssuesInput`, `GetIssuesWhere`, `GetIssueInclude`, `CreateIssueInput`, and so on. Schema types use the schema name: `Issue`, `Project`, `TimeEntry`.
+The package exports a type for every input and every schema. Input types take their names from the spec's operation ids, such as `GetIssuesInput`, `GetIssuesWhere`, `GetIssueInclude`, and `CreateIssueInput`. Schema types use the schema name, such as `Issue`, `Project`, and `TimeEntry`.
 
 ## Call an endpoint the spec does not cover
 
 `rm.request` sends an untyped request with the same auth, retries, timeouts, and errors as typed calls. Use it for plugin endpoints. `path` is relative to `baseUrl`, without a leading slash. The result is the parsed JSON as `unknown`, or `undefined` for an empty body.
 
-`body` takes any JSON value: an object, array, string, number, boolean, or `null`. It is sent as it is, with no envelope. A function, symbol, bigint, or non-finite number fails with `invalid_input`, and so does a body on `GET`. Leave `body` out to send none. The body and `query` are separate, so both can use the same key.
+`body` takes any JSON value: an object, array, string, number, boolean, or `null`. The client sends it as is, with no envelope. A function, symbol, bigint, or non-finite number fails with `invalid_input`, and so does a body on `GET`. Leave `body` out to send none. The body and `query` are separate, so both can use the same key.
 
-An array in `query` goes out as `k[]=a&k[]=b` by default. Set `arrayFormat` to `"comma"` for `k=a,b` or `"repeat"` for `k=a&k=b`. Redmine itself reads the first two. With a repeated key it keeps only the last value, so use `"repeat"` only for a plugin that expects it.
+By default, the client sends an array in `query` as `k[]=a&k[]=b`. Set `arrayFormat` to `"comma"` for `k=a,b` or `"repeat"` for `k=a&k=b`. Redmine itself reads the first two. With a repeated key, Redmine keeps only the last value, so use `"repeat"` only for a plugin that expects it.
 
 ```ts
 interface ChecklistItem {
@@ -107,11 +107,11 @@ console.log(listIssues?.output.kind); // "list": output.schema describes one iss
 
 `catalog` has one entry per method: the generated namespace methods and the hand-written `issues.transition`, `attachments.upload`, `attachments.download`, and `attachments.thumbnail`. Each entry has:
 
-- `id`, the spec's operation id, or a stable id for a hand-written method. `namespace` and `verb` name the method, `rm[namespace][verb](input)`.
+- `id`, the spec's operation id, or a stable id for a hand-written method. `namespace` and `verb` name the method as `rm[namespace][verb](input)`.
 - `title`, `description`, and `docsUrl`, from the spec.
 - `method`, `safety`, `since`, `until`, and `stability`. `method` is what `access` checks.
-- `inputSchema`, a JSON Schema (draft 2020-12) of the method's input object. It refuses unknown keys and requires what the TypeScript input requires. For a list, `where` accepts each filter in the forms the client compiles, with only the operators the spec documents for that filter, and `cf_<id>` keys where custom field filters apply.
+- `inputSchema`, a JSON Schema (draft 2020-12) of the method's input object. It refuses unknown keys and requires what the TypeScript input requires. For a list, `where` accepts each filter in the forms the client compiles, with only the operators the spec documents for that filter. It also accepts `cf_<id>` keys where custom field filters apply.
 - `inlineUploads`, the input key whose entries may also carry file bytes, such as `"uploads"` on `issues.create`, or `null`. `inputSchema` describes only the JSON form of those entries, `{ token, filename, content_type, description }`, so a tool layer that accepts file content adds its own form for that key.
-- `output`, with `kind` `"item"`, `"list"`, `"empty"`, or `"binary"`. For an item or a list, `schema` describes one returned record. Output schemas allow properties they do not name and require only what the types require, and the contract tests validate real responses from Redmine 6.1 and 7.0 against them. `optional: true` on an item means Redmine can answer with no body, as `wiki.update` does for an existing page.
+- `output`, with `kind` `"item"`, `"list"`, `"empty"`, or `"binary"`. For an item or a list, `schema` describes one returned record. Output schemas allow properties they do not name and require only what the types require. The contract tests validate real responses from Redmine 6.1 and 7.0 against them. `optional: true` on an item means Redmine can answer with no body, as `wiki.update` does for an existing page.
 
-The schemas carry no `$ref`, so each one stands alone. The `file` input of `attachments.upload` has no JSON type, because JSON cannot carry bytes. The tool layer decides how to accept them, for example as base64 text.
+The schemas carry no `$ref`, so each schema is complete on its own. The `file` input of `attachments.upload` has no JSON type, because JSON cannot carry bytes. The tool layer decides how to accept file bytes, for example as base64 text.

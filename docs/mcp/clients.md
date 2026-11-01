@@ -15,7 +15,7 @@ REDMINE_URL=https://tracker.example.com REDMINE_API_KEY=... npx -y @redmine-ts/m
 npm install -g @redmine-ts/mcp && redmine-mcp --help
 ```
 
-Put your API key in the client's own config, not in a file you share. Each example below picks an [access mode](tools.md#access-modes) with a flag. Leave the flag out only when the agent must delete.
+Put your API key in the client's own config, not in a file you share. Each example below picks an [access mode](tools.md#access-modes) with a flag. Remove the flag only when the agent must delete.
 
 ## Add the server to Claude Code
 
@@ -97,4 +97,4 @@ Each person then allows the client on the server's consent page, signs in to Red
 
 ## Clients that read strict schemas
 
-Tool schemas are JSON Schema draft 2020-12 with one `type` per schema. A value that may be `null` is an `anyOf` with a `{ "type": "null" }` branch, not `"type": ["string", "null"]`, so clients that map tool schemas onto a dialect with one type per schema, such as Gemini's function declarations, can read them. They use no `$ref`. Each input schema in `tools/list` is under 5,000 bytes of compact JSON, because Codex strips the descriptions from a larger one.
+Tool schemas are JSON Schema draft 2020-12 with one `type` per schema. A value that may be `null` is an `anyOf` with a `{ "type": "null" }` branch, not `"type": ["string", "null"]`. So a client that maps tool schemas onto a dialect with one type per schema, such as Gemini's function declarations, can read them. The schemas use no `$ref`. Each input schema in `tools/list` is under 5,000 bytes of compact JSON, because Codex strips the descriptions from a larger one.

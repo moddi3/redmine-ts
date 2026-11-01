@@ -11,11 +11,11 @@ const issue = await rm.issues.get({ issue_id: 42, include: ["journals"] });
 console.log(issue.subject, `${issue.journals.length} journal entries`);
 ```
 
-Without `include: ["journals"]`, `issue.journals` is possibly `undefined` and the second line does not compile. Redmine omits some included keys when they are empty, such as `relations` and `children`. Those stay optional.
+Without `include: ["journals"]`, `issue.journals` may be `undefined`, so the second line does not compile. Redmine omits some included keys, such as `relations` and `children`, when they are empty. Those keys stay optional.
 
 ### Journals come oldest first
 
-The client returns an issue's `journals` and `changesets`, and a news item's `comments`, oldest first for every API key. Redmine sends these lists newest first when the key's user sets **Display comments** to **In reverse chronological order** in **My account**. The client's order does not follow that setting. The REST API does not send the setting, so the client reads the order from the list itself. It reverses a list whose first entry is later than its last, and puts news comments, which come without dates, in `id` order. To show newest first in a UI, reverse the list. To keep Redmine's order, pass `normalize: false` to `createRedmine`. That also turns off the client's other response fixes, such as `hours` sent as `"8/1"`.
+The client returns an issue's `journals` and `changesets`, and a news item's `comments`, oldest first for every API key. Redmine sends these lists newest first when the key's user sets **Display comments** to **In reverse chronological order** in **My account**. The client's order does not follow that setting. The REST API does not send the setting, so the client reads the order from the list itself. It reverses a list whose first entry is later than its last, and puts news comments, which come without dates, in `id` order. To show newest first in a UI, reverse the list. To keep Redmine's order, pass `normalize: false` to `createRedmine`. `normalize: false` also turns off the client's other response fixes, such as `hours` sent as `"8/1"`.
 
 ```ts
 const asSent = createRedmine({
@@ -29,7 +29,7 @@ console.log(issue.journals.map((journal) => journal.id));
 
 ## Filter lists with `where`
 
-List operations take filters under `where`. The keys are Redmine's filter parameter names, and custom fields are `cf_<id>`. A value or an array of values means "equals". An object picks another operator:
+List operations take filters under `where`. The keys are Redmine's filter parameter names, and a custom field's key is `cf_<id>`. A value or an array of values means "equals". An object picks another operator:
 
 ```ts
 import { createRedmine, type GetIssuesWhere } from "@redmine-ts/sdk";
@@ -46,11 +46,11 @@ const untriaged: GetIssuesWhere = {
 };
 ```
 
-The operators are `not`, `gte`, `lte`, `between`, `contains`, `not_contains`, `starts_with`, `ends_with`, `any`, and `none`. Each field accepts only the operators the spec documents for it, so `status_id: { contains: "x" }` does not compile. Redmine ignores an unknown filter and returns every row. To prevent that, the client throws `invalid_input` before any request when a key is unknown or an operator is undocumented. `{ raw }` sends its string as is, for relative dates and operators the object form does not cover, except next to a `project_id` other than one id, as below.
+The operators are `not`, `gte`, `lte`, `between`, `contains`, `not_contains`, `starts_with`, `ends_with`, `any`, and `none`. Each field accepts only the operators the spec documents for it, so `status_id: { contains: "x" }` does not compile. Redmine ignores an unknown filter and returns every row. So when a key is unknown or an operator is undocumented, the client throws `invalid_input` before any request. `{ raw }` sends its string as is, for relative dates and for operators the object form does not cover. The exception is a custom field's `{ raw }` when `project_id` is anything but one id or identifier, as [Filter by several projects](#filter-by-several-projects) explains.
 
 ### Match one of several values
 
-An array goes on the wire as `a|b`, which Redmine splits for most filters. A few id filters read only the first value and split it on commas: `issue_id`, `parent_id`, `child_id`, `done_ratio`, the relation filters (`relates`, `blocks`, and the rest), and `issue.parent_id` on time entries. For those the client sends `a,b`. The input is the same array either way, so this call returns both issues:
+The client sends an array as `a|b`, which Redmine splits for most filters. A few id filters read only the first value and split it on commas. They are `issue_id`, `parent_id`, `child_id`, `done_ratio`, every relation filter, such as `relates` and `blocks`, and `issue.parent_id` on time entries. For those filters, the client sends `a,b`. The input is the same array either way, so this call returns both issues:
 
 ```ts
 const pair = await rm.issues.list({ where: { issue_id: [4, 9], status_id: "any" } }).all();
@@ -59,9 +59,11 @@ console.log(pair.map((issue) => issue.id));
 
 ### Filter by several projects
 
-Redmine reads `project_id` as the one project to scope the request to, and answers 404 to `project_id=1|2`. So when `project_id` is anything but one id or identifier, such as a list of two or more ids, `{ not }` or `"mine"`, the client sends the whole `where` in Redmine's long form, such as `f[]=project_id&op[project_id]==&v[project_id][]=1&v[project_id][]=2`. A standard filter there reads its value the way Redmine reads the short form. A custom field there takes an object condition or a plain value. Its `{ raw }`, or a plain value that starts with `<`, `>`, `!`, `*`, `~`, `^` or `$`, is `invalid_input`, because Redmine reads those by the field's format, which the client does not know.
+Redmine reads `project_id` as the one project that scopes the request, and it answers 404 to `project_id=1|2`. So when `project_id` is anything but one id or identifier, the client sends the whole `where` in Redmine's long form. Examples are a list of two or more ids, `{ not }`, and `"mine"`. The ids `1` and `2`, for example, become `f[]=project_id&op[project_id]==&v[project_id][]=1&v[project_id][]=2`.
 
-The form also decides whether subprojects match. One id or identifier, alone or as a one-element list, includes the issues of subprojects. A list of two or more ids does not, and `{ not: id }` excludes only that project, not its subprojects. In a list of two or more or under `{ not }`, `project_id` takes ids, so an identifier there is `invalid_input`.
+In the long form, Redmine reads a standard filter's value the way it reads the short form. A custom field in the long form takes an object condition or a plain value. Its `{ raw }` is `invalid_input` there, and so is a plain value that starts with `<`, `>`, `!`, `*`, `~`, `^`, or `$`. Redmine reads those values by the field's format, which the client does not know.
+
+The shape of `project_id` also decides whether subprojects match. One id or identifier, alone or as a one-element list, includes the issues of subprojects. A list of two or more ids does not. `{ not: id }` excludes only that project, not its subprojects. In a list of two or more, and under `{ not }`, `project_id` takes only ids, so an identifier there is `invalid_input`.
 
 ```ts
 const twoProjects = await rm.issues.list({ where: { project_id: [1, 2] } }).count();
@@ -70,11 +72,11 @@ console.log(`${twoProjects} open issues in projects 1 and 2, not counting their 
 
 ### Filters that need one project
 
-Redmine drops some filters without an error and returns a wider list, so the client refuses them with `invalid_input` on every request. `category_id` and `subproject_id`, and `issue.category_id` on time entries, need one `project_id`, because Redmine offers them only inside one project. A `query_id` takes no other filter but one `project_id`, because Redmine runs the saved query's own filters.
+Redmine drops some filters without an error and returns a wider list, so the client refuses them with `invalid_input` on every request. `category_id` and `subproject_id`, and `issue.category_id` on time entries, need one `project_id`, because Redmine offers them only inside one project. Next to a `query_id`, the only filter allowed is one `project_id`, because Redmine runs the saved query's own filters.
 
 ### Include closed issues
 
-Redmine's issue list returns only open issues when `status_id` is absent. Pass `status_id: "any"` to include closed ones. The words `"open"`, `"closed"` and `"any"` are Redmine's status operators, so each stands alone: `{ not: "closed" }` means open, and a word in a list with status ids is `invalid_input`.
+Without `status_id`, Redmine's issue list returns only open issues. To include closed issues, pass `status_id: "any"`. The words `"open"`, `"closed"`, and `"any"` are Redmine's status operators, so each one stands alone. `{ not: "closed" }` means open, and a word in a list with status ids is `invalid_input`.
 
 ```ts
 const allStatuses = await rm.issues
@@ -85,7 +87,7 @@ console.log(`${allStatuses} issues in web, open and closed`);
 
 ### Search the issue tree
 
-On an id filter that takes `contains`, the value is an id and the match is a search of the issue tree. `parent_id: { contains: 42 }` returns every issue below #42, `child_id: { contains: 42 }` every issue above it, and `issue_id: { contains: 42 }` on time entries the entries of #42 and its subtasks.
+On an id filter that takes `contains`, the value is an id, and the filter searches the issue tree. `parent_id: { contains: 42 }` returns every issue below #42. `child_id: { contains: 42 }` returns every issue above #42. On time entries, `issue_id: { contains: 42 }` returns the entries of #42 and its subtasks.
 
 ```ts
 const belowEpic = await rm.issues.list({ where: { parent_id: { contains: 42 } } }).all();
@@ -94,7 +96,7 @@ console.log(`${belowEpic.length} open issues below #42`);
 
 ## Walk pages
 
-`list` returns a `Listing`. Creating one sends nothing, and it is not a promise. Iterate it, or call one of its methods:
+`list` returns a `Listing`. Creating a `Listing` sends nothing, and a `Listing` is not a promise. Iterate it, or call one of its methods:
 
 ```ts
 const open = rm.issues.list({ where: { project_id: "web", status_id: "open" } });
@@ -120,11 +122,11 @@ for await (const page of rm.timeEntries.list({ from: "2026-10-01", to: "2026-10-
 }
 ```
 
-- `for await` walks every page. `pageSize` sets the items per request, 100 by default, which is Redmine's default maximum.
+- `for await` walks every page. `pageSize` sets the number of items per request. The default is 100, which is Redmine's default maximum.
 - `page({ offset, limit })` fetches one page. Its `total_count` is `undefined` for lists Redmine does not page, such as `issueStatuses.list()`.
 - `count()` sends one request with `limit=1` and returns `total_count`.
-- `all({ max })` collects every item into an array. With more than `max` items it throws `protocol` with reason `page_cap` instead of returning a truncated list.
+- `all({ max })` collects every item into an array. If the list has more than `max` items, `all` throws `protocol` with reason `page_cap` instead of returning a truncated list.
 - `pages()` yields whole pages.
-- `paging: "keyset"` on `issues.list` walks by ascending id, so issues created or deleted during the walk do not shift the pages. It cannot be combined with `sort`.
+- `paging: "keyset"` on `issues.list` walks by ascending id, so issues created or deleted during the walk do not shift the pages. You cannot combine keyset paging with `sort`.
 
 When the server ignores `offset` or repeats a page, the walk stops with a `protocol` error instead of looping or skipping items.

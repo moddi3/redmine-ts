@@ -12,7 +12,7 @@ Each page serves one of three readers:
 | A person who connects an MCP client   | `packages/mcp/README.md` | A working client config, then the pages in `docs/mcp/`    |
 | A contributor                         | `CONTRIBUTING.md`        | The setup, the checks, and code generation                |
 
-Write each page for one of them. Link to the other readers' pages instead of repeating them.
+Write each page for one of them. Link to the other readers' pages instead of repeating what they say.
 
 ## Pick the page type
 
@@ -44,7 +44,7 @@ Write each page for one of them. Link to the other readers' pages instead of rep
 - Each section that shows new API syntax gets its own example.
 - Code on a page is an excerpt of an example file, which `vp check` typechecks. SDK code comes from `packages/sdk/examples/`, and MCP code from `packages/mcp/examples/`. `packages/sdk/tests/unit/readme.test.ts` and `packages/mcp/tests/unit/docs.test.ts` fail when a `ts` block is not an exact excerpt. Change the example file first, then copy the lines into the page.
 - Put TypeScript in `ts` fences, the label the tests read. `vp run docs:check` fails on a `js` or `typescript` fence, and on a fence without a language.
-- The test also builds the namespace table from the client and compares it with the table in [reference.md](sdk/reference.md).
+- `readme.test.ts` also builds the namespace table from the client and compares it with the table in [reference.md](sdk/reference.md).
 
 ## Link between pages
 

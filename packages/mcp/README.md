@@ -2,11 +2,11 @@
 
 [![npm](https://img.shields.io/npm/v/@redmine-ts/mcp)](https://www.npmjs.com/package/@redmine-ts/mcp)
 
-An MCP server that lets Claude, ChatGPT, and coding agents work in your Redmine as you. It has 93 tools for the Redmine REST API, over stdio or Streamable HTTP. Each call runs with your Redmine permissions, and Redmine records each change under your name.
+This MCP server lets Claude, ChatGPT, and coding agents work in your Redmine as you. It has a tool for each of the 86 SDK operations and workflow tools for the common jobs, served over stdio or Streamable HTTP. Each call runs with your Redmine permissions, and Redmine records each change under your name.
 
 ## Quick start
 
-You need Node 22 or later, Redmine 6.1 or 7.0 with the REST API turned on, and your API key from Redmine, under **My account**, **API access key**. Add the server to Claude Code:
+You need Node 22 or later, and Redmine 6.1 or 7.0 with the REST API turned on. You also need your API key, which Redmine shows under **My account**, **API access key**. Add the server to Claude Code:
 
 ```sh
 claude mcp add redmine \
@@ -15,21 +15,21 @@ claude mcp add redmine \
   -- npx -y @redmine-ts/mcp --no-delete
 ```
 
-Then ask Claude what is assigned to you in Redmine. `--no-delete` leaves every tool that deletes out of the list. Leave it out only when the agent needs to delete.
+Then ask Claude what is assigned to you in Redmine. `--no-delete` hides every tool that deletes. Remove the flag only when the agent needs to delete.
 
 ## Connect other clients
 
 - Codex, Cursor, and other local clients connect as [Connect a client](https://github.com/moddi3/redmine-ts/blob/main/docs/mcp/clients.md) shows.
-- claude.ai and ChatGPT sign in with OAuth, so they need a shared server at a public https URL. [Run a shared server for claude.ai and ChatGPT](https://github.com/moddi3/redmine-ts/blob/main/docs/mcp/http-and-oauth.md) walks through the setup.
+- claude.ai and ChatGPT sign in with OAuth, so they need a shared server at a public https URL. [Run a shared server for claude.ai and ChatGPT](https://github.com/moddi3/redmine-ts/blob/main/docs/mcp/http-and-oauth.md) describes the setup.
 - Your own Node, Bun, or Cloudflare Workers program can run the server, as [Embed the server](https://github.com/moddi3/redmine-ts/blob/main/docs/mcp/embedding.md) shows.
 
 ## What you get
 
-- **Workflow tools for the common jobs.** `issue_context` returns an issue with the statuses it can move to, its relations, and its journals as readable changes, in one call. `issues_transition` changes a status by name and lists the allowed ones when the workflow refuses. `people_find` returns a colleague's login by name, for any key.
-- **A typed tool for every SDK operation.** 86 tools come from [`@redmine-ts/sdk`](https://www.npmjs.com/package/@redmine-ts/sdk), each with a JSON Schema for its input and its output, and hints that tell the client whether it reads, writes, or deletes.
-- **Access modes the SDK enforces.** `--read-only` lists only the tools that read and sends only `GET`. `--no-delete` hides the delete tools, never sends `DELETE`, and refuses an update that deletes, such as blank journal notes. A hidden tool called anyway gets an error, and Redmine sees nothing. [Access modes](https://github.com/moddi3/redmine-ts/blob/main/docs/mcp/tools.md#access-modes) lists the tools of each mode.
-- **One server for a team.** With `--http`, each request brings its own API key or OAuth token. The server needs no database, because it seals codes and tokens with one secret. The CLI keeps its [grant store](https://github.com/moddi3/redmine-ts/blob/main/docs/mcp/authentication.md#grant-store), which makes codes and refresh tokens single-use, in memory, so a restart lets a used refresh token work once more.
-- **Sign-in through Redmine's OAuth.** CI signs in through a Redmine OAuth application and with an API key against Redmine 6.1 and 7.0. On 2026-10-26, claude.ai and ChatGPT signed in through this server by hand, ran tool calls, and refreshed their tokens.
+- **Workflow tools for the common jobs.** `issue_context` returns an issue with the statuses it can move to, its relations, and its journals as readable changes, in one call. `issues_transition` changes a status by name, and lists the allowed statuses when the workflow refuses the change. `people_find` returns a colleague's login by name, and works with any key.
+- **A typed tool for every SDK operation.** 86 tools come from [`@redmine-ts/sdk`](https://www.npmjs.com/package/@redmine-ts/sdk). Each has a JSON Schema for its input and its output, and hints that tell the client whether the tool reads, writes, or deletes.
+- **Access modes the SDK enforces.** `--read-only` lists only the tools that read and sends only `GET`. `--no-delete` hides the delete tools, never sends `DELETE`, and refuses an update that deletes, such as blank journal notes. If a client calls a hidden tool anyway, the server returns an error and sends nothing to Redmine. [Access modes](https://github.com/moddi3/redmine-ts/blob/main/docs/mcp/tools.md#access-modes) lists the tools of each mode.
+- **One server for a team.** With `--http`, each request brings its own API key or OAuth token. The server needs no database, because it seals codes and tokens with one secret. The [grant store](https://github.com/moddi3/redmine-ts/blob/main/docs/mcp/authentication.md#grant-store) makes codes and refresh tokens single-use. The CLI keeps it in memory, so after a restart a used refresh token works once more.
+- **Sign-in through Redmine's OAuth.** Against Redmine 6.1 and 7.0, CI signs in both through a Redmine OAuth application and with an API key. In a check by hand on 2026-10-26, claude.ai and ChatGPT signed in through this server, ran tool calls, and refreshed their tokens.
 
 ## Documentation
 

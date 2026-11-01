@@ -6,13 +6,13 @@
 
 `auth` takes one of three forms:
 
-| `auth`                           | What the client sends                                                                                                                                                     |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `{ apiKey }`                     | The `X-Redmine-API-Key` header. The key never goes in the URL.                                                                                                            |
-| `{ basic: { login, password } }` | `Authorization: Basic`. A login that is empty or holds `:` throws `invalid_input`.                                                                                        |
-| `{ bearer }`                     | `Authorization: Bearer` with an OAuth access token, which Redmine accepts since 6.1. `bearer` is a token string, or an object with `token()` and an optional `refresh()`. |
+| `auth`                           | What the client sends                                                                                                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ apiKey }`                     | The `X-Redmine-API-Key` header. The key never goes in the URL.                                                                                                               |
+| `{ basic: { login, password } }` | `Authorization: Basic`. A login that is empty or contains `:` throws `invalid_input`.                                                                                        |
+| `{ bearer }`                     | `Authorization: Bearer` with an OAuth access token, which Redmine 6.1 and later accept. `bearer` is a token string, or an object with `token()` and an optional `refresh()`. |
 
-The client keeps the `/redmine` subpath of `baseUrl` in every request URL. With a login and password:
+The client keeps the `/redmine` subpath of `baseUrl` in every request URL. The next client signs in with a login and password:
 
 ```ts
 const withPassword = createRedmine({
@@ -43,14 +43,14 @@ const withOAuth = createRedmine({
 console.log((await withOAuth.users.current()).login);
 ```
 
-After a 401, the client calls `refresh()`, and concurrent requests share one call. It then sends the request once more, unless the request has a `ReadableStream` body, which can be read only once. If `refresh()` throws, the call fails with `unauthorized`, and the thrown error is its `cause`.
+After a 401, the client calls `refresh()`, and concurrent requests share one call. The client then sends the request once more, unless the request has a `ReadableStream` body, which can be read only once. If `refresh()` throws, the call fails with `unauthorized`, and the error's `cause` is what `refresh()` threw.
 
 ## Declare the server version
 
-Redmine does not report its version over the API. You can declare it with `version`, and it is optional:
+Redmine does not report its version over the API. Declaring it with `version` is optional:
 
 - Without `version`, the client offers every operation it knows and sends every call. If an operation is newer than the server, Redmine answers 404, and the error's `hint` names the likely cause.
-- With a literal such as `version: "6.1"`, calling an operation added after 6.1 does not compile. At runtime the client refuses it with `unsupported_version` before any request.
+- With a literal such as `version: "6.1"`, calling an operation added after 6.1 does not compile. At runtime, the client refuses such a call with `unsupported_version` before any request.
 - With a version read from config, `parseRedmineVersion` turns `"7.0.1"` into `"7.0"` and throws `invalid_input` for an unsupported version. The client type then offers every operation, and the runtime refusal still applies.
 
 ```ts
@@ -81,11 +81,11 @@ await legacy.groups.removeUsers({ group_id: 3, user_ids: [7, 9] });
 
 ### Why one entrypoint serves every version
 
-There is one entrypoint for all supported versions, not `@redmine-ts/sdk/6.1` and `@redmine-ts/sdk/7.0`. From 6.1 to 7.0 the spec added one operation and four properties, so per-version modules would duplicate every type to express that difference, and every server upgrade would change your imports. A property that only newer servers return is optional and tagged `@since` in its JSDoc. [Architecture](../architecture.md#version-strategy-one-superset-optional-declared-version) has the measurements behind this choice.
+There is one entrypoint for all supported versions, not `@redmine-ts/sdk/6.1` and `@redmine-ts/sdk/7.0`. From 6.1 to 7.0, the spec added one operation and four properties. Per-version modules would duplicate every type to express that difference, and every server upgrade would change your imports. A property that only newer servers return is optional and tagged `@since` in its JSDoc. [Architecture](../architecture.md#version-strategy-one-superset-optional-declared-version) has the measurements behind this choice.
 
 ## Restrict the client to reads
 
-`access` limits the HTTP methods the client sends. Use it for scripts, dashboards, and agents that hold a powerful key but should never change data:
+`access` limits the HTTP methods the client sends. Use it for scripts, dashboards, and agents that hold a key with write access but must never change data:
 
 | `access`           | Sends                          |
 | ------------------ | ------------------------------ |
@@ -123,21 +123,21 @@ try {
 
 ### What `no-delete` refuses
 
-- `"no-delete"` also refuses an update that would make Redmine delete records: blank journal `notes`, `deleted_attachment_ids` on an issue or a wiki page, and membership `role_ids` that name none of the membership's current roles. The client reads the request as it would be sent, so `rm.request` to those routes is refused too.
-- For a membership update with roles in `role_ids`, the client first reads the membership with one `GET`. Redmine silently drops the roles that the key cannot manage, and the API does not list them, so only a role that the membership has now is sure to stay. A failed read fails the call with the read's error. To swap roles, send the new roles with one current role, then send the new roles alone.
+- `"no-delete"` also refuses an update that would make Redmine delete records. Such an update sends blank journal `notes`, `deleted_attachment_ids` on an issue or a wiki page, or membership `role_ids` that name none of the membership's current roles. The client checks the request as it would go to Redmine, so it refuses `rm.request` calls to those routes too.
+- For a membership update with roles in `role_ids`, the client first reads the membership with one `GET`. Redmine silently drops the roles that the key cannot manage, and the API does not list those roles. So only a role that the membership has now is sure to stay. A failed read fails the call with the read's error. To swap roles, send the new roles with one current role, then send the new roles alone.
 
 ### How the client type follows the mode
 
 - With a literal such as `access: "read-only"`, the client type has only the methods that send what the mode allows, so a write on a read-only client does not compile. `rm.request` takes only the allowed `method` values.
-- With an access read from config, typed `Access`, the client type has every method, and the runtime refusal below still applies.
+- With an `access` value read from config and typed `Access`, the client type has every method, and the runtime refusal below still applies.
 
 ### What the client refuses at runtime
 
-At runtime the client refuses any other request with `access_denied` before it sends anything, whatever its type says. `createRedmine` throws `invalid_input` for an unknown mode. The rule covers every namespace method, listings, the hand-written methods, and `rm.request`, which is judged by its `method`. `issues.transition` reads the issue and then updates it, so a read-only client refuses it before the read, and its type has no `transition`. `attachments.upload` is a `POST`. A create or update with files in `uploads` also sends a `POST` for each file, and the client refuses the whole call before the first upload when either method is not allowed or the update would delete. A client derived with `with` keeps its parent's `access`, in its type too.
+At runtime, whatever the client's type says, the client refuses any other request with `access_denied` before it sends anything. `createRedmine` throws `invalid_input` for an unknown mode. The rule covers every namespace method, listings, the hand-written methods, and `rm.request`. For `rm.request`, the client checks the `method` you pass. `issues.transition` reads the issue and then updates it, so a read-only client refuses the call before the read. A read-only client's type also has no `transition`. `attachments.upload` is a `POST`. A create or update with files in `uploads` also sends a `POST` for each file. The client refuses the whole call before the first upload when the mode does not allow one of the two methods, or when the update would delete. A client derived with `with` keeps its parent's `access`, and its type keeps it too.
 
 ## Act as another user
 
-With an admin API key, Redmine runs a request as another user when it carries `X-Redmine-Switch-User`. Pass `as` for one call, or derive a client with `with`:
+With an admin API key, Redmine runs a request as another user when the request carries `X-Redmine-Switch-User`. Pass `as` for one call, or derive a client with `with`:
 
 ```ts
 await rm.timeEntries.create(
@@ -162,9 +162,9 @@ A derived client shares the parent's `maxConcurrent` limit. `with` accepts any c
 
 ### How the client checks the key
 
-Only an admin key can switch users. Redmine ignores the header on a non-admin key and runs the request as the key's own user, with no error, so a write would be saved under the wrong author. The client guards against this. Before the first request that carries `as`, it sends `GET users/current.json` without `as` and reads `admin` from the answer. If the key is not an admin's, the call fails with `switch_user_rejected` and `data.reason` `"not_admin"`, and nothing impersonated is sent.
+Only an admin key can switch users. Redmine ignores the header on a non-admin key and runs the request as the key's own user, with no error. Redmine would then save a write under the wrong author, so the client checks the key first. Before the first request that carries `as`, the client sends `GET users/current.json` without `as` and reads `admin` from the answer. If the key is not an admin's, the call fails with `switch_user_rejected` and `data.reason` `"not_admin"`, and the client sends nothing as the other user.
 
-That check is one extra request per client. Clients derived through `with` share it, and calls that start at the same time wait for the same check. The answer is kept for the life of the client, so a key that changes role later needs a new client. A check that fails, such as a 401 or a network error, throws that error and is repeated on the next call. `onEvent` reports it as a `getCurrentUser` request. A login that Redmine does not know fails with `"rejected_by_server"`.
+That check is one extra request per client. Clients derived through `with` share it, and calls that start at the same time wait for the same check. The client keeps the answer for its lifetime, so a key that changes role later needs a new client. A check that fails, for example on a 401 or a network error, throws that error, and the client repeats the check on the next call. `onEvent` reports the check as a `getCurrentUser` request. A login that Redmine does not know fails with `"rejected_by_server"`.
 
 ## Set retries, timeouts, and concurrency
 
@@ -195,7 +195,7 @@ const users = await rm.users
 
 ### Which failures the client retries
 
-The client retries a 429 for every method. It retries 502, 503, 504, network errors, and timeouts only for `GET` and `DELETE`. After those failures a `POST`, `PUT`, or `PATCH` may already have reached Redmine, which has no idempotency key, so a replayed `PUT` with `notes` would add the journal entry twice. The client never retries a request whose body is a `ReadableStream`, because a stream can be read only once. `retry: false` turns retries off.
+The client retries a 429 for every method. It retries 502, 503, 504, network errors, and timeouts only for `GET` and `DELETE`. After those failures, a `POST`, `PUT`, or `PATCH` may already have reached Redmine. Redmine has no idempotency key, so a replayed `PUT` with `notes` would add the journal entry twice. The client never retries a request whose body is a `ReadableStream`, because a stream can be read only once. `retry: false` turns retries off.
 
 ### Options for one call
 
@@ -230,6 +230,6 @@ To use an HTTP proxy in Node, pass the `fetch` from [undici](https://github.com/
 
 ## Call Redmine from a browser
 
-Browsers are not tested. Redmine sends no CORS headers, and an API key in a browser is readable by anyone who opens the developer tools. Pass a `fetch` that sends each request to a proxy on your origin, and let the proxy add the key on the server.
+Browsers are not tested. Redmine sends no CORS headers, and anyone who opens the developer tools can read an API key in a browser. Pass a `fetch` that sends each request to a proxy on your origin, and let the proxy add the key on the server.
 
 [Compatibility](../compatibility.md#runtimes) lists the runtimes that CI checks.
