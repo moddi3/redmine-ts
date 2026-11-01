@@ -992,6 +992,28 @@ describe("authentication", () => {
     },
   );
 
+  test("a token() that throws an unauthorized RedmineError is network and starts no refresh", async () => {
+    const thrown = new RedmineError({ kind: "unauthorized", status: 401 }, {});
+    let refreshes = 0;
+    const token = (): string => {
+      throw thrown;
+    };
+    const refresh = (): string => {
+      refreshes++;
+      return "new";
+    };
+    const { call, requests } = testEngine(ok, {
+      retry: false,
+      auth: { bearer: { token, refresh } },
+    });
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.kind).toBe("network");
+    expect(error.cause).toBe(thrown);
+    expect(refreshes).toBe(0);
+    expect(requests).toHaveLength(0);
+  });
+
   test("a caller that aborts during a shared refresh stops waiting without cancelling it for others", async () => {
     let finish: (token: string) => void = () => {};
     let refreshes = 0;

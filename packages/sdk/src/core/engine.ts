@@ -110,8 +110,12 @@ export function createEngine(config: ResolvedConfig): Engine {
       ? AbortSignal.any([options.signal, timeout.signal])
       : timeout.signal;
     let sent: Record<string, string> = { ...plan.headers };
+    const credentials = config.auth.headers().catch((cause: unknown) => {
+      const message = cause instanceof Error ? cause.message : "token() failed";
+      throw new RedmineError({ kind: "network", message }, { op: op.id, cause });
+    });
     try {
-      sent = { ...sent, ...(await untilAborted(config.auth.headers(), signal)) };
+      sent = { ...sent, ...(await untilAborted(credentials, signal)) };
       emit({
         type: "request",
         op: op.id,
