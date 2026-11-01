@@ -13,6 +13,10 @@ configs:
 
 # The image's database.yml sets no SQLite busy timeout, so a write that meets another one, such as a
 # request while Redmine deletes a project in the background, fails at once with "database is locked".
+# The timeout fixes this on 7.0 only. Under 6.1's Rails 7.2 such a write still fails: a transaction that
+# reads first skips the wait, and a write-only one blocks the thread that would finish the delete.
+# 6.1 passes only because the suites' order puts seconds of other tests between a large project delete
+# and the next write to it.
 # Rails merges DATABASE_URL's options into database.yml. A file mounted over it would sit in config/,
 # which the image's entrypoint chowns as root.
 x-database: &database
