@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Records the OAuth walkthrough in packages/mcp/README.md: MCP Inspector signs in to the Docker Redmine 7.0
+# Records the OAuth walkthrough in docs/mcp/http-and-oauth.md: MCP Inspector signs in to the Docker Redmine 7.0
 # through the MCP server, and the animation and screenshots are written to packages/mcp/docs/oauth/.
 #
 # Needs the Docker Redmines (`node scripts/redmine-env.ts up`), a build (`vp run -r build`), agent-browser,

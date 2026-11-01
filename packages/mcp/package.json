@@ -54,7 +54,9 @@
   },
   "devDependencies": {
     "@arethetypeswrong/core": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
     "@modelcontextprotocol/client": "2.3.1",
+    "@types/bun": "catalog:",
     "@types/node": "^26.6.5",
     "ajv": "catalog:",
     "ajv-formats": "catalog:",

@@ -56,3 +56,5 @@ for (const attachment of issue.attachments) {
   const file = await rm.attachments.download(attachment);
   await writeFile(file.filename, await file.bytes());
 }
+
+await rm.issues.update({ issue_id: created.id, assigned_to_id: null, due_date: null });

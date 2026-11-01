@@ -4,21 +4,42 @@ import { describe, expect, test } from "vite-plus/test";
 import { SLOTS } from "../../src/generated/slots.ts";
 import { createRedmine, VERSIONS } from "../../src/index.ts";
 
-const root = resolve(import.meta.dirname, "../..");
-const readme = readFileSync(resolve(root, "README.md"), "utf8");
-const examples = readdirSync(resolve(root, "examples"))
+const sdk = resolve(import.meta.dirname, "../..");
+const repo = resolve(sdk, "../..");
+const examples = readdirSync(resolve(sdk, "examples"))
   .filter((name) => name.endsWith(".ts"))
-  .map((name) => readFileSync(resolve(root, "examples", name), "utf8"));
+  .map((name) => readFileSync(resolve(sdk, "examples", name), "utf8"));
 
-describe("README.md", () => {
-  test("every ts block is a verbatim excerpt of a typechecked example", () => {
-    const blocks = [...readme.matchAll(/^```ts\n([\s\S]*?)^```$/gm)].map(([, code]) => code!);
-    expect(blocks.length).toBeGreaterThan(0);
-    const drifted = blocks.filter((code) => !examples.some((example) => example.includes(code)));
-    expect(drifted).toEqual([]);
+const guides = readdirSync(resolve(repo, "docs/sdk"))
+  .filter((name) => name.endsWith(".md"))
+  .map((name) => `docs/sdk/${name}`);
+
+/** Pages with SDK code, relative to the repository root. Each must hold at least one ts block. */
+const pages = ["packages/sdk/README.md", "README.md", "docs/architecture.md", ...guides];
+const namespaceTable = "docs/sdk/reference.md";
+
+const read = (page: string) => readFileSync(resolve(repo, page), "utf8");
+
+describe("SDK documentation", () => {
+  test("reads typechecked examples", () => {
+    expect(examples.length).toBeGreaterThan(0);
   });
 
-  test("the namespace table lists the client's methods", () => {
+  test("finds the SDK guides in docs/sdk", () => {
+    expect(guides).toContain(namespaceTable);
+  });
+
+  test.each(pages)(
+    "every ts block in %s is a verbatim excerpt of a typechecked example",
+    (page) => {
+      const blocks = [...read(page).matchAll(/^```ts\n([\s\S]*?)^```$/gm)].map(([, code]) => code!);
+      expect(blocks.length).toBeGreaterThan(0);
+      const drifted = blocks.filter((code) => !examples.some((example) => example.includes(code)));
+      expect(drifted).toEqual([]);
+    },
+  );
+
+  test(`the namespace table in ${namespaceTable} lists the client's methods`, () => {
     const rm = createRedmine({ baseUrl: "https://redmine.test" });
     const rows = Object.entries(rm).flatMap(([namespace, methods]) => {
       if (typeof methods !== "object" || methods === null) return [];
@@ -29,8 +50,10 @@ describe("README.md", () => {
       return [[`\`${namespace}\``, verbs.join(", ")]];
     });
     const table = markdownTable(["Namespace", "Methods"], rows);
-    const start = readme.indexOf("| Namespace");
-    expect(readme.slice(start, readme.indexOf("\n\n", start))).toBe(table);
+    const page = read(namespaceTable);
+    const start = page.indexOf("| Namespace");
+    expect(start).toBeGreaterThan(-1);
+    expect(page.slice(start, page.indexOf("\n\n", start))).toBe(table);
   });
 });
 

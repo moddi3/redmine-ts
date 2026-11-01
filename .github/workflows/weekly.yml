@@ -51,7 +51,7 @@ jobs:
             echo
             while read -r tag; do echo "- \`$tag\`"; done <<< "$newer"
             echo
-            echo "To vendor a newer revision of a supported Redmine version, run \`spec/fetch.sh <tag>\`, delete the older file of the same version, and run \`vp run gen\` in \`packages/sdk\`. For a new Redmine version, follow \"Add a Redmine version\" in the root README."
+            echo "To vendor a newer revision of a supported Redmine version, run \`spec/fetch.sh <tag>\`, delete the older file of the same version, and run \`vp run gen\` in \`packages/sdk\`. For a new Redmine version, follow \"Add a Redmine version\" in CONTRIBUTING.md."
             echo
             echo "The weekly workflow rewrites this issue on each run and closes it when the vendored specs catch up."
           } > "$RUNNER_TEMP/spec-watch.md"

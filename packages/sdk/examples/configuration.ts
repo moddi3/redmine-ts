@@ -15,3 +15,11 @@ const users = await rm.users
   .list({ where: { status: 1 } }, { signal: AbortSignal.timeout(60_000), retry: false })
   .all();
 console.log(`${users.length} active users`);
+
+const asSent = createRedmine({
+  baseUrl: "https://tracker.example.com/redmine",
+  auth: { apiKey: process.env.REDMINE_API_KEY! },
+  normalize: false,
+});
+const issue = await asSent.issues.get({ issue_id: 42, include: ["journals"] });
+console.log(issue.journals.map((journal) => journal.id));
