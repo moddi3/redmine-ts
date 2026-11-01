@@ -1,6 +1,6 @@
 {
   "name": "@redmine-ts/mcp",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "MCP server that lets ChatGPT, Claude, and coding agents work in Redmine, with typed tools and sign-in through Redmine's own OAuth",
   "keywords": [
     "chatgpt",
