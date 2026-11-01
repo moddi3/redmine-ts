@@ -130,6 +130,7 @@ describe("building requests", () => {
     ["a bigint", { estimated_hours: 1n }],
     ["a function", { notes: () => "n" }],
     ["a circular object", { custom_fields: [circular] }],
+    ["a boxed NaN", { estimated_hours: Object(Number.NaN) }],
   ])("a typed body refuses %s before the network", async (_name, input) => {
     const { call, requests } = testEngine(() => empty());
     const error = await failure(call(ops.updateIssue, { issue_id: 7, ...input }));
@@ -223,6 +224,7 @@ describe("building requests", () => {
     ["Infinity nested in an array", { payload: [Number.POSITIVE_INFINITY] }],
     ["undefined inside an array", { payload: [1, undefined] }],
     ["a circular object", { payload: circular }],
+    ["a boxed NaN nested in an object", { payload: { hours: Object(Number.NaN) } }],
   ])("a value body refuses %s before the network", async (_name, input) => {
     const { call, requests } = testEngine(() => empty());
     const error = await failure(call(ops.sendValue, input));

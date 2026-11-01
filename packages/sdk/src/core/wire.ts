@@ -246,7 +246,7 @@ function jsonText(op: AnyOp, value: unknown): string {
       if (kind === "function" || kind === "symbol" || kind === "bigint") {
         throw new TypeError(`a ${kind} cannot be sent as JSON`);
       }
-      const refused = unsendable(v);
+      const refused = unsendable(v instanceof Number ? v.valueOf() : v);
       if (refused !== undefined) throw new TypeError(refused);
       return v;
     });
