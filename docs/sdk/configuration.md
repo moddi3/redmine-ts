@@ -94,6 +94,8 @@ There is one entrypoint for all supported versions, not `@redmine-ts/sdk/6.1` an
 | `"read-only"`      | `GET` only.                    |
 
 ```ts
+import { createRedmine, RedmineError, type Access } from "@redmine-ts/sdk";
+
 const reader = createRedmine({
   baseUrl: "https://tracker.example.com/redmine",
   auth: { apiKey: process.env.REDMINE_API_KEY! },
@@ -193,7 +195,7 @@ const users = await rm.users
 
 ### Which failures the client retries
 
-The client retries a 429 for every method. It retries 502, 503, 504, network errors, and timeouts only for `GET` and `DELETE`. After those failures a `POST`, `PUT`, or `PATCH` may already have reached Redmine, which has no idempotency key, so a replayed `PUT` with `notes` would add the journal entry twice. `retry: false` turns retries off.
+The client retries a 429 for every method. It retries 502, 503, 504, network errors, and timeouts only for `GET` and `DELETE`. After those failures a `POST`, `PUT`, or `PATCH` may already have reached Redmine, which has no idempotency key, so a replayed `PUT` with `notes` would add the journal entry twice. The client never retries a request whose body is a `ReadableStream`, because a stream can be read only once. `retry: false` turns retries off.
 
 ### Options for one call
 

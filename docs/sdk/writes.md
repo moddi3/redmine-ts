@@ -1,6 +1,12 @@
 # Create and update records
 
-This page covers creating and updating records, clearing fields, and attaching and downloading files. The examples use a client `rm` made as in the [quickstart](../../packages/sdk/README.md#quickstart).
+This page covers creating and updating records, clearing fields, and attaching and downloading files. The examples use a client `rm` made as in the [quickstart](../../packages/sdk/README.md#quickstart), and these imports:
+
+```ts
+import { readFile, writeFile } from "node:fs/promises";
+import { createRedmine, RedmineError } from "@redmine-ts/sdk";
+import type { CreateIssueInput } from "@redmine-ts/sdk";
+```
 
 ## Create and update a record
 

@@ -35,7 +35,9 @@ Inputs take ids, not names. `reference_data` maps the common names to ids in one
 
 ## Which tools the server lists
 
-Three settings decide which tools `tools/list` returns: the access mode, the declared Redmine version, and whether the key belongs to an admin. A files directory adds `attachments_save`.
+Three settings decide which tools `tools/list` returns: the access mode, the declared Redmine version, and whether the key belongs to an admin. A files directory adds `attachments_save`. Over OAuth, a request uses the stricter of the server's mode and the mode of the token's [scope](authentication.md#scopes-and-access-modes).
+
+The counts on this page are for an admin's key, Redmine 7.0 or no declared version, and no files directory.
 
 ### Access modes
 

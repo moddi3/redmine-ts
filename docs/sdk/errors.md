@@ -1,6 +1,10 @@
 # Handle errors
 
-Every failure is a `RedmineError`. This page shows how to tell failures apart, how to recover from a stale edit, and what an error holds.
+Every failure is a `RedmineError`. This page shows how to tell failures apart, how to recover from a stale edit, and what an error holds. The examples use a client `rm` made as in the [quickstart](../../packages/sdk/README.md#quickstart), and this import:
+
+```ts
+import { createRedmine, RedmineError } from "@redmine-ts/sdk";
+```
 
 ## Tell failures apart
 
