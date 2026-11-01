@@ -974,6 +974,26 @@ describe("authentication", () => {
     expect(requests.map((r) => r.url.pathname)).toEqual(["/redmine/issues/2.json"]);
   });
 
+  test("an abort whose reason is a RedmineError is still aborted and starts no refresh", async () => {
+    let refreshes = 0;
+    const refresh = (): string => {
+      refreshes++;
+      return "new";
+    };
+    const { call, requests } = testEngine(ok, {
+      timeoutMs: 60_000,
+      auth: { bearer: { token: () => new Promise<string>(() => {}), refresh } },
+    });
+    const controller = new AbortController();
+    const stuck = failure(call(ops.getIssue, { issue_id: 1 }, { signal: controller.signal }));
+    await sleep(5);
+    controller.abort(new RedmineError({ kind: "unauthorized", status: 401 }, {}));
+
+    expect((await stuck).data).toEqual({ kind: "aborted" });
+    expect(refreshes).toBe(0);
+    expect(requests).toHaveLength(0);
+  });
+
   test.each([
     [
       "throws",

@@ -352,8 +352,8 @@ function classify(
   timeout: AbortSignal,
   timeoutMs: number,
 ): RedmineError {
-  if (cause instanceof RedmineError) return cause;
   if (caller?.aborted) return new RedmineError({ kind: "aborted" }, { op: op.id, cause });
+  if (cause instanceof RedmineError) return cause;
   if (timeout.aborted)
     return new RedmineError({ kind: "timeout", after_ms: timeoutMs }, { op: op.id, cause });
   const message = cause instanceof Error ? cause.message : "fetch failed";
