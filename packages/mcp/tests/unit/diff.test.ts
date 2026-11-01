@@ -253,7 +253,7 @@ function cuts(shown: string, text: string): Set<number> {
   return ends.get(text.length) ?? new Set();
 }
 
-/** The README's pairs in a block. */
+/** The pairs that docs/mcp/workflow-tools.md describes, in a block. */
 function pairs(block: readonly Row[]): [Row, Row][] {
   const candidates: [number, Row, Row][] = [];
   for (const removed of block.filter((row) => row.sign === "-")) {

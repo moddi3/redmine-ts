@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "isolatedDeclarations": false,
+    "declaration": false,
+    "paths": {
+      "@redmine-ts/mcp": ["../src/index.ts"],
+      "@redmine-ts/sdk": ["../../sdk/src/index.ts"],
+      "@redmine-ts/sdk/catalog": ["../../sdk/src/catalog.ts"]
+    }
+  },
+  "include": ["*.ts"]
+}

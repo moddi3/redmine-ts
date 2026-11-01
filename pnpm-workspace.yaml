@@ -8,6 +8,8 @@ catalogMode: prefer
 catalog:
   "@arethetypeswrong/core": ^0.18.5
   "@changesets/cli": ^3.0.3
+  "@cloudflare/workers-types": 5.20261015.1
+  "@types/bun": 1.4.3
   "@types/node": ^24
   ajv: ^8.20.0
   ajv-formats: ^3.0.1
