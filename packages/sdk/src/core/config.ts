@@ -14,10 +14,16 @@ export type Auth =
   | { bearer: string | BearerSource };
 
 export interface BearerSource {
+  /**
+   * Asked before each request until a `refresh()` succeeds, after which the client sends the refreshed token.
+   * The wait counts against `timeoutMs`. An abort or a timeout stops the call's wait without cancelling the
+   * promise, so one promise can serve many callers. A throw or a rejection fails the attempt as kind "network"
+   * with the error as `cause`, and retries as any network error does.
+   */
   token(): string | Promise<string>;
   /**
    * Called after a 401. Single-flight: concurrent 401s share one refresh. The failed request replays
-   * once, and only when its body is replayable.
+   * once, and only when its body is replayable. A caller that aborts stops waiting without cancelling it.
    */
   refresh?(): string | Promise<string>;
 }
@@ -208,7 +214,7 @@ export function resolveConfig(config: RedmineConfig): ResolvedConfig {
     access,
     // Called through a wrapper: a bare `globalThis.fetch` throws "Illegal invocation" when called as a method.
     fetch: custom ?? ((input, init) => globalThis.fetch(input, init)),
-    timeoutMs: positive("timeoutMs", config.timeoutMs ?? 30_000),
+    timeoutMs: timerMs("timeoutMs", config.timeoutMs ?? 30_000),
     maxConcurrent: positiveInteger("maxConcurrent", config.maxConcurrent ?? 4),
     retry: resolveRetry(config.retry ?? {}),
     normalize: config.normalize ?? true,
@@ -245,15 +251,22 @@ function parseBase(raw: string | URL): URL {
   return url;
 }
 
-function positive(name: string, value: number): number {
-  if (!Number.isFinite(value) || value <= 0)
-    throw invalidInput(`${name} must be a positive number`);
+/** setTimeout keeps a delay in a signed 32-bit integer and fires a longer one after 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+export function timerMs(name: string, value: number, op?: string): number {
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_TIMER_MS) {
+    throw invalidInput(
+      `${name} must be a positive number of milliseconds up to ${MAX_TIMER_MS}`,
+      op,
+    );
+  }
   return value;
 }
 
-function positiveInteger(name: string, value: number): number {
+export function positiveInteger(name: string, value: number, op?: string): number {
   if (!Number.isInteger(value) || value < 1)
-    throw invalidInput(`${name} must be a positive integer`);
+    throw invalidInput(`${name} must be a positive integer`, op);
   return value;
 }
 
@@ -263,8 +276,8 @@ function nonNegative(name: string, value: number): number {
   return value;
 }
 
-function nonNegativeInteger(name: string, value: number): number {
+export function nonNegativeInteger(name: string, value: number, op?: string): number {
   if (!Number.isInteger(value) || value < 0)
-    throw invalidInput(`${name} must be a non-negative integer`);
+    throw invalidInput(`${name} must be a non-negative integer`, op);
   return value;
 }

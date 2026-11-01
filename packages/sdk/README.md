@@ -38,7 +38,7 @@ for await (const open of rm.issues.list({
 }
 ```
 
-`createRedmine` validates the config and sends nothing. The client keeps the `/redmine` subpath of `baseUrl` in every request URL. It sends the API key only in the `X-Redmine-API-Key` header, never in the URL. The other `auth` forms are `{ basic: { login, password } }` and `{ bearer }`, where `bearer` is a token string or an object with `token()` and an optional `refresh()`. After a 401, concurrent requests share one `refresh()` call, and each request is sent once more.
+`createRedmine` validates the config and sends nothing. The client keeps the `/redmine` subpath of `baseUrl` in every request URL. It sends the API key only in the `X-Redmine-API-Key` header, never in the URL. The other `auth` forms are `{ basic: { login, password } }` and `{ bearer }`, where `bearer` is a token string or an object with `token()` and an optional `refresh()`. After a 401, concurrent requests share one `refresh()` call, and each request is sent once more. The wait for `token()` counts against `timeoutMs`. An abort or a timeout stops the call's wait but does not cancel the promise `token()` returned, so one promise can serve many calls. A `token()` that throws or rejects fails the call as `network`, with that error as `cause`.
 
 ## Why use it
 
@@ -57,6 +57,8 @@ Its types and operations are generated from the community [Redmine OpenAPI spec]
 Every operation is `rm.<namespace>.<verb>(input, options?)`. `input` is one flat object with snake_case keys, named as in the Redmine API. It holds path parameters, query parameters, and body fields side by side. The client puts each key where Redmine expects it and adds the JSON envelope. For example, `rm.issues.update({ issue_id: 42, notes: "Fixed" })` sends `PUT issues/42.json` with the body `{ "issue": { "notes": "Fixed" } }`.
 
 To clear a field on update, set it to `null`, for example `rm.issues.update({ issue_id: 42, assigned_to_id: null })`. Redmine ignores a `null` `assigned_to_id` but clears it for `""`, so the client sends `""` for that one field. Every other nullable field clears with `null` as is.
+
+A number in `input` must be finite. JSON would send `NaN` or `Infinity` as `null`, and `null` clears most fields. A URL would carry the word `NaN`. So the client throws `invalid_input` for a non-finite number in a path, query, body, or `where` value, before it sends anything. An `undefined` item in a body array fails the same way. `page()` takes only a whole `offset` from 0 and a whole `limit` from 1.
 
 The package exports a type for every input and every schema. Input types are named after the spec's operation id: `GetIssuesInput`, `GetIssuesWhere`, `GetIssueInclude`, `CreateIssueInput`, and so on. Schema types use the schema name: `Issue`, `Project`, `TimeEntry`.
 
@@ -189,7 +191,7 @@ try {
 | `not_acceptable`         | 406.                                                                                                                             |
 | `http`                   | Any other status. `data.body` holds up to 2 KiB of the response.                                                                 |
 | `protocol`               | The response does not match the operation, such as a body that is not JSON or a page that repeats. `data.hint` names the cause.  |
-| `network`                | `fetch` threw.                                                                                                                   |
+| `network`                | `fetch` threw, or a bearer `token()` threw or rejected. `cause` holds the error.                                                 |
 | `timeout`                | An attempt ran longer than `timeoutMs`.                                                                                          |
 | `aborted`                | Your `signal` aborted the call.                                                                                                  |
 | `unsupported_version`    | The declared `version` lacks the operation. Nothing was sent.                                                                    |
@@ -396,7 +398,7 @@ At runtime the client refuses any other request with `access_denied` before it s
 
 | Option           | Default | Meaning                                                               |
 | ---------------- | ------- | --------------------------------------------------------------------- |
-| `timeoutMs`      | 30000   | Time limit for each attempt.                                          |
+| `timeoutMs`      | 30000   | Time limit for each attempt in ms, at most 2147483647.                |
 | `maxConcurrent`  | 4       | Requests in flight per client, shared with clients derived by `with`. |
 | `retry.attempts` | 2       | Extra attempts after the first.                                       |
 | `retry.baseMs`   | 250     | Base of the exponential backoff with full jitter.                     |
@@ -427,7 +429,7 @@ Every method takes call options as its second argument: `signal`, `timeoutMs`, `
 
 `rm.request` sends an untyped request with the same auth, retries, timeouts, and errors as typed calls. Use it for plugin endpoints. `path` is relative to `baseUrl`, without a leading slash. The result is the parsed JSON as `unknown`, or `undefined` for an empty body.
 
-`body` takes any JSON value: an object, array, string, number, boolean, or `null`. It is sent as it is, with no envelope. A function, symbol, bigint, or non-finite number fails with `invalid_input`, and so does a body on `GET`. Leave `body` out to send none. The body and `query` are separate, so both can use the same key.
+`body` takes any JSON value: an object, array, string, number, boolean, or `null`. It is sent as it is, with no envelope. A function, symbol, bigint, non-finite number, or `undefined` array item fails with `invalid_input`, and so does a body on `GET`. A non-finite number in `query` fails the same way. Leave `body` out to send none. The body and `query` are separate, so both can use the same key.
 
 An array in `query` goes out as `k[]=a&k[]=b` by default. Set `arrayFormat` to `"comma"` for `k=a,b` or `"repeat"` for `k=a&k=b`. Redmine itself reads the first two. With a repeated key it keeps only the last value, so use `"repeat"` only for a plugin that expects it.
 

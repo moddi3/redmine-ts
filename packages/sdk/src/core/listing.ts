@@ -4,7 +4,8 @@
 
 import { RedmineError } from "./errors.ts";
 import type { AnyOp, FilterSpec } from "./op.ts";
-import { invalidInput, isRecord, own } from "./util.ts";
+import { nonNegativeInteger, positiveInteger } from "./config.ts";
+import { invalidInput, isRecord, own, unsendable } from "./util.ts";
 
 type Many<V> = V | readonly V[];
 
@@ -278,6 +279,8 @@ function compileWord(
 
 function scalar(value: unknown, at: string): string {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const refused = unsendable(value);
+    if (refused !== undefined) throw invalidInput(`${at}: ${refused}`);
     return String(value);
   }
   throw invalidInput(`${at}: expected a string, number or boolean, got ${describeType(value)}`);
@@ -453,8 +456,8 @@ export function createListing<T>(
     async page(at) {
       if (problem) throw problem;
       return fetchPage({
-        offset: at?.offset ?? 0,
-        limit: at?.limit ?? pageSize,
+        offset: nonNegativeInteger("offset", at?.offset ?? 0, op.id),
+        limit: positiveInteger("limit", at?.limit ?? pageSize, op.id),
         extra: sortExtra,
       });
     },

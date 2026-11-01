@@ -59,9 +59,22 @@ describe("building requests", () => {
     ["a dot-dot segment", { issue_id: ".." }],
     ["a missing parameter", {}],
     ["an object", { issue_id: { id: 1 } }],
+    ["NaN", { issue_id: Number.NaN }],
+    ["Infinity", { issue_id: Number.POSITIVE_INFINITY }],
   ])("refuses %s as a path parameter before the network", async (_name, input) => {
     const { call, requests } = testEngine(ok);
     const error = await failure(call(ops.getIssue, input));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+
+  test.each([
+    ["NaN", [Number.NaN]],
+    ["Infinity next to a name", ["journals", Number.POSITIVE_INFINITY]],
+  ])("refuses %s in a query value before the network", async (_name, include) => {
+    const { call, requests } = testEngine(ok);
+    const error = await failure(call(ops.getIssue, { issue_id: 1, include }));
 
     expect(error.kind).toBe("invalid_input");
     expect(requests).toHaveLength(0);
@@ -106,6 +119,24 @@ describe("building requests", () => {
     await call(ops.updateIssue, { issue_id: 7, ...input });
 
     expect(requests[0]?.json()).toEqual({ issue: sent });
+  });
+
+  test.each([
+    ["NaN", { estimated_hours: Number.NaN }],
+    ["Infinity", { estimated_hours: Number.POSITIVE_INFINITY }],
+    ["-Infinity", { assigned_to_id: Number.NEGATIVE_INFINITY }],
+    ["NaN inside a custom field value", { custom_fields: [{ id: 1, value: [Number.NaN] }] }],
+    ["undefined inside an array", { watcher_user_ids: [1, undefined] }],
+    ["a bigint", { estimated_hours: 1n }],
+    ["a function", { notes: () => "n" }],
+    ["a circular object", { custom_fields: [circular] }],
+    ["a boxed NaN", { estimated_hours: Object(Number.NaN) }],
+  ])("a typed body refuses %s before the network", async (_name, input) => {
+    const { call, requests } = testEngine(() => empty());
+    const error = await failure(call(ops.updateIssue, { issue_id: 7, ...input }));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
   });
 
   test("an operation with no clear fields sends null as null", async () => {
@@ -191,7 +222,9 @@ describe("building requests", () => {
     ["a bigint", { payload: 1n }],
     ["NaN", { payload: Number.NaN }],
     ["Infinity nested in an array", { payload: [Number.POSITIVE_INFINITY] }],
+    ["undefined inside an array", { payload: [1, undefined] }],
     ["a circular object", { payload: circular }],
+    ["a boxed NaN nested in an object", { payload: { hours: Object(Number.NaN) } }],
   ])("a value body refuses %s before the network", async (_name, input) => {
     const { call, requests } = testEngine(() => empty());
     const error = await failure(call(ops.sendValue, input));
@@ -504,6 +537,18 @@ describe("the impersonation guard", () => {
     expect(requests).toHaveLength(0);
   });
 
+  test("a check whose token never arrives times out instead of holding the impersonated call", async () => {
+    const { call, requests } = testEngine(keyOf("admin", ok), {
+      timeoutMs: 10,
+      retry: false,
+      auth: { bearer: { token: () => new Promise<string>(() => {}) } },
+    });
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }, { as: "jsmith" }));
+
+    expect(error.data).toEqual({ kind: "timeout", after_ms: 10 });
+    expect(requests).toHaveLength(0);
+  });
+
   test("a caller that aborts while the shared check is pending stops waiting without cancelling it for others", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -645,6 +690,20 @@ describe("timeouts and cancellation", () => {
     const error = await failure(call(ops.getIssue, { issue_id: 1 }, { timeoutMs: 10 }));
 
     expect(error.data).toEqual({ kind: "timeout", after_ms: 10 });
+  });
+
+  test.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["zero", 0],
+    ["a negative number", -1],
+    ["2 ** 31", 2 ** 31],
+  ])("a per-call timeout of %s is refused before anything is sent", async (_name, timeoutMs) => {
+    const { call, requests } = testEngine(keyOf("admin", ok));
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }, { as: "jsmith", timeoutMs }));
+
+    expect(error.kind).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
   });
 
   test("timeouts retry a GET and never a PUT", async () => {
@@ -883,6 +942,130 @@ describe("authentication", () => {
 
     expect(error.kind).toBe("unauthorized");
     expect(error.cause).toBe(cause);
+  });
+
+  test("a token() that never settles is a timeout and sends nothing", async () => {
+    const { call, requests } = testEngine(ok, {
+      timeoutMs: 10,
+      retry: false,
+      auth: { bearer: { token: () => new Promise<string>(() => {}) } },
+    });
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.data).toEqual({ kind: "timeout", after_ms: 10 });
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a caller that aborts while token() is pending stops waiting and frees its slot", async () => {
+    let tokens = 0;
+    const { call, requests } = testEngine(ok, {
+      maxConcurrent: 1,
+      timeoutMs: 60_000,
+      auth: { bearer: { token: () => (++tokens === 1 ? new Promise<string>(() => {}) : "t") } },
+    });
+    const controller = new AbortController();
+    const stuck = failure(call(ops.getIssue, { issue_id: 1 }, { signal: controller.signal }));
+    const queued = call(ops.getIssue, { issue_id: 2 });
+    await sleep(5);
+    controller.abort();
+
+    expect((await stuck).data).toEqual({ kind: "aborted" });
+    expect(await queued).toEqual(issue);
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/redmine/issues/2.json"]);
+  });
+
+  test("an abort whose reason is a RedmineError is still aborted and starts no refresh", async () => {
+    let refreshes = 0;
+    const refresh = (): string => {
+      refreshes++;
+      return "new";
+    };
+    const { call, requests } = testEngine(ok, {
+      timeoutMs: 60_000,
+      auth: { bearer: { token: () => new Promise<string>(() => {}), refresh } },
+    });
+    const controller = new AbortController();
+    const stuck = failure(call(ops.getIssue, { issue_id: 1 }, { signal: controller.signal }));
+    await sleep(5);
+    controller.abort(new RedmineError({ kind: "unauthorized", status: 401 }, {}));
+
+    expect((await stuck).data).toEqual({ kind: "aborted" });
+    expect(refreshes).toBe(0);
+    expect(requests).toHaveLength(0);
+  });
+
+  test.each([
+    [
+      "throws",
+      () => {
+        throw new Error("vault down");
+      },
+    ],
+    ["rejects", () => Promise.reject(new Error("vault down"))],
+  ])(
+    "a token() that %s fails the call as network, with the error as its cause",
+    async (_name, token) => {
+      const { call, requests } = testEngine(ok, { retry: false, auth: { bearer: { token } } });
+      const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+      expect(error.kind).toBe("network");
+      expect(error.cause).toEqual(new Error("vault down"));
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  test("a token() that throws an unauthorized RedmineError is network and starts no refresh", async () => {
+    const thrown = new RedmineError({ kind: "unauthorized", status: 401 }, {});
+    let refreshes = 0;
+    const token = (): string => {
+      throw thrown;
+    };
+    const refresh = (): string => {
+      refreshes++;
+      return "new";
+    };
+    const { call, requests } = testEngine(ok, {
+      retry: false,
+      auth: { bearer: { token, refresh } },
+    });
+    const error = await failure(call(ops.getIssue, { issue_id: 1 }));
+
+    expect(error.kind).toBe("network");
+    expect(error.cause).toBe(thrown);
+    expect(refreshes).toBe(0);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a caller that aborts during a shared refresh stops waiting without cancelling it for others", async () => {
+    let finish: (token: string) => void = () => {};
+    let refreshes = 0;
+    let token = "old";
+    const { call } = testEngine(
+      (request) =>
+        request.headers.get("authorization") === "Bearer new" ? json({ issue }) : empty(401),
+      {
+        maxConcurrent: 10,
+        auth: {
+          bearer: {
+            token: () => token,
+            refresh: () => {
+              refreshes++;
+              return new Promise<string>((resolve) => (finish = (t) => resolve((token = t))));
+            },
+          },
+        },
+      },
+    );
+    const controller = new AbortController();
+    const aborted = failure(call(ops.getIssue, { issue_id: 1 }, { signal: controller.signal }));
+    const patient = call(ops.getIssue, { issue_id: 2 });
+    await sleep(5);
+    controller.abort();
+
+    expect((await aborted).data).toEqual({ kind: "aborted" });
+    finish("new");
+    expect(await patient).toEqual(issue);
+    expect(refreshes).toBe(1);
   });
 });
 

@@ -303,7 +303,8 @@ describe("the budget for request bodies in flight", () => {
         error: { message: "The request body took longer than 0.3 seconds to arrive." },
       },
     });
-    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+    // setTimeout counts from the event loop's cached clock, which can lag Date.now() by a few ms.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(290);
     expect(errors).toEqual(["The request body took longer than 0.3 seconds to arrive."]);
     expect((await handle(whole(toolsList(350 * KiB)))).status).toBe(200);
   });
