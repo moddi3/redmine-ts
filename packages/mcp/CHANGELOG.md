@@ -1,5 +1,12 @@
 # @redmine-ts/mcp
 
+## 0.8.2
+
+### Patch Changes
+
+- Updated dependencies [11c4676]
+  - @redmine-ts/sdk@0.8.0
+
 ## 0.8.1
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @redmine-ts/sdk
 
+## 0.8.0
+
+### Minor Changes
+
+- 11c4676: A bearer `token()` that throws or rejects now fails the call with the new error kind `credentials` instead of `network`, with the error as `cause`. The client no longer retries it, so retry inside `token()` if its source can fail briefly. A `switch` over `kind` that checks for every kind needs a `credentials` case.
+
 ## 0.7.2
 
 ### Patch Changes
