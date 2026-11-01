@@ -112,7 +112,7 @@ export function createEngine(config: ResolvedConfig): Engine {
     let sent: Record<string, string> = { ...plan.headers };
     const credentials = config.auth.headers().catch((cause: unknown) => {
       const message = cause instanceof Error ? cause.message : "token() failed";
-      throw new RedmineError({ kind: "network", message }, { op: op.id, cause });
+      throw new RedmineError({ kind: "credentials", message }, { op: op.id, cause });
     });
     try {
       sent = { ...sent, ...(await untilAborted(credentials, signal)) };

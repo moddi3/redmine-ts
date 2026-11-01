@@ -45,7 +45,7 @@ console.log((await withOAuth.users.current()).login);
 
 After a 401, the client calls `refresh()`, when `bearer` has one, and sends the request once more with the new token. Requests that fail at the same time share one `refresh()` call. A `ReadableStream` body can be read only once, so after a 401 on such a request the client neither calls `refresh()` nor sends the request again. If `refresh()` throws, the call fails with `unauthorized`, and the error's `cause` is what `refresh()` threw.
 
-The wait for `token()` counts against `timeoutMs`. An abort or a timeout stops the call's wait, but it does not cancel the promise that `token()` returned, so one promise can serve many calls. If `token()` throws or rejects, the call fails with `network`, and the error's `cause` is what `token()` threw.
+The wait for `token()` counts against `timeoutMs`. An abort or a timeout stops the call's wait, but it does not cancel the promise that `token()` returned, so one promise can serve many calls. If `token()` throws or rejects, the call fails with `credentials`, and the error's `cause` is what `token()` threw. The request that needed the token is not sent, and the client does not retry it, so retry inside `token()` if its source can fail briefly. Earlier requests of the same call, such as inline uploads, may already have reached Redmine. `error.uploads` hands back their references as it does for any other failure.
 
 ## Declare the server version
 
@@ -197,7 +197,7 @@ const users = await rm.users
 
 ### Which failures the client retries
 
-The client retries a 429 for every method. It retries 502, 503, 504, network errors, and timeouts only for `GET` and `DELETE`. After those failures, a `POST`, `PUT`, or `PATCH` may already have reached Redmine. Redmine has no idempotency key, so a replayed `PUT` with `notes` would add the journal entry twice. The client never retries a request whose body is a `ReadableStream`, because a stream can be read only once. `retry: false` turns retries off.
+The client retries a 429 for every method. It retries 502, 503, 504, network errors, and timeouts only for `GET` and `DELETE`. After those failures, a `POST`, `PUT`, or `PATCH` may already have reached Redmine. Redmine has no idempotency key, so a replayed `PUT` with `notes` would add the journal entry twice. The client never retries a request whose body is a `ReadableStream`, because a stream can be read only once. It never retries a `credentials` error either. `retry: false` turns retries off.
 
 ### Options for one call
 

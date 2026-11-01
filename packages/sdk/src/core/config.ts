@@ -17,8 +17,8 @@ export interface BearerSource {
   /**
    * Asked before each request until a `refresh()` succeeds, after which the client sends the refreshed token.
    * The wait counts against `timeoutMs`. An abort or a timeout stops the call's wait without cancelling the
-   * promise, so one promise can serve many callers. A throw or a rejection fails the attempt as kind "network"
-   * with the error as `cause`, and retries as any network error does.
+   * promise, so one promise can serve many callers. A throw or a rejection fails the call as kind "credentials"
+   * with the error as `cause`. The request it was for is not sent and the call is not retried, so retry inside `token()` if its source can blip.
    */
   token(): string | Promise<string>;
   /**
