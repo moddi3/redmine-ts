@@ -77,7 +77,7 @@ ChatGPT sends the token endpoint as `aud`, so the check keeps accepting it, as R
 
 ### Big single results
 
-`issues_get` with journals and `raw_request` still return everything that Redmine sends, up to 900K characters.
+The [result budget](#result-budget) trims list pages, `issues_get` journals, and `raw_request` responses. The other get tools still return the whole record. A long wiki page from `wiki_get` can pass the size a client accepts, and so can an issue whose description alone passes the budget.
 
 ### Smaller tool schemas
 
@@ -149,7 +149,7 @@ This item collects the work that waits until after OAuth:
 
 ### A stale key set while the fetch slots are full
 
-A signed-in user can name 4 slow key set URLs and take every key set fetch slot. Another key-bound client whose kept key set has expired then gets 503. `--allow-client` closes this gap today. A key set fetched within the last hour could serve its client while the slots are full, as metadata documents already do.
+A signed-in user can name 4 slow key set URLs and take every key set fetch slot. While the slots are full, a key set fetched within the last hour still serves a token request whose assertion names a `kid` in that set. Another client with keys gets 503 when the server has not fetched its set within the hour, or when its new key is not in that set. `--allow-client` closes this gap, because only documents on the listed hosts choose the key set URLs.
 
 ### Evals
 

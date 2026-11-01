@@ -43,7 +43,7 @@ const withOAuth = createRedmine({
 console.log((await withOAuth.users.current()).login);
 ```
 
-After a 401, the client calls `refresh()`, and concurrent requests share one call. The client then sends the request once more, unless the request has a `ReadableStream` body, which can be read only once. If `refresh()` throws, the call fails with `unauthorized`, and the error's `cause` is what `refresh()` threw.
+After a 401, the client calls `refresh()`, when `bearer` has one, and sends the request once more with the new token. Requests that fail at the same time share one `refresh()` call. A `ReadableStream` body can be read only once, so after a 401 on such a request the client neither calls `refresh()` nor sends the request again. If `refresh()` throws, the call fails with `unauthorized`, and the error's `cause` is what `refresh()` threw.
 
 ## Declare the server version
 

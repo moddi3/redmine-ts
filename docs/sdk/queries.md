@@ -124,7 +124,7 @@ for await (const page of rm.timeEntries.list({ from: "2026-10-01", to: "2026-10-
 
 - `for await` walks every page. `pageSize` sets the number of items per request. The default is 100, which is Redmine's default maximum.
 - `page({ offset, limit })` fetches one page. Its `total_count` is `undefined` for lists Redmine does not page, such as `issueStatuses.list()`.
-- `count()` sends one request with `limit=1` and returns `total_count`.
+- `count()` sends one request with `limit=1` and returns `total_count`. For a list Redmine does not page, it returns the number of items in the answer, which is the whole list.
 - `all({ max })` collects every item into an array. If the list has more than `max` items, `all` throws `protocol` with reason `page_cap` instead of returning a truncated list.
 - `pages()` yields whole pages.
 - `paging: "keyset"` on `issues.list` walks by ascending id, so issues created or deleted during the walk do not shift the pages. You cannot combine keyset paging with `sort`.
