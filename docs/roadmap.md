@@ -88,7 +88,7 @@ In a full-access listing of 200K characters, output schemas take 80K and descrip
 
 The SDK vendors the spec tags `6.1.3-r2` and `7.0.2-r2`. Where those specs are wrong or silent, the generator covers the gap. Each entry below should go once upstream fixes it.
 
-- **The wiki page's `project` on 6.1.** `7.0.2-r2` requires it. `6.1.3-r2` declares it, though Redmine 6.1 never renders it (`wiki/show.api.rsb` in 6.1.3, 6.1.5 and `6.1-stable`). `overlay.optional` keeps it optional. The fix belongs in the upstream maintenance branch `6.1.3-r2`, in `src/components/schemas/wiki_page.yaml`. Generation fails once the entry stops changing the merged spec.
+- **The wiki page's `project` on 6.1.** `7.0.2-r2` requires it. `6.1.3-r2` declares it, though Redmine 6.1 never renders it (`wiki/show.api.rsb` in 6.1.3, 6.1.5 and `6.1-stable`). `overlay.optional` keeps it optional. The fix belongs in the upstream maintenance branch `6.1.3-r2`, in `src/components/schemas/wiki_page.yaml`, and [d-yoshi/redmine-openapi#14](https://github.com/d-yoshi/redmine-openapi/issues/14) tracks it. Generation fails once the entry stops changing the merged spec.
 - **Issue children on 6.1.** `6.1.3-r2` still describes them inline, and `7.0.2-r2` uses the recursive `issue_child`. `overlay.resolved` takes the 7.0 shape, because Redmine 6.1 renders the same fields.
 - **Stable operations.** The tag descriptions in `7.0.2-r2` no longer mark operations as stable. `overlay.stableTags` keeps the list from `7.0.1-r1`.
 - **`updateJournal` on older releases.** `7.0.2-r2` says that a journal left with empty notes is kept, which is true only from 6.1.4 and 7.0.1. `overlay.descriptions` gives text that holds for both versions.

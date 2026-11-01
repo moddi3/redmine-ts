@@ -191,6 +191,6 @@ export const overlay: Overlay = {
   },
   optional: {
     "#/components/schemas/wiki_page/properties/project":
-      "The 6.1.3-r2 spec declares it, but Redmine 6.1 never renders it: wiki/show.api.rsb in 6.1.3, 6.1.5 and 6.1-stable has no project. Observed on 6.1: tests/contract/catalog.test.ts.",
+      "The 6.1.3-r2 spec declares it, but Redmine 6.1 never renders it: wiki/show.api.rsb in 6.1.3, 6.1.5 and 6.1-stable has no project. Observed on 6.1: tests/contract/catalog.test.ts. Upstream: https://github.com/d-yoshi/redmine-openapi/issues/14.",
   },
 };
