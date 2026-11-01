@@ -390,6 +390,23 @@ describe("a failed call hands back its uploads", () => {
     expect(requests).toHaveLength(2);
   });
 
+  test("a token() that fails after the first upload keeps its reference and sends nothing more", async () => {
+    let asked = 0;
+    const token = (): string => {
+      if (++asked > 1) throw new Error("vault down");
+      return "t";
+    };
+    const { rm, requests } = client(server(), { auth: { bearer: { token } } });
+    const error = await failure(
+      rm.issues.create({ project_id: 1, subject: "s", uploads: twoFiles() }),
+    );
+
+    expect(error.data).toEqual({ kind: "credentials", message: "vault down" });
+    expect(paths(requests)).toEqual(["POST uploads.json?filename=a"]);
+    expect(error.uploads?.[0]).toEqual({ token: "1.t", filename: "a" });
+    expect(error.uploads?.[1]).toHaveProperty("file");
+  });
+
   test("the references stay out of JSON and out of the enumerable properties", async () => {
     const { rm } = client(server(() => json({ errors: ["Subject cannot be blank"] }, 422)));
     const error = await failure(

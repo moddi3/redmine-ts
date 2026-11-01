@@ -38,7 +38,7 @@ for await (const open of rm.issues.list({
 }
 ```
 
-`createRedmine` validates the config and sends nothing. The client keeps the `/redmine` subpath of `baseUrl` in every request URL. It sends the API key only in the `X-Redmine-API-Key` header, never in the URL. The other `auth` forms are `{ basic: { login, password } }` and `{ bearer }`, where `bearer` is a token string or an object with `token()` and an optional `refresh()`. After a 401, concurrent requests share one `refresh()` call, and each request is sent once more. The wait for `token()` counts against `timeoutMs`. An abort or a timeout stops the call's wait but does not cancel the promise `token()` returned, so one promise can serve many calls. A `token()` that throws or rejects fails the call as `credentials`, with that error as `cause`. Nothing is sent and the call is not retried.
+`createRedmine` validates the config and sends nothing. The client keeps the `/redmine` subpath of `baseUrl` in every request URL. It sends the API key only in the `X-Redmine-API-Key` header, never in the URL. The other `auth` forms are `{ basic: { login, password } }` and `{ bearer }`, where `bearer` is a token string or an object with `token()` and an optional `refresh()`. After a 401, concurrent requests share one `refresh()` call, and each request is sent once more. The wait for `token()` counts against `timeoutMs`. An abort or a timeout stops the call's wait but does not cancel the promise `token()` returned, so one promise can serve many calls. A `token()` that throws or rejects fails the call as `credentials`, with that error as `cause`. The request it was for is not sent, and the call is not retried. Earlier requests of the same call, such as inline uploads, may already have reached Redmine, and `error.uploads` hands back their references as for any other failure.
 
 ## Why use it
 
@@ -192,7 +192,7 @@ try {
 | `http`                   | Any other status. `data.body` holds up to 2 KiB of the response.                                                                 |
 | `protocol`               | The response does not match the operation, such as a body that is not JSON or a page that repeats. `data.hint` names the cause.  |
 | `network`                | `fetch` threw. `cause` holds the error.                                                                                          |
-| `credentials`            | A bearer `token()` threw or rejected. `cause` holds the error. Nothing was sent, and the client does not retry it.               |
+| `credentials`            | A bearer `token()` threw or rejected. `cause` holds the error. That request was not sent, and the client does not retry it.      |
 | `timeout`                | An attempt ran longer than `timeoutMs`.                                                                                          |
 | `aborted`                | Your `signal` aborted the call.                                                                                                  |
 | `unsupported_version`    | The declared `version` lacks the operation. Nothing was sent.                                                                    |

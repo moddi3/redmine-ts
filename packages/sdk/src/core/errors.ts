@@ -38,7 +38,10 @@ export type RedmineErrorData =
       hint: string;
     }
   | { kind: "network"; message: string }
-  /** Nothing was sent: a bearer `token()` threw or rejected. `cause` holds the error. Never retried. */
+  /**
+   * A bearer `token()` threw or rejected, so this request was not sent. Earlier requests of the same call, such as
+   * uploads or pages, may have reached Redmine. `cause` holds the error. Never retried.
+   */
   | { kind: "credentials"; message: string }
   | { kind: "timeout"; after_ms: number }
   | { kind: "aborted" }
