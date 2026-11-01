@@ -120,13 +120,13 @@ describe("the filter table in where", () => {
     const { legend, rows } = table(where(tools, "issues_list").description!);
     const row = (name: string) => rows.get(name)?.[0];
     expect(legend).toContain(
-      "Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on, updated_on, and closed_on.",
+      "Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z.",
     );
-    expect(table(where(tools, "time_entries_list").description!).legend).not.toContain("UTC time");
+    expect(table(where(tools, "time_entries_list").description!).legend).not.toContain("UTC");
     expect(legend).toContain('{between: [from, to]}, {contains: "text"}');
     expect(row("status_id")).toBe("status_id | id, `open`, `closed`, `any` alone | issue status");
     expect(row("tracker_id")).toBe("tracker_id | id");
-    expect(row("created_on")).toBe("created_on | date | creation date");
+    expect(row("created_on")).toBe("created_on | date | creation date or timestamp");
     expect(row("estimated_hours")).toBe("estimated_hours | number");
     expect(row("subject")).toBe("subject | text");
     expect(row("is_private")).toBe(

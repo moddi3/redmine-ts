@@ -121,13 +121,16 @@ describe("catalog", () => {
   test("recursive issue children are checked one level deep", () => {
     const issue = schemaOf(entry("issues.get").output) as { properties: Record<string, object> };
     const children = issue.properties.children!;
+    const tracker = { id: 1, name: "Bug" };
 
     expect(
-      check(children, [{ id: 2, subject: "Child", children: [{ id: 3, subject: "Grandchild" }] }]),
+      check(children, [
+        { id: 2, tracker, subject: "Child", children: [{ id: 3, tracker, subject: "Grandchild" }] },
+      ]),
     ).toEqual([]);
-    expect(check(children, [{ id: 2, children: [] }])).not.toEqual([]);
+    expect(check(children, [{ id: 2, tracker, children: [] }])).not.toEqual([]);
     expect(
-      check(children, [{ id: 2, subject: "Child", children: [{ from: "a plugin" }] }]),
+      check(children, [{ id: 2, tracker, subject: "Child", children: [{ from: "a plugin" }] }]),
     ).toEqual([]);
   });
 });

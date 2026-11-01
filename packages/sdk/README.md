@@ -71,7 +71,7 @@ The client also handles base URLs under a subpath, empty `PUT` and `DELETE` resp
 
 ## Acknowledgements
 
-The types and operations in this package are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi). That spec is an unofficial OpenAPI 3.0.3 description of the Redmine REST API, released under the MIT license. This release uses the spec's tags `6.1.3-r1` and `7.0.2-r1`.
+The types and operations in this package are generated from [redmine-openapi](https://github.com/d-yoshi/redmine-openapi) by [d-yoshi](https://github.com/d-yoshi). That spec is an unofficial OpenAPI 3.0.3 description of the Redmine REST API, released under the MIT license. This release uses the spec's tags `6.1.3-r2` and `7.0.2-r2`.
 
 If a field or operation looks wrong, the cause is most likely in the spec. Report it at [d-yoshi/redmine-openapi/issues](https://github.com/d-yoshi/redmine-openapi/issues). Also open an issue at [moddi3/redmine-ts/issues](https://github.com/moddi3/redmine-ts/issues) so the SDK picks up the fix.
 

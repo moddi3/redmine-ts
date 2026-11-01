@@ -7,7 +7,7 @@ import type { CustomFieldValues, CustomFields, Pref } from "./schemas.ts";
 export type GetIssuesInclude = "attachments" | "relations";
 
 /**
- * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. A UTC time to the second, such as 2026-10-31T08:00:00Z, also works for created_on, updated_on, and closed_on. Unknown filters and operators are refused before anything is sent.
+ * Filters keyed by Redmine filter name. A value or an array means equals any of them. An object with one operator picks another comparison: {not: value or array}, {gte: value}, {lte: value}, {between: [from, to]}, {contains: "text"}, {not_contains: "text"}, {starts_with: "text"}, {ends_with: "text"}, {any: true} for any value set, {none: true} for no value. Every filter also takes {raw: "..."} in Redmine's own syntax, such as a relative date. Dates are YYYY-MM-DD. Timestamps are UTC to the second, such as 2026-10-31T08:00:00Z. Unknown filters and operators are refused before anything is sent.
  */
 export interface GetIssuesWhere {
   /**
@@ -247,36 +247,39 @@ export interface GetIssuesWhere {
    */
   notes?: Cond<string | number, "text" | "presence">;
   /**
-   * Filter by creation date.
+   * Filter by creation date or timestamp.
    * Value: date.
    * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
    *
    * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)
-   * Examples: `>=2024-01-01`, `t`, `>t-7`, `lm`
+   * Timestamp filters with a lower bound may also return issues from the preceding second.
+   * Examples: `>=2024-01-01`, `>=2024-01-01T08:00:00Z`, `t`, `>t-7`, `lm`
    */
   created_on?: Cond<string | number, "range" | "presence">;
   /**
-   * Filter by last updated date.
+   * Filter by last updated date or timestamp.
    * Value: date.
    * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
    *
    * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)
-   * Examples: `>=2024-01-01`, `t`, `>t-7`, `lm`
+   * Timestamp filters with a lower bound may also return issues from the preceding second.
+   * Examples: `>=2024-01-01`, `>=2024-01-01T08:00:00Z`, `t`, `>t-7`, `lm`
    */
   updated_on?: Cond<string | number, "range" | "presence">;
   /**
-   * Filter by closed date.
+   * Filter by closed date or timestamp.
    * Value: date.
    * Accepts a value, an array meaning any of them, or one of {gte: value}, {lte: value}, {between: [from, to]}, {any: true} for any value set, {none: true} for no value, {raw: "..."} in Redmine's own syntax, such as a relative date.
    *
    * `raw` takes Redmine's own syntax:
    * Format: `<operator>[value]`
    * Operators: `=` (on date), `>=` (on or after), `<=` (on or before), `><` (between, pipe-separated), `t` (today), `ld` (yesterday), `w` (this week), `lw` (last week), `l2w` (last 2 weeks), `m` (this month), `lm` (last month), `y` (this year), `t-` (n days ago), `>t-` (less than n days ago), `<t-` (more than n days ago), `><t-` (between n1 and n2 days ago), `*` (any), `!*` (none)
-   * Examples: `>=2024-01-01`, `t`, `>t-7`, `lm`
+   * Timestamp filters with a lower bound may also return issues from the preceding second.
+   * Examples: `>=2024-01-01`, `>=2024-01-01T08:00:00Z`, `t`, `>t-7`, `lm`
    */
   closed_on?: Cond<string | number, "range" | "presence">;
   /**
@@ -1712,7 +1715,7 @@ export interface GetGroupsInput extends ListInput<never> {
 }
 
 export interface CreateGroupInput {
-  name?: string;
+  name: string;
   /**
    * User IDs to add as members of this group.
    */

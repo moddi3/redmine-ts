@@ -26,8 +26,25 @@ export interface Attachment {
   description: string | null;
   content_url: string;
   thumbnail_url?: string;
-  author?: IdName;
+  author: IdName;
   created_on: string;
+}
+
+export interface IssueRelation {
+  id: number;
+  issue_id: number;
+  issue_to_id: number;
+  relation_type:
+    | "relates"
+    | "duplicates"
+    | "duplicated"
+    | "blocks"
+    | "blocked"
+    | "precedes"
+    | "follows"
+    | "copied_to"
+    | "copied_from";
+  delay: number | null;
 }
 
 export interface IssueSummary {
@@ -58,22 +75,7 @@ export interface IssueSummary {
   updated_on: string;
   closed_on: string | null;
   attachments?: Attachment[];
-  relations?: {
-    id?: number;
-    issue_id?: number;
-    issue_to_id?: number;
-    relation_type?:
-      | "relates"
-      | "duplicates"
-      | "duplicated"
-      | "blocks"
-      | "blocked"
-      | "precedes"
-      | "follows"
-      | "copied_to"
-      | "copied_from";
-    delay?: number | null;
-  }[];
+  relations?: IssueRelation[];
 }
 
 export type CustomFields = {
@@ -92,7 +94,7 @@ export type Uploads = {
 
 export interface IssueChild {
   id: number;
-  tracker?: IdName;
+  tracker: IdName;
   subject: string;
   children?: IssueChild[];
 }
@@ -125,29 +127,14 @@ export interface Issue {
   updated_on: string;
   closed_on: string | null;
   changesets?: {
-    revision?: string;
+    revision: string;
     user?: IdName;
-    comments?: string;
-    committed_on?: string;
+    comments: string;
+    committed_on: string;
   }[];
   children?: IssueChild[];
   attachments?: Attachment[];
-  relations?: {
-    id?: number;
-    issue_id?: number;
-    issue_to_id?: number;
-    relation_type?:
-      | "relates"
-      | "duplicates"
-      | "duplicated"
-      | "blocks"
-      | "blocked"
-      | "precedes"
-      | "follows"
-      | "copied_to"
-      | "copied_from";
-    delay?: number | null;
-  }[];
+  relations?: IssueRelation[];
   journals?: {
     id: number;
     user?: IdName;
@@ -303,12 +290,12 @@ export interface User {
 
 export interface TimeEntry {
   id: number;
-  project?: IdName;
+  project: IdName;
   issue?: {
     id: number;
   };
-  user?: IdName;
-  activity?: IdName;
+  user: IdName;
+  activity: IdName;
   hours: number;
   comments: string | null;
   spent_on: string;
@@ -319,13 +306,13 @@ export interface TimeEntry {
 
 export interface NewsComment {
   id: number;
-  author?: IdName;
+  author: IdName;
   content: string;
 }
 
 export interface News {
   id: number;
-  project?: IdName;
+  project: IdName;
   author?: IdName;
   title: string;
   summary?: string;
@@ -338,29 +325,9 @@ export interface News {
 /**
  * @stability alpha
  */
-export interface IssueRelation {
-  id: number;
-  issue_id: number;
-  issue_to_id: number;
-  relation_type:
-    | "relates"
-    | "duplicates"
-    | "duplicated"
-    | "blocks"
-    | "blocked"
-    | "precedes"
-    | "follows"
-    | "copied_to"
-    | "copied_from";
-  delay: number | null;
-}
-
-/**
- * @stability alpha
- */
 export interface VersionSummary {
   id: number;
-  project?: IdName;
+  project: IdName;
   name: string;
   description: string | null;
   status: "open" | "locked" | "closed";
@@ -377,7 +344,7 @@ export interface VersionSummary {
  */
 export interface Version {
   id: number;
-  project?: IdName;
+  project: IdName;
   name: string;
   description: string | null;
   status: "open" | "locked" | "closed";
@@ -420,7 +387,7 @@ export interface WikiPage {
   version: number;
   author?: IdName;
   comments: string | null;
-  project?: IdName;
+  project: IdName;
   created_on: string;
   updated_on: string;
   attachments?: Attachment[];
@@ -452,7 +419,7 @@ export interface IssueStatus {
 export interface Tracker {
   id: number;
   name: string;
-  default_status?: IdName;
+  default_status: IdName;
   description: string | null;
   enabled_standard_fields: string[];
 }
@@ -462,7 +429,7 @@ export interface Tracker {
  */
 export interface IssueCategory {
   id: number;
-  project?: IdName;
+  project: IdName;
   name: string;
   assigned_to?: IdName;
 }
@@ -600,8 +567,8 @@ export interface CustomField {
   trackers?: IdName[];
   roles?: IdName[];
   possible_values?: {
-    value?: string;
-    label?: string;
+    value: string;
+    label: string;
   }[];
 }
 
@@ -628,7 +595,7 @@ export interface File {
   description: string | null;
   content_url: string;
   thumbnail_url?: string;
-  author?: IdName;
+  author: IdName;
   created_on: string;
   version?: IdName;
   digest: string;
