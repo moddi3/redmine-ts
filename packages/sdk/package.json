@@ -1,6 +1,6 @@
 {
   "name": "@redmine-ts/sdk",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Typed, runtime-agnostic TypeScript client for the Redmine REST API",
   "keywords": [
     "api",

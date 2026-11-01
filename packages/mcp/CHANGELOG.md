@@ -1,5 +1,14 @@
 # @redmine-ts/mcp
 
+## 0.8.1
+
+### Patch Changes
+
+- 53d8b12: The READMEs on npm are shorter and link to task guides on GitHub. The SDK README keeps the install steps, the requirements, the quickstart, and what the client catches. It links to guides for reading data, writing records, configuration, errors, and the reference. The MCP README keeps the quick start for Claude Code. It links to guides for each client, the shared server with OAuth, the tools, the settings, authentication, and embedding. Runtime behavior is unchanged.
+- Updated dependencies [53d8b12]
+- Updated dependencies [815be14]
+  - @redmine-ts/sdk@0.7.2
+
 ## 0.8.0
 
 ### Minor Changes
