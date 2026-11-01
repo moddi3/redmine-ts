@@ -1,5 +1,16 @@
 # @redmine-ts/sdk
 
+## 0.7.2
+
+### Patch Changes
+
+- 53d8b12: The READMEs on npm are shorter and link to task guides on GitHub. The SDK README keeps the install steps, the requirements, the quickstart, and what the client catches. It links to guides for reading data, writing records, configuration, errors, and the reference. The MCP README keeps the quick start for Claude Code. It links to guides for each client, the shared server with OAuth, the tools, the settings, authentication, and embedding. Runtime behavior is unchanged.
+- 815be14: The client now refuses a number that has no wire form with kind `invalid_input`, before anything is sent. A `NaN` or `Infinity` in a typed body went out as `null`, so `issues.update({ issue_id: 42, estimated_hours: NaN })` cleared the field. In a path parameter, a query value, or a `where` filter it went out as the word `NaN`. Redmine answered 404 for `issues/NaN.json` and read `limit=NaN&offset=NaN` as its defaults. A typed body also refuses a function, which was dropped, and a bigint or a circular object, which threw a raw `TypeError`. Typed and `rm.request` bodies refuse an `undefined` array item, which went out as `null`. `Listing.page()` refuses an `offset` that is not a whole number from 0 and a `limit` that is not a whole number from 1.
+
+  A `BearerSource.token()` that never settles no longer holds the call and its concurrency slot. The wait for `token()` counts against `timeoutMs`, and the call's `signal` ends it without cancelling the token promise. A `token()` that throws or rejects fails the call as `network`, with the error as `cause`. Before, the raw error escaped. A caller that aborts while a shared `refresh()` runs stops waiting, and the refresh goes on for the other callers.
+
+  `timeoutMs` takes a positive number up to 2147483647, on the client and per call, and anything else is `invalid_input`. Before, a per-call `NaN`, `Infinity`, `0`, or negative value timed out after about 1 ms, and so did `2 ** 31` at either level.
+
 ## 0.7.1
 
 ### Patch Changes
