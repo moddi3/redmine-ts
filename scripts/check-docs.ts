@@ -12,7 +12,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const repoUrl =
-  /^https:\/\/(?:github\.com\/moddi3\/redmine-ts\/(?:blob|tree)|raw\.githubusercontent\.com\/moddi3\/redmine-ts)\/([^/#]+)\/([^#]*)(?:#(.*))?$/;
+  /^https:\/\/(?:github\.com\/moddi3\/redmine-ts\/(?:blob|tree)|raw\.githubusercontent\.com\/moddi3\/redmine-ts)\/([^/#]+)(?:\/([^#]*))?(?:#(.*))?$/;
 /** Pages whose ts blocks packages/sdk/tests/unit/readme.test.ts or packages/mcp/tests/unit/docs.test.ts read. */
 const testedPages =
   /^(?:README\.md|docs\/architecture\.md|packages\/(?:sdk|mcp)\/README\.md|docs\/(?:sdk|mcp)\/[^/]+\.md)$/;
@@ -27,6 +27,9 @@ const hiddenTypeScript = new Set([
   "mts",
   "cts",
 ]);
+/** A fence line, after any indent and blockquote markers, so a fence inside a list or a quote counts. */
+const fenceLine = /^[ \t>]*(`{3,}|~{3,})\s*([^\s`]*)/;
+const fencedBlocks = /^[ \t>]*(`{3,}|~{3,})[\s\S]*?^[ \t>]*\1/gm;
 let linkCount = 0;
 
 function markdownFiles(): string[] {
@@ -39,7 +42,10 @@ function markdownFiles(): string[] {
 }
 
 function withoutCode(text: string): string {
-  return text.replace(/^ {0,3}(`{3,}|~{3,})[\s\S]*?^ {0,3}\1/gm, "").replace(/`[^`\n]*`/g, "");
+  return text
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(fencedBlocks, "")
+    .replace(/`[^`\n]*`/g, "");
 }
 
 /** The anchor GitHub gives a heading. */
@@ -58,7 +64,9 @@ function anchors(path: string): Set<string> {
   if (found) return found;
   found = new Set();
   const seen = new Map<string, number>();
-  const text = readFileSync(path, "utf8").replace(/^ {0,3}(`{3,}|~{3,})[\s\S]*?^ {0,3}\1/gm, "");
+  const text = readFileSync(path, "utf8")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(fencedBlocks, "");
   for (const [, title] of text.matchAll(/^#{1,6}\s+(.+?)\s*#*$/gm)) {
     const base = slug(title!);
     const count = seen.get(base) ?? 0;
@@ -76,21 +84,21 @@ function checkLinks(file: string, text: string): string[] {
   const prose = withoutCode(text);
   const targets = [
     ...prose.matchAll(/\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g),
-    ...prose.matchAll(/^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?/gm),
-    ...prose.matchAll(/<[a-z][^>]*\s(?:href|src)="([^"]+)"/gi),
-  ].map(([, target]) => target!);
+    ...prose.matchAll(/^[ \t>]*\[[^\]]+\]:\s*<?([^\s>]+)>?/gm),
+    ...prose.matchAll(/<[a-z][^>]*?\s(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi),
+  ].map(([, ...groups]) => groups.find((group) => group !== undefined)!);
   for (const target of targets) {
     let targetPath: string;
     let anchor: string | undefined;
     const ours = repoUrl.exec(target);
     if (ours) {
-      const [, ref, repoPath, repoAnchor] = ours;
+      const [, ref, repoPath = "", repoAnchor] = ours;
       if (/^[0-9a-f]{40}$/.test(ref!)) continue;
       if (ref !== "main") {
         problems.push(`${file}: ${target} names the branch ${ref}, link to main or a commit`);
         continue;
       }
-      targetPath = join(root, decodeURIComponent(repoPath!));
+      targetPath = join(root, decodeURIComponent(repoPath));
       anchor = repoAnchor;
     } else if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
       continue;
@@ -122,7 +130,7 @@ function checkFences(file: string, text: string): string[] {
   // Changesets writes each CHANGELOG entry once, quoting code as it was at that release.
   const changelog = /(?:^|\/)CHANGELOG\.md$/.test(file);
   for (const [index, line] of text.split("\n").entries()) {
-    const fence = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)/.exec(line);
+    const fence = fenceLine.exec(line);
     if (!fence) continue;
     if (open === undefined) {
       open = fence[1]!;
