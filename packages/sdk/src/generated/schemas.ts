@@ -387,6 +387,9 @@ export interface WikiPage {
   version: number;
   author?: IdName;
   comments: string | null;
+  /**
+   * @since 7.0
+   */
   project?: IdName;
   created_on: string;
   updated_on: string;

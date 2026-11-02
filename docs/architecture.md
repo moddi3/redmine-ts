@@ -66,7 +66,6 @@ The mechanics:
 - The generator merges all vendored specs into a superset. An operation's `since` is the first spec that has it. When a newer spec drops the operation, `until` is the last spec that has it.
 - A property is required only when the latest spec requires it **and** it exists in every supported version's schema. A `required` list that grew between spec revisions, such as the journal lists in 7.0.1, counts as spec precision, not server drift. A property missing from an older version is optional and carries `@since`.
 - A non-additive change, such as a type change or a removed property, fails generation until `generator/overlay.ts` records a decision. The generator never picks a side silently.
-- `overlay.optional` is the one place where the generator changes the specs. An entry covers a property that the latest spec requires and an older spec declares, although that older Redmine never sends it. Before the merge, the generator drops the property from every `required` list. Today the one entry is the wiki page's `project`, which Redmine 6.1 does not render. Generation fails once an entry no longer changes the merged spec, so an upstream fix forces its removal.
 - `overlay.descriptions` replaces an operation's description where the newest spec is wrong for an older supported release. Today the one entry is `updateJournal`. The 7.0.2-r2 text says that Redmine keeps a journal left with empty notes, and Redmine does so only from 6.1.4 and 7.0.1. Each entry quotes the spec text it replaces, so any spec change to that description fails generation.
 - `createRedmine<const V>` captures a literal `version`. The generated `Resources<V>` intersects `Additions70` only when `AtLeast<V, "7.0">` holds. `AtLeast` is a lookup table (`Ladder`), not type arithmetic. A wide `RedmineVersion`, such as the result of `parseRedmineVersion(env)`, gets every method. The runtime guard still applies.
 - `core/quirks.ts` and the pagination guards fix patch-level quirks by symptom, never by version number.
@@ -166,7 +165,7 @@ The bakeoff had three runners. A ran on Opus and B ran on Sonnet, and both desig
 
 ## Tradeoffs accepted
 
-- We accept over-optional fields. There are four today, such as `custom_field.is_for_all`, which 7.0 requires and 6.1 does not have. In exchange we get one type model, and a server upgrade changes no imports.
+- We accept over-optional fields. There are three today: `custom_field.is_for_all`, `wiki_page.project` and `wiki_page.summary.project`, which 7.0 requires and 6.1 does not have. In exchange we get one type model, and a server upgrade changes no imports.
 - We accept `rm.issues.get({ issue_id: 42 })` over `get(42)`. In exchange we get one calling convention, self-documenting arguments, and a method input that is identical to the tool input.
 - We accept that request types are a superset too. A 6.1 client can send a 7.0-only field. We observed on real 6.1 and 7.0 servers that Redmine ignores unknown body attributes, and the request succeeds.
 - We accept filter keys named by wire params (`assigned_to_id`), with no prettier aliases, because an alias table would be a list that someone syncs by hand.

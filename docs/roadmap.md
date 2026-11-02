@@ -10,61 +10,61 @@ The MCP items share the background in [MCP server package](#mcp-server-package).
 
 ## Overview
 
-| Status                                  | Item                                                                                                | Area         | Tracking                       |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------ | ------------------------------ |
-| Next                                    | [Read the method list of a metadata document](#read-the-method-list-of-a-metadata-document)         | MCP          |                                |
-| Next                                    | [A stricter `aud`](#a-stricter-aud)                                                                 | MCP          |                                |
-| Next                                    | [Big single results](#big-single-results)                                                           | MCP          | #78                            |
-| Next                                    | [Smaller tool schemas](#smaller-tool-schemas)                                                       | MCP          |                                |
-| Next                                    | [Spec gaps the generator covers](#spec-gaps-the-generator-covers)                                   | SDK, MCP     |                                |
-| Next, partly done in MCP                | [Curated triage toolset](#curated-triage-toolset)                                                   | Toolkit      |                                |
-| Next                                    | [`gen` CLI for an instance config](#gen-cli-for-an-instance-config)                                 | SDK          |                                |
-| Next                                    | [Follow-ups found while building](#follow-ups-found-while-building)                                 | MCP, SDK     |                                |
-| Limitation                              | [Revocation in a real client](#revocation-in-a-real-client)                                         | MCP          |                                |
-| Limitation                              | [Bodies that keep growing](#bodies-that-keep-growing)                                               | MCP          |                                |
-| Limitation                              | [Per-client revocation](#per-client-revocation)                                                     | MCP          |                                |
-| Limitation                              | [A list of connected clients](#a-list-of-connected-clients)                                         | MCP          |                                |
-| Limitation                              | [The CLI forgets used tokens on restart](#the-cli-forgets-used-tokens-on-restart)                   | MCP          |                                |
-| Limitation                              | [No deployment image](#no-deployment-image)                                                         | MCP          |                                |
-| Limitation                              | [Workers outside CI](#workers-outside-ci)                                                           | MCP          |                                |
-| Limitation                              | [No measure of agent success](#no-measure-of-agent-success)                                         | MCP          |                                |
-| Later                                   | [After OAuth](#after-oauth)                                                                         | MCP          |                                |
-| Later                                   | [A stale key set while the fetch slots are full](#a-stale-key-set-while-the-fetch-slots-are-full)   | MCP          |                                |
-| Later                                   | [Evals](#evals)                                                                                     | MCP          |                                |
-| Later                                   | [Write allowlists and MCP Registry listing](#write-allowlists-and-mcp-registry-listing)             | MCP          |                                |
-| Later                                   | [Redmine plugin: MCP at the tracker's own address](#redmine-plugin-mcp-at-the-trackers-own-address) | Plugin       |                                |
-| Later                                   | [Webhook verification for Redmine 7.0](#webhook-verification-for-redmine-70)                        | SDK          |                                |
-| Later                                   | [Redmine 7.1](#redmine-71)                                                                          | SDK          |                                |
-| Later, only on demand                   | [Redmine 6.0](#redmine-60)                                                                          | SDK          |                                |
-| Later                                   | [Optional response validation](#optional-response-validation)                                       | SDK          |                                |
-| Later                                   | [`/testing` entrypoint](#testing-entrypoint)                                                        | SDK          |                                |
-| Later                                   | [Effect entrypoint](#effect-entrypoint)                                                             | Effect       |                                |
-| Later                                   | [Text formatting as config](#text-formatting-as-config)                                             | SDK, toolkit |                                |
-| Later                                   | [Spec-diff bot](#spec-diff-bot)                                                                     | Tooling      |                                |
-| Done, include and exclude patterns open | [Read-only mode and tool hints](#read-only-mode-and-tool-hints)                                     | SDK, MCP     |                                |
-| Done                                    | [Phase 2: generated tools](#phase-2-generated-tools)                                                | MCP          |                                |
-| Done                                    | [Phase 3: workflow tools](#phase-3-workflow-tools)                                                  | MCP          |                                |
-| Done                                    | [Phase 4: Streamable HTTP](#phase-4-streamable-http)                                                | MCP          |                                |
-| Done                                    | [Phase 5: public package](#phase-5-public-package)                                                  | MCP          |                                |
-| Done                                    | [CORS](#cors)                                                                                       | MCP          |                                |
-| Done                                    | [Portable schemas](#portable-schemas)                                                               | MCP          |                                |
-| Done                                    | [OAuth](#oauth)                                                                                     | MCP          |                                |
-| Done                                    | [OAuth walkthrough](#oauth-walkthrough)                                                             | MCP          |                                |
-| Done                                    | [Real clients](#real-clients)                                                                       | MCP          |                                |
-| Done                                    | [private_key_jwt](#private_key_jwt)                                                                 | MCP          | #46                            |
-| Done                                    | [Metadata fetches (Fable I8)](#metadata-fetches-fable-i8)                                           | MCP          |                                |
-| Done                                    | [401 and 403 inside a request (Codex M8)](#401-and-403-inside-a-request-codex-m8)                   | MCP          |                                |
-| Done                                    | [Loose `where`](#loose-where)                                                                       | MCP          | #56                            |
-| Done                                    | [People by name](#people-by-name)                                                                   | MCP          | #58                            |
-| Done                                    | [Admin tools by key](#admin-tools-by-key)                                                           | MCP          | #93                            |
-| Done                                    | [Short issue items](#short-issue-items)                                                             | MCP          | #57                            |
-| Done                                    | [Result budget](#result-budget)                                                                     | MCP          | #52                            |
-| Done                                    | [After phase 4](#after-phase-4)                                                                     | MCP          |                                |
-| Done                                    | [Unauthenticated body reads](#unauthenticated-body-reads)                                           | MCP          |                                |
-| Done                                    | [Authenticated stalls](#authenticated-stalls)                                                       | MCP          |                                |
-| Done in MCP                             | [Journal details as a readable diff](#journal-details-as-a-readable-diff)                           | MCP          |                                |
-| Done                                    | [Inline uploads in create and update](#inline-uploads-in-create-and-update)                         | SDK          |                                |
-| Done                                    | [Issue fields upstream](#issue-fields-upstream)                                                     | SDK          | #65, d-yoshi/redmine-openapi#9 |
+| Status                                  | Item                                                                                                | Area         | Tracking                                                   |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------ | ---------------------------------------------------------- |
+| Next                                    | [Read the method list of a metadata document](#read-the-method-list-of-a-metadata-document)         | MCP          |                                                            |
+| Next                                    | [A stricter `aud`](#a-stricter-aud)                                                                 | MCP          |                                                            |
+| Next                                    | [Big single results](#big-single-results)                                                           | MCP          | #78                                                        |
+| Next                                    | [Smaller tool schemas](#smaller-tool-schemas)                                                       | MCP          |                                                            |
+| Next                                    | [Spec gaps the generator covers](#spec-gaps-the-generator-covers)                                   | SDK, MCP     |                                                            |
+| Next, partly done in MCP                | [Curated triage toolset](#curated-triage-toolset)                                                   | Toolkit      |                                                            |
+| Next                                    | [`gen` CLI for an instance config](#gen-cli-for-an-instance-config)                                 | SDK          |                                                            |
+| Next                                    | [Follow-ups found while building](#follow-ups-found-while-building)                                 | MCP, SDK     |                                                            |
+| Limitation                              | [Revocation in a real client](#revocation-in-a-real-client)                                         | MCP          |                                                            |
+| Limitation                              | [Bodies that keep growing](#bodies-that-keep-growing)                                               | MCP          |                                                            |
+| Limitation                              | [Per-client revocation](#per-client-revocation)                                                     | MCP          |                                                            |
+| Limitation                              | [A list of connected clients](#a-list-of-connected-clients)                                         | MCP          |                                                            |
+| Limitation                              | [The CLI forgets used tokens on restart](#the-cli-forgets-used-tokens-on-restart)                   | MCP          |                                                            |
+| Limitation                              | [No deployment image](#no-deployment-image)                                                         | MCP          |                                                            |
+| Limitation                              | [Workers outside CI](#workers-outside-ci)                                                           | MCP          |                                                            |
+| Limitation                              | [No measure of agent success](#no-measure-of-agent-success)                                         | MCP          |                                                            |
+| Later                                   | [After OAuth](#after-oauth)                                                                         | MCP          |                                                            |
+| Later                                   | [A stale key set while the fetch slots are full](#a-stale-key-set-while-the-fetch-slots-are-full)   | MCP          |                                                            |
+| Later                                   | [Evals](#evals)                                                                                     | MCP          |                                                            |
+| Later                                   | [Write allowlists and MCP Registry listing](#write-allowlists-and-mcp-registry-listing)             | MCP          |                                                            |
+| Later                                   | [Redmine plugin: MCP at the tracker's own address](#redmine-plugin-mcp-at-the-trackers-own-address) | Plugin       |                                                            |
+| Later                                   | [Webhook verification for Redmine 7.0](#webhook-verification-for-redmine-70)                        | SDK          |                                                            |
+| Later                                   | [Redmine 7.1](#redmine-71)                                                                          | SDK          |                                                            |
+| Later, only on demand                   | [Redmine 6.0](#redmine-60)                                                                          | SDK          |                                                            |
+| Later                                   | [Optional response validation](#optional-response-validation)                                       | SDK          |                                                            |
+| Later                                   | [`/testing` entrypoint](#testing-entrypoint)                                                        | SDK          |                                                            |
+| Later                                   | [Effect entrypoint](#effect-entrypoint)                                                             | Effect       |                                                            |
+| Later                                   | [Text formatting as config](#text-formatting-as-config)                                             | SDK, toolkit |                                                            |
+| Later                                   | [Spec-diff bot](#spec-diff-bot)                                                                     | Tooling      |                                                            |
+| Done, include and exclude patterns open | [Read-only mode and tool hints](#read-only-mode-and-tool-hints)                                     | SDK, MCP     |                                                            |
+| Done                                    | [Phase 2: generated tools](#phase-2-generated-tools)                                                | MCP          |                                                            |
+| Done                                    | [Phase 3: workflow tools](#phase-3-workflow-tools)                                                  | MCP          |                                                            |
+| Done                                    | [Phase 4: Streamable HTTP](#phase-4-streamable-http)                                                | MCP          |                                                            |
+| Done                                    | [Phase 5: public package](#phase-5-public-package)                                                  | MCP          |                                                            |
+| Done                                    | [CORS](#cors)                                                                                       | MCP          |                                                            |
+| Done                                    | [Portable schemas](#portable-schemas)                                                               | MCP          |                                                            |
+| Done                                    | [OAuth](#oauth)                                                                                     | MCP          |                                                            |
+| Done                                    | [OAuth walkthrough](#oauth-walkthrough)                                                             | MCP          |                                                            |
+| Done                                    | [Real clients](#real-clients)                                                                       | MCP          |                                                            |
+| Done                                    | [private_key_jwt](#private_key_jwt)                                                                 | MCP          | #46                                                        |
+| Done                                    | [Metadata fetches (Fable I8)](#metadata-fetches-fable-i8)                                           | MCP          |                                                            |
+| Done                                    | [401 and 403 inside a request (Codex M8)](#401-and-403-inside-a-request-codex-m8)                   | MCP          |                                                            |
+| Done                                    | [Loose `where`](#loose-where)                                                                       | MCP          | #56                                                        |
+| Done                                    | [People by name](#people-by-name)                                                                   | MCP          | #58                                                        |
+| Done                                    | [Admin tools by key](#admin-tools-by-key)                                                           | MCP          | #93                                                        |
+| Done                                    | [Short issue items](#short-issue-items)                                                             | MCP          | #57                                                        |
+| Done                                    | [Result budget](#result-budget)                                                                     | MCP          | #52                                                        |
+| Done                                    | [After phase 4](#after-phase-4)                                                                     | MCP          |                                                            |
+| Done                                    | [Unauthenticated body reads](#unauthenticated-body-reads)                                           | MCP          |                                                            |
+| Done                                    | [Authenticated stalls](#authenticated-stalls)                                                       | MCP          |                                                            |
+| Done in MCP                             | [Journal details as a readable diff](#journal-details-as-a-readable-diff)                           | MCP          |                                                            |
+| Done                                    | [Inline uploads in create and update](#inline-uploads-in-create-and-update)                         | SDK          |                                                            |
+| Done                                    | [Spec fixes upstream](#spec-fixes-upstream)                                                         | SDK          | #65, d-yoshi/redmine-openapi#9, d-yoshi/redmine-openapi#14 |
 
 ## Next
 
@@ -86,10 +86,9 @@ In a full-access listing of 200K characters, output schemas take 80K and descrip
 
 ### Spec gaps the generator covers
 
-The SDK vendors the spec tags `6.1.3-r2` and `7.0.2-r2`. Where those specs are wrong or silent, the generator covers the gap. Each entry below should go once upstream fixes it.
+The SDK vendors the spec tags `6.1.3-r3` and `7.0.2-r2`. Where those specs are wrong or silent, the generator covers the gap. Each entry below should go once upstream fixes it.
 
-- **The wiki page's `project` on 6.1.** `7.0.2-r2` requires it. `6.1.3-r2` declares it, though Redmine 6.1 never renders it (`wiki/show.api.rsb` in 6.1.3, 6.1.5 and `6.1-stable`). `overlay.optional` keeps it optional. The fix belongs in the upstream maintenance branch `6.1.3-r2`, in `src/components/schemas/wiki_page.yaml`, and [d-yoshi/redmine-openapi#14](https://github.com/d-yoshi/redmine-openapi/issues/14) tracks it. Generation fails once the entry stops changing the merged spec.
-- **Issue children on 6.1.** `6.1.3-r2` still describes them inline, and `7.0.2-r2` uses the recursive `issue_child`. `overlay.resolved` takes the 7.0 shape, because Redmine 6.1 renders the same fields.
+- **Issue children on 6.1.** `6.1.3-r3` still describes them inline, and `7.0.2-r2` uses the recursive `issue_child`. `overlay.resolved` takes the 7.0 shape, because Redmine 6.1 renders the same fields.
 - **Stable operations.** The tag descriptions in `7.0.2-r2` no longer mark operations as stable. `overlay.stableTags` keeps the list from `7.0.1-r1`.
 - **`updateJournal` on older releases.** `7.0.2-r2` says that a journal left with empty notes is kept, which is true only from 6.1.4 and 7.0.1. `overlay.descriptions` gives text that holds for both versions.
 - **Timestamps in user and project filters.** The specs document UTC timestamps only for the issue filters `created_on`, `updated_on` and `closed_on`. `TIMESTAMPS` in `packages/sdk/generator/filters.ts` names `created_on`, `updated_on` and `last_login_on` for the user and project lists too.
@@ -326,9 +325,11 @@ The MCP part is done. For now, the normalizer lives in `packages/mcp/src/workflo
 
 `issues.create`, `issues.update`, `news.create`, `news.update`, and `wiki.update` take `{ file, filename }` entries in `uploads` next to references. Inside the call, they upload those entries in order and then send the record. A failed call carries `error.uploads`, so a retry reuses what Redmine acknowledged. The generator finds these operations through the spec's `uploads` component, and the catalog marks them with `inlineUploads`. `attachments.upload` stays, for a reference you keep and for `files.create`. The MCP server keeps the two-step path. An inline form would add about 4K characters to its most-used tool schemas, and over HTTP all files would share one request body. Revisit that choice if agent evals show agents failing the two-step attach. The design came from an arena of two candidates, judged by Sonnet and Sol (`.audit/decisions.tsv`, phase `sdk-inline-uploads`).
 
-### Issue fields upstream
+### Spec fixes upstream
 
-The spec left an issue's `project`, `tracker`, `status`, `priority`, `author`, and `parent.id` optional, though Redmine always sends them. `@redmine-ts/sdk` 0.6.0 marked them as required through an overlay correction. The fix went upstream as d-yoshi/redmine-openapi#9 and d-yoshi/redmine-openapi#10, and shipped in the spec tags `6.1.3-r2` and `7.0.2-r2`. The SDK vendors those tags, and the corrections mechanism is gone.
+The spec left an issue's `project`, `tracker`, `status`, `priority`, `author`, and `parent.id` optional, though Redmine always sends them. `@redmine-ts/sdk` 0.6.0 marked them as required through an overlay correction. The fix went upstream as d-yoshi/redmine-openapi#9 and d-yoshi/redmine-openapi#10, and shipped in the spec tags `6.1.3-r2` and `7.0.2-r2`. The corrections mechanism is gone.
+
+The `6.1.3-r2` spec also declared a wiki page's `project`, which Redmine 6.1 never renders. Once `7.0.2-r2` required it, the generator kept it optional through `overlay.optional`. The fix went upstream as d-yoshi/redmine-openapi#14 and d-yoshi/redmine-openapi#15 and shipped in `6.1.3-r3`. The SDK vendors that tag, and `overlay.optional` is gone.
 
 ## MCP server package
 

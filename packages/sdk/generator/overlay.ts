@@ -70,13 +70,6 @@ export interface Overlay {
   stableTags: readonly string[];
   /** JSON pointer of a non-additive change -> why the latest shape is right. */
   resolved: Readonly<Record<string, string>>;
-  /**
-   * JSON pointer of a property -> why it stays optional. Each entry covers a property that the latest spec
-   * requires and an older spec still declares, although that older Redmine never sends it. Until upstream
-   * fixes the older spec, the generator drops the property from every `required` list before the merge, and
-   * it fails once an entry no longer changes the merged spec.
-   */
-  optional: Readonly<Record<string, string>>;
 }
 
 const ISSUE_CHILD =
@@ -179,7 +172,7 @@ export const overlay: Overlay = {
         "A journal left with empty `notes` and no property changes (`details`) is kept and can still be updated, but is omitted from the issue's `include=journals` response until it has notes again.",
       text: "On Redmine 6.1.0 to 6.1.3 and on 7.0.0, a journal left with empty `notes` and no property changes (`details`) is deleted. On 6.1.4, 7.0.1 and later it is kept and can still be updated, but the issue's `include=journals` response leaves it out until it has notes again.",
       reason:
-        "JournalsController#update destroyed such a journal until Redmine #44258, fixed in 6.1.4 and 7.0.1. The 6.1.3-r2 spec says it is deleted and the 7.0.2-r2 spec says it is kept, and the client cannot tell 6.1.3 from 6.1.4.",
+        "JournalsController#update destroyed such a journal until Redmine #44258, fixed in 6.1.4 and 7.0.1. The 6.1.3-r3 spec says it is deleted and the 7.0.2-r2 spec says it is kept, and the client cannot tell 6.1.3 from 6.1.4.",
     },
   },
   stableTags: ["Issues", "Projects", "Users", "Time Entries", "News"],
@@ -188,9 +181,5 @@ export const overlay: Overlay = {
     "#/components/schemas/issue/properties/children/items/properties/id": ISSUE_CHILD,
     "#/components/schemas/issue/properties/children/items/properties/tracker": ISSUE_CHILD,
     "#/components/schemas/issue/properties/children/items/properties/subject": ISSUE_CHILD,
-  },
-  optional: {
-    "#/components/schemas/wiki_page/properties/project":
-      "The 6.1.3-r2 spec declares it, but Redmine 6.1 never renders it: wiki/show.api.rsb in 6.1.3, 6.1.5 and 6.1-stable has no project. Observed on 6.1: tests/contract/catalog.test.ts. Upstream: https://github.com/d-yoshi/redmine-openapi/issues/14.",
   },
 };
