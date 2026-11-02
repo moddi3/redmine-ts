@@ -26,7 +26,7 @@ const withSpecs = (edit: (byVersion: Record<string, SpecFile["doc"]>) => void): 
 };
 
 describe("drift between vendored versions", () => {
-  test("is one added operation, one added schema and four added properties, with the child shape resolved", () => {
+  test("is one added operation, one added schema and five added properties, with the child shape resolved", () => {
     expect(generated.report.drift).toEqual({
       addedOps: [{ id: "removeUsersFromGroup", since: "7.0" }],
       removedOps: [],
@@ -39,11 +39,12 @@ describe("drift between vendored versions", () => {
         },
         { pointer: "#/components/schemas/custom_field/properties/projects", since: "7.0" },
         { pointer: "#/components/schemas/wiki_page.summary/properties/project", since: "7.0" },
+        { pointer: "#/components/schemas/wiki_page/properties/project", since: "7.0" },
       ]),
       conflicts: [],
       resolved: Object.entries(overlay.resolved).map(([pointer, reason]) => ({ pointer, reason })),
     });
-    expect(generated.report.drift.addedProperties).toHaveLength(4);
+    expect(generated.report.drift.addedProperties).toHaveLength(5);
   });
 
   test("a schema new to 7.0 dates from the first version that can send it", async () => {
@@ -419,33 +420,16 @@ describe("requiredness across versions", () => {
     expectTypeOf<Pick<CustomField, "is_for_all">>().toEqualTypeOf<{ is_for_all?: boolean }>();
   });
 
+  test("a property Redmine 6.1 does not render stays optional", () => {
+    expectTypeOf<WikiPage["project"]>().toEqualTypeOf<IdName | undefined>();
+  });
+
   test("required lists that grew between spec revisions stay required", () => {
     expectTypeOf<Pick<Journal, "notes" | "details">>().toEqualTypeOf<{
       notes: string;
       details: Detail[];
     }>();
     expectTypeOf<Pick<Detail, "old_value">>().toEqualTypeOf<{ old_value: string | null }>();
-  });
-});
-
-describe("overlay.optional", () => {
-  const project = "#/components/schemas/wiki_page/properties/project";
-
-  test("keeps a property optional that an older Redmine never sends", () => {
-    expectTypeOf<WikiPage["project"]>().toEqualTypeOf<IdName | undefined>();
-  });
-
-  test("an entry fails generation once the older spec drops the property", async () => {
-    const fixed = withSpecs((v) => {
-      delete v["6.1"]!.components.schemas.wiki_page!.properties!.project;
-    });
-    await expect(generate(fixed)).rejects.toThrow(`overlay.optional: ${project} no longer changes`);
-  });
-
-  test("an entry that names no property fails generation", async () => {
-    await expect(
-      generate(specs, { ...overlay, optional: { "#/components/schemas/wiki_page": "test" } }),
-    ).rejects.toThrow("does not name a schema property");
   });
 });
 
