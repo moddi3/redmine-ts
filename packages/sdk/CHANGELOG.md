@@ -1,5 +1,11 @@
 # @redmine-ts/sdk
 
+## 0.9.1
+
+### Patch Changes
+
+- ebacb07: Generate from the spec tag `6.1.3-r3`. `WikiPage.project` is marked `@since 7.0`, because Redmine 6.1 never sends it.
+
 ## 0.9.0
 
 ### Minor Changes
