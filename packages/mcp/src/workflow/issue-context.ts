@@ -7,7 +7,7 @@ import type { Issue } from "@redmine-ts/sdk";
 import { z } from "zod";
 import { BY_METHOD } from "../catalog-tools.ts";
 import { roundHours } from "../hours.ts";
-import { fitCount } from "../result-budget.ts";
+import { fittingCount } from "../result-budget.ts";
 import type { ResultBudget } from "../result-budget.ts";
 import type { Client, ToolSpec } from "../tools.ts";
 import { UNTRUSTED } from "../user-text.ts";
@@ -209,7 +209,7 @@ export const issueContextTool: ToolSpec = defineTool({
     "Call it first when asked to work on, triage or summarize an issue, instead of issues_get.",
     "Returns {issue, allowed_statuses: the statuses it can move to next, relations: read from this issue, children: subtasks with their status, attachments: metadata, watchers, journals, journals_total, journals_omitted, journals_before}.",
     "Journals come oldest first. Each one's note is N in the issue page's #note-N; Redmine's own number is higher after a journal hidden from this key, such as another user's private note.",
-    `At the result budget, descriptions and notes over ${TEXT_CAP} characters end in a clip marker naming the call for all of it, and journals stop.`,
+    "Past the result budget, journals stop, and long notes, then a long description, end in a clip marker naming the call for all of it.",
     "Pages with journals_before or journals_after, and the call a journal's clip marker names, return the issue as {id, updated_on} only.",
     "Next: issues_transition to change the status by name, issues_update for other fields or a note, attachments_download for a file.",
   ].join(" "),
@@ -322,20 +322,12 @@ async function firstPage(
       ? {}
       : { watchers: issue.watchers.map(({ id, name }) => ({ id, name })) }),
   };
-  const clipped =
+  const cut =
     description === null
-      ? head
-      : {
-          ...head,
-          issue: {
-            ...head.issue,
-            description: clip(
-              description,
-              TEXT_CAP,
-              `Call issues_get with issue_id ${issue.id} for all of it.`,
-            ),
-          },
-        };
+      ? null
+      : clip(description, TEXT_CAP, `Call issues_get with issue_id ${issue.id} for all of it.`);
+  const clipped =
+    cut === description ? head : { ...head, issue: { ...head.issue, description: cut } };
   return fit(head, clipped, page, budget);
 }
 
@@ -399,11 +391,11 @@ async function journalPage(
 }
 
 /**
- * `head` and the page's journals with their notes whole, when that fits the budget. Otherwise the
- * notes are clipped, and `head` takes as many journals of the page as the budget fits. When `head`
- * does not fit with one journal, `clippedHead` takes its place and keeps one journal at least, so
- * paging moves on even when the issue alone is over the budget. Without a budget, as for the issue
- * resource, the text is clipped and the count alone decides.
+ * `head` and the page's journals with their notes whole, when that fits the budget. Otherwise `head`
+ * takes as many journals of the page as fit with their notes clipped, and those notes come whole
+ * when they fit too. When `head` does not fit with one journal, `clippedHead` takes its place and
+ * keeps one journal at least, so paging moves on even when the issue alone is over the budget.
+ * Without a budget, as for the issue resource, the text is clipped and the count alone decides.
  */
 function fit<H extends object>(
   head: H,
@@ -411,13 +403,23 @@ function fit<H extends object>(
   journals: JournalPage,
   budget: ResultBudget | undefined,
 ): H & Journals {
-  const clipped = (start: H) => (count: number) => ({ ...start, ...journals.page(count, true) });
-  if (budget === undefined) return clipped(clippedHead)(journals.available);
+  const build = (start: H, count: number, clipped: boolean) => ({
+    ...start,
+    ...journals.page(count, clipped),
+  });
+  if (budget === undefined) return build(clippedHead, journals.available, true);
   const fits = (result: object) => budget.size(result) <= budget.bytes;
-  const whole = { ...head, ...journals.page(journals.available, false) };
+  const whole = build(head, journals.available, false);
   if (fits(whole)) return whole;
-  const described = fitCount(budget, journals.available, clipped(head));
-  return fits(described) ? described : fitCount(budget, journals.available, clipped(clippedHead));
+  const page = (start: H) => {
+    const count = fittingCount(budget, journals.available, (candidate) =>
+      build(start, candidate, true),
+    );
+    const unclipped = build(start, count, false);
+    return fits(unclipped) ? unclipped : build(start, count, true);
+  };
+  const described = page(head);
+  return head === clippedHead || fits(described) ? described : page(clippedHead);
 }
 
 /**
