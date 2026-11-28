@@ -338,13 +338,29 @@ describeServers("workflow tools", (server) => {
     expect(JSON.stringify(whole).startsWith(result.response_text)).toBe(true);
   });
 
-  it("clips a long note with a marker that names the issue_context call returning it whole", async () => {
+  it("returns a description and a note over 4000 characters whole in a result under the budget", async () => {
+    const description = `Long description ${marker}. ${"d".repeat(5000)}`;
+    const issue = await sdk.issues.create({
+      project_id: server.projectIdentifier,
+      subject: `MCP whole text ${marker}`,
+      description,
+    });
+    cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
+    const notes = `Long note ${marker}. ${"x".repeat(5000)}`;
+    await sdk.issues.update({ issue_id: issue.id, notes });
+
+    const context = await value("issue_context", { issue_id: issue.id });
+    expect(context.issue.description).toBe(description);
+    expect(context.journals).toEqual([expect.objectContaining({ notes })]);
+  });
+
+  it("clips a note that takes the result over the budget, with a marker that names the issue_context call returning it whole", async () => {
     const issue = await sdk.issues.create({
       project_id: server.projectIdentifier,
       subject: `MCP long note ${marker}`,
     });
     cleanup.push(() => sdk.issues.delete({ issue_id: issue.id }));
-    const long = `Long note ${marker}. ${"x".repeat(5000)}`;
+    const long = `Long note ${marker}. ${"x".repeat(40_000)}`;
     await sdk.issues.update({ issue_id: issue.id, notes: long });
     await sdk.issues.update({ issue_id: issue.id, notes: "A short note after it." });
 

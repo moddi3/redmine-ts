@@ -7,11 +7,15 @@ export const CHANGE_CAP = 1000;
 /** The end of a clip marker, naming the call that returns all of the text, or undefined for text returned whole. */
 export type Rest = string | undefined;
 
-/** `text` cut to its first `cap` characters, never inside a surrogate pair, and marked, or whole when it fits. */
+/**
+ * `text` cut to its first `cap` characters, never inside a surrogate pair, and marked. It comes whole
+ * when it fits, and when the marker is no shorter than the cut, so that a clip never adds bytes.
+ */
 export function clip(text: string, cap: number, rest: Rest): string {
   if (rest === undefined || text.length <= cap) return text;
   const end = /[\uD800-\uDBFF]/.test(text.charAt(cap - 1)) ? cap - 1 : cap;
-  return `${text.slice(0, end)}${marker(text.length - end, rest)}`;
+  const clipped = `${text.slice(0, end)}${marker(text.length - end, rest)}`;
+  return clipped.length < text.length ? clipped : text;
 }
 
 export function marker(omitted: number, rest: string): string {

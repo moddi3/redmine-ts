@@ -61,25 +61,30 @@ export function inlineChars(bytes: number): number | undefined {
 }
 
 /**
- * What `build` makes of the most of `count` entries, 1 at least, that fit in the budget. Each entry
+ * The most of `count` entries, 1 at least, that fit in the budget as `build` makes them. Each entry
  * adds more bytes than any count or cursor beside them can take away, so the sizes grow with the count.
  */
-export function fitCount<T>(budget: ResultBudget, count: number, build: (count: number) => T): T {
-  const fits = (candidate: number) => {
-    const result = build(candidate);
-    return budget.size(result) <= budget.bytes ? result : undefined;
-  };
-  const whole = fits(count);
-  if (count <= 1 || whole !== undefined) return whole ?? build(count);
+export function fittingCount(
+  budget: ResultBudget,
+  count: number,
+  build: (count: number) => unknown,
+): number {
+  const fits = (candidate: number) => budget.size(build(candidate)) <= budget.bytes;
+  if (count <= 1 || fits(count)) return count;
   // `low` is 1 or fits, and `high` does not fit.
   let low = 1;
   let high = count;
   while (high - low > 1) {
     const middle = Math.floor((low + high) / 2);
-    if (fits(middle) === undefined) high = middle;
-    else low = middle;
+    if (fits(middle)) low = middle;
+    else high = middle;
   }
-  return build(low);
+  return low;
+}
+
+/** What `build` makes of the most of `count` entries, 1 at least, that fit in the budget. */
+export function fitCount<T>(budget: ResultBudget, count: number, build: (count: number) => T): T {
+  return build(fittingCount(budget, count, build));
 }
 
 /**
