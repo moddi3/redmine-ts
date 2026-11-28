@@ -24,7 +24,15 @@ A line longer than 350 characters shows an excerpt of at most 350 characters, wi
 
 ### Get text that was cut
 
-`issue_context` cuts descriptions and notes longer than 4000 characters, and adds a marker that names the call for the full text. The result says how many journals it left out. For a description, that call is `issues_get`. For a journal, it is `issue_context` with `journals` 0 and the journal's id in `full`, which returns that journal unclipped even when it is older than the newest `journals`. That call returns the issue as `{id, updated_on}`, because the page with the marker carried the rest.
+`issue_context` returns descriptions and notes whole while the result fits in the [result budget](tools.md#result-size). When the result does not fit, `issue_context` makes room in this order:
+
+1. It cuts notes longer than 4000 characters, and adds a marker that names the call for the full text.
+2. It leaves out the oldest journals of the page. The result says how many journals it left out.
+3. It cuts a description longer than 4000 characters, with a marker, when the description does not fit with one journal.
+
+The description comes last because it states the task, and the next page returns the journals left out.
+
+A description's marker names `issues_get`. A journal's marker names `issue_context` with `journals` 0 and the journal's id in `full`, which returns that journal unclipped even when it is older than the newest `journals`. That call returns the issue as `{id, updated_on}`, because the page with the marker carried the rest.
 
 ### Link to a note
 
@@ -71,4 +79,4 @@ A path must resolve inside the directory once the server follows its symlinks. B
 
 ## Read an issue as a resource
 
-The server offers the resource template `redmine://issues/{id}`. A read of `redmine://issues/123` returns issue 123 as Markdown, built from the same data as `issue_context`. The first line holds the warning about user-written text, and the user-written text comes quoted. The resource holds the newest 20 journals, and the [result budget](tools.md#result-size) does not apply to it. An unknown URI or a missing issue returns an MCP error.
+The server offers the resource template `redmine://issues/{id}`. A read of `redmine://issues/123` returns issue 123 as Markdown, built from the same data as `issue_context`. The first line holds the warning about user-written text, and the user-written text comes quoted. The resource holds the newest 20 journals, and the [result budget](tools.md#result-size) does not apply to it. So the resource always cuts descriptions and notes longer than 4000 characters, with the marker that [Get text that was cut](#get-text-that-was-cut) describes. An unknown URI or a missing issue returns an MCP error.
